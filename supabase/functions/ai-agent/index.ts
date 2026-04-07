@@ -97,45 +97,6 @@ ${memories.map((m: any) => `- [${m.memory_type}] ${JSON.stringify(m.content)}`).
 `;
     }
 
-    // Tool definitions for structured actions
-    const tools = [
-      {
-        type: "function",
-        function: {
-          name: "create_task",
-          description: "Create a new task in the project management system",
-          parameters: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Task title" },
-              description: { type: "string", description: "Task description" },
-              priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
-              project_name: { type: "string", description: "Project to assign to" },
-              due_date: { type: "string", description: "Due date in YYYY-MM-DD format" },
-            },
-            required: ["title", "priority"],
-          },
-        },
-      },
-      {
-        type: "function",
-        function: {
-          name: "flag_risk",
-          description: "Flag a risk for a project with severity and mitigation",
-          parameters: {
-            type: "object",
-            properties: {
-              project_name: { type: "string" },
-              risk_description: { type: "string" },
-              severity: { type: "string", enum: ["high", "medium", "low"] },
-              mitigation: { type: "string" },
-            },
-            required: ["project_name", "risk_description", "severity"],
-          },
-        },
-      },
-    ];
-
     const enrichedMessages = [
       { role: "system", content: SYSTEM_PROMPT + "\n\n" + contextData },
       ...(messages || []),
@@ -150,7 +111,6 @@ ${memories.map((m: any) => `- [${m.memory_type}] ${JSON.stringify(m.content)}`).
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: enrichedMessages,
-        tools,
         stream: true,
       }),
     });
