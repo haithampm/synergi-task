@@ -1,110 +1,134 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Mic, Bot, User } from 'lucide-react';
+import { Send, Sparkles, Bot, User, RotateCcw, Zap } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
-import type { ChatMessage } from '@/lib/mock-data';
+import { streamAgentChat } from '@/lib/ai-agent';
+import { toast } from 'sonner';
+
+type Msg = { role: 'user' | 'assistant'; content: string };
 
 const suggestions = [
-  "What's the status of all active projects?",
-  "Generate a project plan for a new feature",
-  "Summarize today's tasks and priorities",
-  "Create tasks from this meeting summary",
+  { icon: '📊', text: "What's the status of all active projects?" },
+  { icon: '🧠', text: "Analyze risks across all projects and suggest mitigations" },
+  { icon: '📋', text: "Generate a project plan for launching a new feature" },
+  { icon: '⚡', text: "Auto-create tasks from: We need auth, API docs, and testing" },
 ];
 
-const mockResponses: Record<string, string> = {
-  default: "I can help you with project management tasks. Try asking about project statuses, task creation, meeting summaries, or project planning!",
-  status: `Here's a summary of your active projects:\n\n📊 **Website Redesign** — 68% complete, on track\n📱 **Mobile App v2** — 35% complete, on track\n⚠️ **Data Pipeline** — 22% complete, at risk (deadline approaching)\n⏸️ **Customer Portal** — 45% complete, on hold\n\nThe Data Pipeline project needs attention — would you like me to suggest action items?`,
-  plan: `Here's a suggested project plan:\n\n**Phase 1 — Discovery (Week 1-2)**\n- Stakeholder interviews\n- Requirements gathering\n- Technical feasibility study\n\n**Phase 2 — Design (Week 3-4)**\n- Wireframes and prototypes\n- Design review sessions\n- Final UI/UX approval\n\n**Phase 3 — Development (Week 5-8)**\n- Sprint planning\n- Core feature development\n- Integration testing\n\n**Phase 4 — Launch (Week 9-10)**\n- UAT and bug fixes\n- Deployment and monitoring\n\nWould you like me to create tasks for each phase?`,
-  tasks: `Based on priorities, here are today's focus areas:\n\n🔴 **Urgent:** Database schema migration (Data Pipeline) — Due Apr 8\n🔴 **Urgent:** Implement auth flow (Website Redesign) — Due Apr 10\n🟡 **High:** Performance optimization (Data Pipeline) — Due Apr 12\n🟡 **High:** Design new homepage layout (Website Redesign) — Due Apr 15\n\n**2 tasks are overdue** — shall I reschedule them?`,
-};
-
-const getResponse = (msg: string): string => {
-  const lower = msg.toLowerCase();
-  if (lower.includes('status') || lower.includes('project')) return mockResponses.status;
-  if (lower.includes('plan') || lower.includes('generate')) return mockResponses.plan;
-  if (lower.includes('task') || lower.includes('summar') || lower.includes('today')) return mockResponses.tasks;
-  return mockResponses.default;
-};
-
 const AiChat = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: '0', role: 'assistant', content: "Hi! I'm your AI Project Manager assistant. I can help you manage projects, create tasks, summarize meetings, and provide insights. What would you like to do?", timestamp: new Date().toISOString() },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = (text: string) => {
-    if (!text.trim()) return;
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: text.trim(), timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || isLoading) return;
+    const userMsg: Msg = { role: 'user', content: text.trim() };
+    const allMessages = [...messages, userMsg];
+    setMessages(allMessages);
     setInput('');
-    setIsTyping(true);
+    setIsLoading(true);
 
-    setTimeout(() => {
-      const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'assistant', content: getResponse(text), timestamp: new Date().toISOString() };
-      setMessages(prev => [...prev, botMsg]);
-      setIsTyping(false);
-    }, 1200);
+    let assistantSoFar = '';
+    const upsertAssistant = (chunk: string) => {
+      assistantSoFar += chunk;
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'assistant') {
+          return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantSoFar } : m);
+        }
+        return [...prev, { role: 'assistant', content: assistantSoFar }];
+      });
+    };
+
+    try {
+      await streamAgentChat({
+        messages: allMessages,
+        onDelta: upsertAssistant,
+        onDone: () => setIsLoading(false),
+        onError: (err) => {
+          toast.error(err);
+          setIsLoading(false);
+        },
+      });
+    } catch {
+      toast.error('Failed to connect to AI agent');
+      setIsLoading(false);
+    }
   };
 
   return (
     <AppLayout>
-      <AppHeader title="AI Assistant" subtitle="Powered by AI — ask anything about your projects." />
-      <div className="flex flex-col h-[calc(100vh-4rem)]">
-        {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
-              {msg.role === 'assistant' && (
-                <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0 mt-1">
-                  <Bot className="h-4 w-4 text-primary-foreground" />
-                </div>
-              )}
-              <Card className={`max-w-[600px] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'glass'}`}>
-                <div className="p-3 text-sm leading-relaxed whitespace-pre-line">{msg.content}</div>
-              </Card>
-              {msg.role === 'user' && (
-                <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-1">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                </div>
-              )}
-            </div>
-          ))}
-          {isTyping && (
-            <div className="flex gap-3 animate-fade-in">
-              <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0">
-                <Bot className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <Card className="glass">
-                <div className="p-3 flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </Card>
-            </div>
-          )}
+      <div className="flex flex-col h-screen">
+        <AppHeader title="AI Agent" subtitle="Autonomous project manager — acts on your behalf." />
 
-          {messages.length === 1 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 max-w-2xl">
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => sendMessage(s)}
-                  className="p-3 rounded-lg border border-border bg-card hover:bg-muted/50 text-left text-sm transition-all hover:shadow-md hover:-translate-y-0.5 flex items-start gap-2"
-                >
-                  <Sparkles className="h-4 w-4 text-accent mt-0.5 shrink-0" />
-                  {s}
-                </button>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full px-6 pb-20">
+              <div className="h-16 w-16 rounded-2xl gradient-primary flex items-center justify-center mb-6 shadow-glow">
+                <Zap className="h-8 w-8 text-primary-foreground" />
+              </div>
+              <h2 className="text-2xl font-bold mb-2">AI Project Manager</h2>
+              <p className="text-muted-foreground text-center max-w-md mb-8">
+                I analyze your projects, create tasks autonomously, predict risks, and make decisions on your behalf.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.text}
+                    onClick={() => sendMessage(s.text)}
+                    className="p-4 rounded-xl border border-border bg-card hover:bg-muted/50 text-left text-sm transition-all hover:shadow-md hover:-translate-y-0.5 flex items-start gap-3 group"
+                  >
+                    <span className="text-lg">{s.icon}</span>
+                    <span className="text-foreground/80 group-hover:text-foreground transition-colors">{s.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto p-6 space-y-6">
+              {messages.map((msg, idx) => (
+                <div key={idx} className={`flex gap-3 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                  {msg.role === 'assistant' && (
+                    <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0 mt-1">
+                      <Bot className="h-4 w-4 text-primary-foreground" />
+                    </div>
+                  )}
+                  <div className={`max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3' : ''}`}>
+                    {msg.role === 'assistant' ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm">{msg.content}</p>
+                    )}
+                  </div>
+                  {msg.role === 'user' && (
+                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-1">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
               ))}
+              {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
+                <div className="flex gap-3 animate-fade-in">
+                  <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0">
+                    <Bot className="h-4 w-4 text-primary-foreground" />
+                  </div>
+                  <div className="flex items-center gap-1 py-3">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -115,20 +139,25 @@ const AiChat = () => {
             onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
             className="flex items-center gap-2 max-w-3xl mx-auto"
           >
-            <Button type="button" variant="outline" size="icon" className="shrink-0">
-              <Mic className="h-4 w-4" />
-            </Button>
+            {messages.length > 0 && (
+              <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setMessages([])}>
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            )}
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask the AI assistant..."
+              placeholder="Ask the AI agent to take action..."
               className="flex-1"
-              disabled={isTyping}
+              disabled={isLoading}
             />
-            <Button type="submit" disabled={!input.trim() || isTyping} className="gradient-primary text-primary-foreground shadow-glow shrink-0">
+            <Button type="submit" disabled={!input.trim() || isLoading} className="gradient-primary text-primary-foreground shadow-glow shrink-0">
               <Send className="h-4 w-4" />
             </Button>
           </form>
+          <p className="text-[11px] text-muted-foreground text-center mt-2">
+            AI Agent powered by Lovable AI • Responses may contain inaccuracies
+          </p>
         </div>
       </div>
     </AppLayout>
