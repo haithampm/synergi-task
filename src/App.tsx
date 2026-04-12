@@ -13,6 +13,7 @@ import AiChat from "./pages/AiChat";
 import Reports from "./pages/Reports";
 import Tickets from "./pages/Tickets";
 import Settings from "./pages/Settings";
+import ImportExport from "./pages/ImportExport";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -43,6 +44,7 @@ function ProtectedRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/tickets" element={<Tickets />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/import-export" element={<ImportExport />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
