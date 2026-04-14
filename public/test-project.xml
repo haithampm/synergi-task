@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Name>Test Construction Project</Name>
+  <Author>PM Agent</Author>
+  <StartDate>2026-04-01T08:00:00</StartDate>
+  <FinishDate>2026-09-30T17:00:00</FinishDate>
+  <Tasks>
+    <Task>
+      <UID>1</UID>
+      <ID>1</ID>
+      <Name>Phase 1 - Planning</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-04-01T08:00:00</Start>
+      <Finish>2026-04-30T17:00:00</Finish>
+      <PercentComplete>100</PercentComplete>
+      <Summary>1</Summary>
+      <Milestone>0</Milestone>
+      <Duration>PT160H0M0S</Duration>
+      <Priority>500</Priority>
+    </Task>
+    <Task>
+      <UID>2</UID>
+      <ID>2</ID>
+      <Name>Requirements Gathering</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Start>2026-04-01T08:00:00</Start>
+      <Finish>2026-04-15T17:00:00</Finish>
+      <PercentComplete>100</PercentComplete>
+      <Summary>0</Summary>
+      <Milestone>0</Milestone>
+      <Duration>PT80H0M0S</Duration>
+      <Priority>700</Priority>
+    </Task>
+    <Task>
+      <UID>3</UID>
+      <ID>3</ID>
+      <Name>Planning Complete</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Start>2026-04-30T17:00:00</Start>
+      <Finish>2026-04-30T17:00:00</Finish>
+      <PercentComplete>0</PercentComplete>
+      <Summary>0</Summary>
+      <Milestone>1</Milestone>
+      <Duration>PT0H0M0S</Duration>
+      <Priority>500</Priority>
+    </Task>
+    <Task>
+      <UID>4</UID>
+      <ID>4</ID>
+      <Name>Phase 2 - Development</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-05-01T08:00:00</Start>
+      <Finish>2026-08-31T17:00:00</Finish>
+      <PercentComplete>30</PercentComplete>
+      <Summary>1</Summary>
+      <Milestone>0</Milestone>
+      <Duration>PT640H0M0S</Duration>
+      <Priority>500</Priority>
+    </Task>
+    <Task>
+      <UID>5</UID>
+      <ID>5</ID>
+      <Name>Backend Development</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Start>2026-05-01T08:00:00</Start>
+      <Finish>2026-07-15T17:00:00</Finish>
+      <PercentComplete>50</PercentComplete>
+      <Summary>0</Summary>
+      <Milestone>0</Milestone>
+      <Duration>PT400H0M0S</Duration>
+      <Priority>800</Priority>
+    </Task>
+  </Tasks>
+</Project>
