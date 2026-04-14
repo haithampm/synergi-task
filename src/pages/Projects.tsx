@@ -25,12 +25,23 @@ const Projects = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', description: '', priority: 'medium' });
+  const [newProject, setNewProject] = useState({
+    name: '',
+    description: '',
+    priority: 'medium',
+    status: 'active',
+    startDate: '',
+    endDate: '',
+    teamMembers: '',
+    budget: '',
+    department: ''
+  });
 
   const { data: dbProjects } = useProjects();
   const createProject = useCreateProject();
 
   const allProjects = dbProjects?.length ? dbProjects : mockProjects;
+
   const filtered = (allProjects as any[]).filter((p: any) => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
@@ -43,7 +54,17 @@ const Projects = () => {
       await createProject.mutateAsync(newProject);
       toast.success('Project created!');
       setDialogOpen(false);
-      setNewProject({ name: '', description: '', priority: 'medium' });
+      setNewProject({
+        name: '',
+        description: '',
+        priority: 'medium',
+        status: 'active',
+        startDate: '',
+        endDate: '',
+        teamMembers: '',
+        budget: '',
+        department: ''
+      });
     } catch (err: any) {
       toast.error(err.message || 'Failed to create project');
     }
@@ -76,21 +97,49 @@ const Projects = () => {
                 <Plus className="h-4 w-4 mr-1" /> New Project
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create Project</DialogTitle>
+                <DialogTitle>Create New Project</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 mt-2">
-                <Input placeholder="Project name" value={newProject.name} onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))} />
+                <Input placeholder="Project name *" value={newProject.name} onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))} />
                 <Input placeholder="Description" value={newProject.description} onChange={e => setNewProject(p => ({ ...p, description: e.target.value }))} />
-                <Select value={newProject.priority} onValueChange={v => setNewProject(p => ({ ...p, priority: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="high">High Priority</SelectItem>
-                    <SelectItem value="medium">Medium Priority</SelectItem>
-                    <SelectItem value="low">Low Priority</SelectItem>
-                  </SelectContent>
-                </Select>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Start Date</label>
+                    <Input type="date" value={newProject.startDate} onChange={e => setNewProject(p => ({ ...p, startDate: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">End Date</label>
+                    <Input type="date" value={newProject.endDate} onChange={e => setNewProject(p => ({ ...p, endDate: e.target.value }))} />
+                  </div>
+                </div>
+
+                <Input placeholder="Team members (comma-separated)" value={newProject.teamMembers} onChange={e => setNewProject(p => ({ ...p, teamMembers: e.target.value }))} />
+                <Input placeholder="Budget (optional)" value={newProject.budget} onChange={e => setNewProject(p => ({ ...p, budget: e.target.value }))} />
+                <Input placeholder="Department" value={newProject.department} onChange={e => setNewProject(p => ({ ...p, department: e.target.value }))} />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Select value={newProject.priority} onValueChange={v => setNewProject(p => ({ ...p, priority: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Priority" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High Priority</SelectItem>
+                      <SelectItem value="medium">Medium Priority</SelectItem>
+                      <SelectItem value="low">Low Priority</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={newProject.status} onValueChange={v => setNewProject(p => ({ ...p, status: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="on-hold">On Hold</SelectItem>
+                      <SelectItem value="at-risk">At Risk</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <Button onClick={handleCreate} disabled={createProject.isPending} className="w-full gradient-primary text-primary-foreground">
                   {createProject.isPending ? 'Creating...' : 'Create Project'}
                 </Button>
