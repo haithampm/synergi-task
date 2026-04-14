@@ -14,6 +14,7 @@ import Reports from "./pages/Reports";
 import Tickets from "./pages/Tickets";
 import Settings from "./pages/Settings";
 import ImportExport from "./pages/ImportExport";
+import Schedule from "./pages/Schedule";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -45,6 +46,7 @@ function ProtectedRoutes() {
         <Route path="/tickets" element={<Tickets />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/import-export" element={<ImportExport />} />
+        <Route path="/schedule" element={<Schedule />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>

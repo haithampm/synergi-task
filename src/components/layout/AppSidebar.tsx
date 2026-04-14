@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Ticket, Settings, ChevronLeft, ChevronRight, Sparkles, Zap,
-  Sun, Moon, LogOut, Search, FileUp
+  Sun, Moon, LogOut, Search, FileUp, GanttChart
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -15,6 +15,7 @@ const navItems = [
   { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
   { icon: BarChart3, label: 'Reports', path: '/reports' },
   { icon: Ticket, label: 'Tickets', path: '/tickets' },
+  { icon: GanttChart, label: 'Schedule', path: '/schedule' },
   { icon: FileUp, label: 'Import/Export', path: '/import-export' },
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
