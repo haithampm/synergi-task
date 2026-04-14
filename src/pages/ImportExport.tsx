@@ -215,7 +215,7 @@ const ImportExport = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Export your project data as MS Project XML (compatible with Microsoft Project) or CSV.
+              Export your project as MS Project XML — opens directly in Microsoft Project (File → Open). Also available as CSV.
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <Select value={exportProject} onValueChange={setExportProject}>
@@ -228,8 +228,8 @@ const ImportExport = () => {
                   ))}
                 </SelectContent>
               </Select>
-              <Button onClick={() => handleExport('xml')} variant="outline" disabled={!exportProject}>
-                <FileSpreadsheet className="h-4 w-4 mr-1" /> Export XML
+              <Button onClick={() => handleExport('xml')} disabled={!exportProject} className="gradient-primary text-primary-foreground shadow-glow">
+                <FileSpreadsheet className="h-4 w-4 mr-1" /> Export for MS Project (.xml)
               </Button>
               <Button onClick={() => handleExport('csv')} variant="outline" disabled={!exportProject}>
                 <FileText className="h-4 w-4 mr-1" /> Export CSV
