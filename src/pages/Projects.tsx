@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Search, Calendar, FileText, MessageSquare, Users, Settings as SettingsIcon, MoreHorizontal, Download, Upload, Trash2, Milestone, ChevronRight, LayoutDashboard, Share2, Filter } from 'lucide-react';
+import { Plus, Search, Calendar, FileText, MessageSquare, Users, Settings as SettingsIcon, MoreHorizontal, Download, Upload, Trash2, Milestone, ChevronRight, LayoutDashboard, Share2, Check, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import { useProjects, useCreateProject, useUpdateProject, useDeleteProject } fro
 import { projects as mockProjects } from '@/lib/mock-data';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 
 const statusColor: Record<string, string> = {
   active: 'bg-success/10 text-success border-success/20',
