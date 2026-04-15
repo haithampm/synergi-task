@@ -80,7 +80,7 @@ const Tasks = () => {
   const openTaskDetail = (task: any) => {
     setSelectedTask({ ...task });
     setTaskDetailOpen(true);
-    setIsEditing(false);
+    setIsEditing(true);
   };
 
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
