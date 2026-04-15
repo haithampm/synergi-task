@@ -92,7 +92,7 @@ const Projects = () => {
   const openProjectDetail = (project: any) => {
     setSelectedProject({ ...project });
     setDetailOpen(true);
-    setIsEditing(false);
+    setIsEditing(true);
   };
 
   return (
