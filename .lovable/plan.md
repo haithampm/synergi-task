@@ -1,33 +1,24 @@
-## Phase 1: Database & Auth Foundation
-- Create database tables: projects, tasks, team_members, agent_memory, agent_decisions, tickets, comments
-- Set up RLS policies
-- Add user authentication (email + Google)
-- Create user profiles with roles
 
-## Phase 2: AI Agent Brain
-- Edge function `ai-agent` powered by Lovable AI (Gemini)
-- Agent memory system (stores past decisions, context, user preferences)
-- Autonomous capabilities: auto-generate tasks, predict delays, suggest mitigations
-- System prompt designed as a real PM, not a chatbot
 
-## Phase 3: Enterprise UI Overhaul
-- Redesign all pages to Linear/Notion quality
-- Add command palette (⌘K)
-- Improved sidebar with workspace switcher
-- Better data tables, inline editing
-- Real-time activity feed
-- Dark/light mode toggle
-- Smooth page transitions
+## Plan: Add clickable team member profile sheet
 
-## Phase 4: Real Integrations
-- Slack connector: send notifications, create tasks from messages
-- Linear connector: sync issues bidirectionally  
-- Resend connector: email summaries and notifications
-- AI-powered features: meeting summarizer, email parser, auto task generation
+### What changes
+1. **`src/pages/Team.tsx`** — Add a Sheet (side panel) that opens when clicking a team member card or table row. The sheet displays:
+   - Avatar, name, role, status badge, email
+   - Task completion progress bar with stats
+   - Mock task list showing assigned tasks (filtered from `tasks` mock data by assignee name)
+   - "Send Message" button
 
-## Phase 5: Advanced Agent Features
-- Agent autonomy settings (manual/semi-auto/full-auto)
-- Risk monitoring with AI-predicted delays
-- Workload balancing suggestions
-- Daily digest generation
-- Decision audit trail
+   Implementation: Add `selectedMember` state, wrap cards/rows with `onClick` + `cursor-pointer`, import Sheet components and render a right-side Sheet with member details.
+
+2. **Also fix build errors** in the same pass:
+   - **`supabase/functions/ai-agent/index.ts`** line 144: Replace `.catch(() => {})` with `.then(() => {}).catch(() => {})` or wrap in try/catch
+   - **`src/hooks/useProjects.ts`** line 134: Add proper typing to the update object instead of `{ [key: string]: any }`
+
+### Technical details
+- Uses existing `Sheet`, `SheetContent`, `SheetHeader`, `SheetTitle` components
+- Filters `tasks` from mock-data by matching `task.assignee` to `member.name`
+- Cards get `cursor-pointer` class and `onClick={() => setSelectedMember(member)}`
+- Table rows also become clickable
+- Sheet closes via `onOpenChange` setting `selectedMember` to `null`
+
