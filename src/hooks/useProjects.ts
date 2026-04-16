@@ -130,7 +130,7 @@ export function useDeleteTask() {
 export function useUpdateProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; [key: string]: any }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; name?: string; description?: string; status?: string; priority?: string; progress?: number; start_date?: string; end_date?: string; budget?: number; risk_level?: string; ai_summary?: string }) => {
       const { data, error } = await supabase.from('projects').update(updates).eq('id', id).select().single();
       if (error) throw error;
       return data;
