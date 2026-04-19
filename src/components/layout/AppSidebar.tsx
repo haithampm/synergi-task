@@ -1,110 +1,187 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
-  BarChart3, Ticket, Settings, ChevronLeft, ChevronRight, Sparkles, Zap,
-  Sun, Moon, LogOut, Search, FileUp, GanttChart
+  BarChart3, Ticket, Settings, ChevronLeft, ChevronRight, Sparkles,
+  Sun, Moon, LogOut, Search, FileUp, GanttChart, CalendarDays, Files, BriefcaseBusiness, StickyNote, User
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { useWorkspaceSettings } from '@/hooks/useProjects';
+import { translateText } from '@/lib/i18n';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: FolderKanban, label: 'Projects', path: '/projects' },
-  { icon: CheckSquare, label: 'Tasks', path: '/tasks' },
-  { icon: Users, label: 'Team', path: '/team' },
-  { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
-  { icon: BarChart3, label: 'Reports', path: '/reports' },
-  { icon: Ticket, label: 'Tickets', path: '/tickets' },
-  { icon: GanttChart, label: 'Schedule', path: '/schedule' },
-  { icon: FileUp, label: 'Import/Export', path: '/import-export' },
-  { icon: Settings, label: 'Settings', path: '/settings' },
+const navSections = [
+  {
+    title: 'Overview',
+    items: [
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+      { icon: BarChart3, label: 'Reports', path: '/reports' },
+    ],
+  },
+  {
+    title: 'Planning',
+    items: [
+      { icon: FolderKanban, label: 'Projects', path: '/projects' },
+      { icon: CheckSquare, label: 'Tasks', path: '/tasks' },
+      { icon: GanttChart, label: 'Schedule', path: '/schedule' },
+      { icon: CalendarDays, label: 'Calendar', path: '/calendar' },
+      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources' },
+      { icon: Files, label: 'Documents', path: '/documents' },
+      { icon: Ticket, label: 'Tickets', path: '/tickets' },
+    ],
+  },
+  {
+    title: 'Collaboration',
+    items: [
+      { icon: Users, label: 'Team', path: '/team' },
+      { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
+      { icon: FileUp, label: 'Import/Export', path: '/import-export' },
+    ],
+  },
+  {
+    title: 'Personal Workspace',
+    items: [
+      { icon: User, label: 'My Profile', path: '/profile' },
+      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes' },
+      { icon: CheckSquare, label: 'To Do', path: '/tasks' },
+      { icon: MessageSquare, label: 'Team Chat', path: '/team-chat' },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      { icon: Settings, label: 'Settings', path: '/settings' },
+    ],
+  },
 ];
 
 const AppSidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const location = useLocation();
-  const { signOut, user } = useAuth();
+  const { signOut } = useAuth();
+  const { data: settings } = useWorkspaceSettings();
+  const language = settings?.appearance.language ?? 'en';
+  const isArabic = language === 'ar';
 
   const toggleDarkMode = () => {
     document.documentElement.classList.toggle('dark');
     setDarkMode(!darkMode);
   };
 
+  const triggerSearch = () => {
+    window.dispatchEvent(new CustomEvent('workspace-search-open', { detail: { query: '' } }));
+  };
+
   return (
     <aside
-      className={`fixed left-0 top-0 z-40 h-screen bg-sidebar text-sidebar-foreground transition-all duration-300 flex flex-col ${
+      dir={isArabic ? 'rtl' : 'ltr'}
+      className={`fixed top-0 z-40 h-screen bg-sidebar text-sidebar-foreground transition-all duration-300 flex flex-col ${
+        isArabic ? 'right-0' : 'left-0'
+      } ${
         collapsed ? 'w-[68px]' : 'w-[240px]'
       }`}
     >
-      {/* Logo */}
-      <div className="flex h-14 items-center gap-3 px-4 border-b border-sidebar-border">
+      <Link to="/" className="flex h-14 items-center gap-3 px-4 border-b border-sidebar-border hover:bg-sidebar-accent/30 transition-colors">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg gradient-primary">
-          <Zap className="h-4 w-4 text-primary-foreground" />
+          <FolderKanban className="h-4 w-4 text-primary-foreground" />
         </div>
         {!collapsed && (
-          <span className="text-sm font-bold tracking-tight animate-fade-in">AI PM Agent</span>
+          <span className="text-sm font-bold tracking-tight animate-fade-in">{settings?.branding.appName ?? 'Synergi PM'}</span>
         )}
-      </div>
+      </Link>
 
-      {/* Quick search hint */}
       {!collapsed && (
         <div className="mx-3 mt-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-sidebar-accent/50 text-sidebar-muted text-xs cursor-pointer hover:bg-sidebar-accent transition-colors"
-            onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}>
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-sidebar-accent/50 text-sidebar-muted text-xs cursor-pointer hover:bg-sidebar-accent transition-colors"
+            onClick={triggerSearch}
+          >
             <Search className="h-3 w-3" />
-            <span>Search</span>
-            <kbd className="ml-auto text-[10px] border border-sidebar-border rounded px-1">⌘K</kbd>
+            <span>{translateText(language, 'Search')}</span>
+            <kbd className="ml-auto text-[10px] border border-sidebar-border rounded px-1">Ctrl K</kbd>
           </div>
         </div>
       )}
 
-      {/* Navigation */}
-      <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive = location.pathname === item.path ||
-            (item.path !== '/' && location.pathname.startsWith(item.path));
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 group ${
-                isActive
-                  ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-glow'
-                  : 'text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              }`}
-            >
-              <item.icon className={`h-4 w-4 shrink-0 ${isActive ? '' : 'group-hover:scale-110 transition-transform'}`} />
-              {!collapsed && <span className="animate-fade-in">{item.label}</span>}
-              {!collapsed && item.highlight && (
-                <Sparkles className="ml-auto h-3 w-3 text-accent" />
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 py-3 px-3 space-y-4 overflow-y-auto">
+        {navSections.map((section) => (
+          <Fragment key={section.title}>
+            {!collapsed ? (
+              <div className="px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-sidebar-muted">
+                {translateText(language, section.title)}
+              </div>
+            ) : (
+              <div className="mx-auto h-px w-8 bg-sidebar-border/70" />
+            )}
+            <div className="space-y-0.5">
+              {section.items.map((item) => {
+                const itemPathname = item.path.split('?')[0];
+                const isActive = location.pathname === itemPathname ||
+                  (itemPathname !== '/' && location.pathname.startsWith(itemPathname));
+
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 group ${
+                      isActive
+                        ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-glow'
+                        : 'text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                    }`}
+                  >
+                    <item.icon className={`h-4 w-4 shrink-0 ${isActive ? '' : 'group-hover:scale-110 transition-transform'}`} />
+                    {!collapsed && <span className="animate-fade-in">{translateText(language, item.label)}</span>}
+                    {!collapsed && item.highlight && (
+                      <Sparkles className="ml-auto h-3 w-3 text-accent" />
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </Fragment>
+        ))}
       </nav>
 
-      {/* Bottom actions */}
       <div className="border-t border-sidebar-border p-2 space-y-1">
+        <Link
+          to="/profile"
+          className={`mb-2 flex items-center gap-3 rounded-lg border border-sidebar-border/70 px-3 py-2 transition-colors hover:bg-sidebar-accent/40 ${collapsed ? 'justify-center px-2' : ''}`}
+        >
+            {settings?.profile.avatarUrl ? (
+              <img src={settings.profile.avatarUrl} alt="Profile" className="h-8 w-8 rounded-full object-cover" />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-bold text-sidebar-primary-foreground">
+                {(settings?.currentUser.displayName ?? 'U').split(' ').map((part) => part[0]).join('').slice(0, 2)}
+              </div>
+            )}
+            <div className="min-w-0">
+              {!collapsed && (
+                <>
+                  <p className="truncate text-sm font-medium">{settings?.currentUser.displayName ?? 'Workspace User'}</p>
+                  <p className="truncate text-[11px] text-sidebar-muted">{settings?.profile.email ?? 'No email'}</p>
+                </>
+              )}
+            </div>
+        </Link>
         <button
           onClick={toggleDarkMode}
           className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
         >
           {darkMode ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-          {!collapsed && <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+          {!collapsed && <span>{translateText(language, darkMode ? 'Light Mode' : 'Dark Mode')}</span>}
         </button>
         <button
           onClick={signOut}
           className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-muted hover:bg-destructive/20 hover:text-destructive transition-colors"
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>Sign Out</span>}
+          {!collapsed && <span>{translateText(language, 'Sign Out')}</span>}
         </button>
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="w-full flex items-center justify-center py-1.5 text-sidebar-muted hover:text-sidebar-foreground transition-colors"
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {collapsed ? <ChevronRight className={`h-4 w-4 ${isArabic ? 'rotate-180' : ''}`} /> : <ChevronLeft className={`h-4 w-4 ${isArabic ? 'rotate-180' : ''}`} />}
         </button>
       </div>
     </aside>

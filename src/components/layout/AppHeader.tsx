@@ -1,7 +1,10 @@
 import { Bell, Search, Plus, CheckCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useWorkspaceSettings } from '@/hooks/useProjects';
+import { translateText } from '@/lib/i18n';
 
 interface AppHeaderProps {
   title: string;
@@ -16,7 +19,14 @@ const initialNotifications = [
 
 const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const [notifications, setNotifications] = useState(initialNotifications);
+  const navigate = useNavigate();
+  const { data: settings } = useWorkspaceSettings();
+  const language = settings?.appearance.language ?? 'en';
+  const isArabic = language === 'ar';
+  const localizedTitle = useMemo(() => translateText(language, title), [language, title]);
+  const localizedSubtitle = useMemo(() => (subtitle ? translateText(language, subtitle) : undefined), [language, subtitle]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -28,18 +38,34 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
     setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
   };
 
+  const openWorkspaceSearch = (query = search) => {
+    window.dispatchEvent(new CustomEvent('workspace-search-open', { detail: { query } }));
+  };
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 backdrop-blur-xl px-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 backdrop-blur-xl px-6" dir={isArabic ? 'rtl' : 'ltr'}>
+      <div className={isArabic ? 'text-right' : ''}>
+        <h1 className="text-xl font-semibold tracking-tight">{localizedTitle}</h1>
+        {localizedSubtitle && <p className="text-sm text-muted-foreground">{localizedSubtitle}</p>}
       </div>
       <div className="flex items-center gap-3">
         <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isArabic ? 'right-3' : 'left-3'}`} />
           <Input
-            placeholder="Search anything..."
-            className="w-64 pl-9 bg-muted/50 border-transparent focus:border-primary/30 focus:bg-card"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              if (e.target.value) openWorkspaceSearch(e.target.value);
+            }}
+            onFocus={() => openWorkspaceSearch(search)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                openWorkspaceSearch(search);
+              }
+            }}
+            placeholder={translateText(language, 'Search anything...')}
+            className={`w-64 bg-muted/50 border-transparent focus:border-primary/30 focus:bg-card ${isArabic ? 'pr-9 text-right' : 'pl-9'}`}
           />
         </div>
         <div className="relative">
@@ -54,9 +80,9 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
           {open && (
             <div className="absolute right-0 mt-2 w-80 rounded-xl border border-border bg-card shadow-xl z-50">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <span className="font-semibold text-sm">Notifications</span>
+                <span className="font-semibold text-sm">{translateText(language, 'Notifications')}</span>
                 <button onClick={markAllRead} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
-                  <CheckCheck className="h-3 w-3" /> Mark all read
+                  <CheckCheck className="h-3 w-3" /> {translateText(language, 'Mark all read')}
                 </button>
               </div>
               <ul className="max-h-72 overflow-y-auto divide-y divide-border">
@@ -79,14 +105,18 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
                 ))}
               </ul>
               {notifications.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-6">No notifications</p>
+                <p className="text-sm text-muted-foreground text-center py-6">{translateText(language, 'No notifications')}</p>
               )}
             </div>
           )}
         </div>
-        <Button size="sm" className="gradient-primary text-primary-foreground shadow-glow gap-1.5">
+        <Button
+          size="sm"
+          className="gradient-primary text-primary-foreground shadow-glow gap-1.5"
+          onClick={() => navigate('/projects?action=create')}
+        >
           <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">New Project</span>
+          <span className="hidden sm:inline">{translateText(language, 'New Project')}</span>
         </Button>
       </div>
     </header>

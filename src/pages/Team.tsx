@@ -1,20 +1,32 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { CheckCircle, Clock, FolderPlus, LayoutGrid, Mail, Pencil, Plus, Table as TableIcon, UserPlus } from 'lucide-react';
+import AppLayout from '@/components/layout/AppLayout';
+import AppHeader from '@/components/layout/AppHeader';
+import PageSection from '@/components/layout/PageSection';
+import DynamicCustomFields from '@/components/forms/DynamicCustomFields';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Mail, MoreHorizontal, LayoutGrid, Table as TableIcon, CheckCircle, Clock, AlertCircle, Plus, Pencil, UserPlus, FolderPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  useCreateTeamMember,
+  useProjects,
+  useTasks,
+  useTeamMembers,
+  useUpdateTask,
+  useUpdateTeamMember,
+  useWorkspaceSettings,
+} from '@/hooks/useProjects';
+import { getActiveCustomFields, normalizeCustomFieldValues } from '@/lib/custom-fields';
 import { toast } from 'sonner';
-import AppLayout from '@/components/layout/AppLayout';
-import AppHeader from '@/components/layout/AppHeader';
-import { teamMembers as initialMembers, tasks as initialTasks, projects as mockProjects, type TeamMember, type Task } from '@/lib/mock-data';
+import type { WorkspaceTeamMember } from '@/lib/workspace-store';
 
 const statusDot: Record<string, string> = {
   online: 'bg-success',
@@ -22,125 +34,139 @@ const statusDot: Record<string, string> = {
   offline: 'bg-muted-foreground/40',
 };
 
-const priorityColor: Record<string, string> = {
-  urgent: 'text-destructive',
-  high: 'text-warning',
-  medium: 'text-primary',
-  low: 'text-muted-foreground',
-};
-
 const avatarColors = [
-  { label: 'Primary', class: 'gradient-primary' },
-  { label: 'Blue', class: 'bg-blue-600' },
-  { label: 'Green', class: 'bg-emerald-600' },
-  { label: 'Purple', class: 'bg-purple-600' },
-  { label: 'Orange', class: 'bg-orange-500' },
-  { label: 'Pink', class: 'bg-pink-500' },
-  { label: 'Teal', class: 'bg-teal-600' },
-  { label: 'Red', class: 'bg-red-600' },
+  'gradient-primary',
+  'bg-blue-600',
+  'bg-emerald-600',
+  'bg-orange-500',
+  'bg-red-600',
+  'bg-teal-600',
 ];
 
-interface ExtendedMember extends TeamMember {
-  phone?: string;
-  department?: string;
-  avatarColor?: string;
-  assignedProjectIds?: string[];
-}
+const emptyForm = {
+  name: '',
+  role: '',
+  email: '',
+  phone: '',
+  department: '',
+  status: 'online',
+  avatarColor: 'gradient-primary',
+  capacityHours: 40,
+  utilizationTarget: 85,
+  privilegeRole: 'lead',
+  customFieldValues: {} as Record<string, string | number | boolean>,
+};
 
-const emptyForm = (): Omit<ExtendedMember, 'id'> => ({
-  name: '', role: '', avatar: '', email: '', phone: '', department: '',
-  tasksAssigned: 0, tasksCompleted: 0, status: 'online' as const, avatarColor: 'gradient-primary', assignedProjectIds: [],
-});
+const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 
 const Team = () => {
   const [view, setView] = useState<'cards' | 'table'>('cards');
-  const [members, setMembers] = useState<ExtendedMember[]>(initialMembers.map(m => ({ ...m, phone: '', department: '', avatarColor: 'gradient-primary', assignedProjectIds: [] })));
-  const [localTasks, setLocalTasks] = useState<Task[]>([...initialTasks]);
-  const [selectedMember, setSelectedMember] = useState<ExtendedMember | null>(null);
-
-  // Form dialog state
+  const [selectedMember, setSelectedMember] = useState<WorkspaceTeamMember | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm());
-
-  // Assign dialogs
   const [assignTaskOpen, setAssignTaskOpen] = useState(false);
   const [assignProjectOpen, setAssignProjectOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<WorkspaceTeamMember | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [form, setForm] = useState(emptyForm);
+  const [activeTab, setActiveTab] = useState<'directory' | 'ownership'>('directory');
 
-  const getMemberTasks = (memberName: string) => {
-    const firstName = memberName.split(' ')[0];
-    return localTasks.filter(t => t.assignee === firstName);
-  };
+  const { data: settings } = useWorkspaceSettings();
+  const { data: members = [] } = useTeamMembers();
+  const { data: tasks = [] } = useTasks();
+  const { data: projects = [] } = useProjects();
+  const teamCustomFields = useMemo(() => getActiveCustomFields(settings, 'teamMember'), [settings]);
+  const createMember = useCreateTeamMember();
+  const updateMember = useUpdateTeamMember();
+  const updateTask = useUpdateTask();
 
-  const getMemberProjects = (member: ExtendedMember) => {
-    const ids = member.assignedProjectIds || [];
-    const fromTasks = getMemberTasks(member.name).map(t => t.projectId);
-    const allIds = [...new Set([...ids, ...fromTasks])];
-    return mockProjects.filter(p => allIds.includes(p.id));
-  };
+  const taskStats = useMemo(() => {
+    return members.map((member) => {
+      const aliases = [member.name, member.name.split(' ')[0]];
+      const assignedTasks = tasks.filter((task) => aliases.includes(task.assignee));
+      const completed = assignedTasks.filter((task) => task.status === 'done').length;
+      const assignedHours = assignedTasks.reduce((sum, task) => sum + (task.workloadHours ?? 0), 0);
+      const capacity = member.capacityHours ?? 40;
+      const assignedProjectIds = new Set([
+        ...(member.assignedProjectIds ?? []),
+        ...assignedTasks.map((task) => task.project_id).filter(Boolean) as string[],
+      ]);
+
+      return {
+        ...member,
+        tasksAssigned: assignedTasks.length,
+        tasksCompleted: completed,
+        assignedTasks,
+        assignedHours,
+        utilizationPct: Math.round((assignedHours / Math.max(1, capacity)) * 100),
+        assignedProjects: projects.filter((project) => assignedProjectIds.has(project.id)),
+      };
+    });
+  }, [members, projects, tasks]);
+  const activeMember = selectedMember ? taskStats.find((member) => member.id === selectedMember.id) ?? null : null;
+  const currentProfileMember =
+    taskStats.find((member) => member.id === settings?.currentUser.teamMemberId) ??
+    taskStats.find((member) => normalizeText(member.email) === normalizeText(settings?.profile.email));
 
   const openAddForm = () => {
-    setEditingId(null);
-    setForm(emptyForm());
+    setEditingMember(null);
+    setForm({ ...emptyForm, customFieldValues: normalizeCustomFieldValues(teamCustomFields, {}) });
     setFormOpen(true);
   };
 
-  const openEditForm = (member: ExtendedMember) => {
-    setEditingId(member.id);
-    setForm({ ...member });
+  const openEditForm = (member: WorkspaceTeamMember) => {
+    setEditingMember(member);
+    setForm({
+      name: member.name,
+      role: member.role,
+      email: member.email,
+      phone: member.phone ?? '',
+      department: member.department ?? '',
+      status: member.status,
+      avatarColor: member.avatarColor ?? 'gradient-primary',
+      capacityHours: member.capacityHours ?? 40,
+      utilizationTarget: member.utilizationTarget ?? 85,
+      privilegeRole: member.privilegeRole ?? 'lead',
+      customFieldValues: normalizeCustomFieldValues(teamCustomFields, member.customFieldValues),
+    });
     setFormOpen(true);
   };
 
-  const handleFormSave = () => {
-    if (!form.name.trim()) { toast.error('Name is required'); return; }
-    const initials = form.name.split(' ').map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
-
-    if (editingId) {
-      setMembers(prev => prev.map(m => m.id === editingId ? { ...m, ...form, avatar: initials } : m));
-      if (selectedMember?.id === editingId) {
-        setSelectedMember(prev => prev ? { ...prev, ...form, avatar: initials } : null);
-      }
-      toast.success('Member updated');
-    } else {
-      const newMember: ExtendedMember = {
-        ...form,
-        id: `m${Date.now()}`,
-        avatar: initials,
-        assignedProjectIds: [],
-      };
-      setMembers(prev => [...prev, newMember]);
-      toast.success('Member added');
+  const saveMember = async () => {
+    if (!form.name.trim()) {
+      toast.error('Member name is required');
+      return;
     }
+
+    if (editingMember) {
+      await updateMember.mutateAsync({ id: editingMember.id, ...form });
+      toast.success('Team member updated');
+    } else {
+      await createMember.mutateAsync(form);
+      toast.success('Team member added');
+    }
+
     setFormOpen(false);
   };
 
-  const handleAssignTask = () => {
-    if (!selectedTaskId || !selectedMember) return;
-    const firstName = selectedMember.name.split(' ')[0];
-    setLocalTasks(prev => prev.map(t => t.id === selectedTaskId ? { ...t, assignee: firstName } : t));
-    setMembers(prev => prev.map(m => m.id === selectedMember.id ? { ...m, tasksAssigned: m.tasksAssigned + 1 } : m));
-    setSelectedMember(prev => prev ? { ...prev, tasksAssigned: prev.tasksAssigned + 1 } : null);
+  const assignTask = async () => {
+    if (!activeMember || !selectedTaskId) return;
+    await updateTask.mutateAsync({
+      id: selectedTaskId,
+      assignee: activeMember.name.split(' ')[0],
+      assignee_id: activeMember.id,
+      assignees: [activeMember.id],
+    });
     toast.success('Task assigned');
     setAssignTaskOpen(false);
     setSelectedTaskId('');
   };
 
-  const handleAssignProject = () => {
-    if (!selectedProjectId || !selectedMember) return;
-    setMembers(prev => prev.map(m => {
-      if (m.id !== selectedMember.id) return m;
-      const ids = new Set(m.assignedProjectIds || []);
-      ids.add(selectedProjectId);
-      return { ...m, assignedProjectIds: [...ids] };
-    }));
-    setSelectedMember(prev => {
-      if (!prev) return null;
-      const ids = new Set(prev.assignedProjectIds || []);
-      ids.add(selectedProjectId);
-      return { ...prev, assignedProjectIds: [...ids] };
-    });
+  const assignProject = async () => {
+    if (!activeMember || !selectedProjectId) return;
+    const ids = new Set(activeMember.assignedProjectIds ?? []);
+    ids.add(selectedProjectId);
+    await updateMember.mutateAsync({ id: activeMember.id, assignedProjectIds: [...ids] });
     toast.success('Project assigned');
     setAssignProjectOpen(false);
     setSelectedProjectId('');
@@ -148,165 +174,223 @@ const Team = () => {
 
   return (
     <AppLayout>
-      <AppHeader title="Team" subtitle="Manage your team and track performance." />
+      <AppHeader title="Team Workspace" subtitle="Manage resources, utilization, team chat, and assignment privileges." />
       <div className="p-6 space-y-6 animate-fade-in">
-        {/* View Toggle + Add */}
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">{members.length} team members</p>
-          <div className="flex gap-2">
-            <Button variant={view === 'cards' ? 'default' : 'outline'} size="sm" onClick={() => setView('cards')} className="gap-2">
-              <LayoutGrid className="h-4 w-4" /> Cards
-            </Button>
-            <Button variant={view === 'table' ? 'default' : 'outline'} size="sm" onClick={() => setView('table')} className="gap-2">
-              <TableIcon className="h-4 w-4" /> Table
-            </Button>
-            <Button size="sm" onClick={openAddForm} className="gap-2">
-              <Plus className="h-4 w-4" /> Add Member
-            </Button>
-          </div>
-        </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'directory' | 'ownership')} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2 gap-2">
+            <TabsTrigger value="directory">Directory</TabsTrigger>
+            <TabsTrigger value="ownership">Ownership</TabsTrigger>
+          </TabsList>
 
-        {/* Cards View */}
-        {view === 'cards' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {members.map((member) => {
-              const completion = member.tasksAssigned > 0 ? Math.round((member.tasksCompleted / member.tasksAssigned) * 100) : 0;
-              return (
-                <Card key={member.id} className="glass hover:shadow-lg transition-all duration-300 group cursor-pointer" onClick={() => setSelectedMember(member)}>
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <div className={`h-11 w-11 rounded-full ${member.avatarColor || 'gradient-primary'} flex items-center justify-center text-sm font-bold text-primary-foreground`}>
-                            {member.avatar}
-                          </div>
-                          <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${statusDot[member.status]}`} />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-sm">{member.name}</p>
-                          <p className="text-xs text-muted-foreground">{member.role}</p>
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); openEditForm(member); }}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                    <div className="space-y-3">
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-muted-foreground">Task completion</span>
-                          <span className="font-medium">{completion}%</span>
-                        </div>
-                        <Progress value={completion} className="h-1.5" />
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{member.tasksCompleted}/{member.tasksAssigned} tasks</span>
-                        <Badge variant="outline" className="text-[10px]">{member.status}</Badge>
-                      </div>
-                    </div>
-                    <Button variant="outline" size="sm" className="w-full mt-4 gap-1.5 text-xs" onClick={(e) => e.stopPropagation()}>
-                      <Mail className="h-3 w-3" /> Send Message
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Table View */}
-        {view === 'table' && (
+          <TabsContent value="directory" className="space-y-6">
+        <PageSection
+          title="Capacity & Team Directory"
+          description="Review team capacity, resource utilization, and member assignments before making changes."
+        />
+        <div className="grid grid-cols-1 gap-6">
           <Card className="glass">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Member</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Tasks</TableHead>
-                  <TableHead>Completion</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members.map((member) => {
-                  const completion = member.tasksAssigned > 0 ? Math.round((member.tasksCompleted / member.tasksAssigned) * 100) : 0;
-                  return (
-                    <TableRow key={member.id} className="cursor-pointer" onClick={() => setSelectedMember(member)}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <div className={`h-9 w-9 rounded-full ${member.avatarColor || 'gradient-primary'} flex items-center justify-center text-xs font-bold text-primary-foreground`}>
-                              {member.avatar}
+            <CardContent className="p-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{members.length} team members</p>
+                <div className="flex gap-2">
+                  <Button variant={view === 'cards' ? 'default' : 'outline'} size="sm" onClick={() => setView('cards')} className="gap-2">
+                    <LayoutGrid className="h-4 w-4" /> Cards
+                  </Button>
+                  <Button variant={view === 'table' ? 'default' : 'outline'} size="sm" onClick={() => setView('table')} className="gap-2">
+                    <TableIcon className="h-4 w-4" /> Table
+                  </Button>
+                  <Button size="sm" onClick={openAddForm} className="gap-2">
+                    <Plus className="h-4 w-4" /> Add Member
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  { label: 'Total Capacity', value: `${taskStats.reduce((sum, member) => sum + (member.capacityHours ?? 40), 0)}h` },
+                  { label: 'Assigned Hours', value: `${taskStats.reduce((sum, member) => sum + member.assignedHours, 0)}h` },
+                  { label: 'Average Utilization', value: `${Math.round(taskStats.reduce((sum, member) => sum + member.utilizationPct, 0) / Math.max(1, taskStats.length))}%` },
+                ].map((metric) => (
+                  <div key={metric.label} className="rounded-xl border p-4 bg-card/40">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.label}</p>
+                    <p className="text-2xl font-bold mt-1">{metric.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {view === 'cards' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {taskStats.map((member) => (
+                    <Card key={member.id} className="glass hover:shadow-lg transition-all duration-300 group cursor-pointer" onClick={() => setSelectedMember(member)}>
+                      <CardContent className="p-5">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              <div className={`h-11 w-11 rounded-full ${member.avatarColor || 'gradient-primary'} flex items-center justify-center text-sm font-bold text-primary-foreground`}>
+                                {member.avatar}
+                              </div>
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${statusDot[member.status]}`} />
                             </div>
-                            <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card ${statusDot[member.status]}`} />
+                            <div>
+                              <p className="font-semibold text-sm">{member.name}</p>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                <p className="text-xs text-muted-foreground">{member.role}</p>
+                                {currentProfileMember?.id === member.id ? (
+                                  <Badge className="text-[10px]">Profile Access</Badge>
+                                ) : null}
+                              </div>
+                            </div>
                           </div>
-                          <span className="font-medium text-sm">{member.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{member.role}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs capitalize">{member.status}</Badge></TableCell>
-                      <TableCell className="text-sm">{member.tasksCompleted}/{member.tasksAssigned}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Progress value={completion} className="h-2 w-20" />
-                          <span className="text-xs font-medium">{completion}%</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openEditForm(member)}>
-                            <Pencil className="h-3 w-3" /> Edit
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-8 gap-1.5">
-                            <Mail className="h-3 w-3" /> Message
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); openEditForm(member); }}>
+                            <Pencil className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Utilization</span>
+                            <span className="font-medium">{member.utilizationPct}%</span>
+                          </div>
+                          <Progress value={member.utilizationPct} className="h-1.5" />
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{member.assignedHours}/{member.capacityHours ?? 40}h</span>
+                            <Badge variant="outline" className="text-[10px]">{member.privilegeRole}</Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="glass">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Member</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Hours</TableHead>
+                        <TableHead>Utilization</TableHead>
+                        <TableHead>Privilege</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {taskStats.map((member) => (
+                        <TableRow key={member.id} className="cursor-pointer" onClick={() => setSelectedMember(member)}>
+                          <TableCell className="font-medium">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span>{member.name}</span>
+                              {currentProfileMember?.id === member.id ? (
+                                <Badge className="text-[10px]">Profile Access</Badge>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell>{member.role}</TableCell>
+                          <TableCell>{member.assignedHours}/{member.capacityHours ?? 40}h</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress value={member.utilizationPct} className="h-2 w-20" />
+                              <span className="text-xs font-medium">{member.utilizationPct}%</span>
+                            </div>
+                          </TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{member.privilegeRole}</Badge></TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditForm(member); }}>Edit</Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+            </CardContent>
           </Card>
-        )}
+        </div>
+          </TabsContent>
+
+          <TabsContent value="ownership" className="space-y-6">
+        <PageSection
+          title="Delivery Ownership"
+          description="Cross-project workload and assignment visibility for every team member."
+        />
+        <Card className="glass">
+          <CardContent className="p-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold">Task Ownership Snapshot</h3>
+              <p className="text-xs text-muted-foreground">Cross-project assignment and professional utilization controls.</p>
+            </div>
+            <div className="space-y-3">
+              {taskStats.map((member) => (
+                <div key={member.id} className="rounded-lg border p-3 bg-card/40">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-sm font-medium">{member.name}</p>
+                    <Badge variant={member.utilizationPct > (member.utilizationTarget ?? 85) ? 'destructive' : 'outline'} className="text-[10px]">
+                      {member.utilizationPct}% / target {member.utilizationTarget ?? 85}%
+                    </Badge>
+                  </div>
+                  {member.assignedTasks.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No assigned tasks.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {member.assignedTasks.map((task) => (
+                        <Badge key={task.id} variant="secondary" className="text-[10px]">
+                          {task.title} - {task.workloadHours ?? 0}h
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+          </TabsContent>
+        </Tabs>
       </div>
 
-      {/* Add/Edit Member Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Edit Member' : 'Add New Member'}</DialogTitle>
+            <DialogTitle>{editingMember ? 'Edit Member' : 'Add New Member'}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
               <Label>Full Name *</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="John Doe" />
+              <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Role / Title</Label>
-                <Input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} placeholder="Developer" />
+                <Input value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))} />
               </div>
               <div className="grid gap-2">
                 <Label>Department</Label>
-                <Input value={form.department || ''} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} placeholder="Engineering" />
+                <Input value={form.department} onChange={(e) => setForm((prev) => ({ ...prev, department: e.target.value }))} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Email</Label>
-                <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="john@company.com" />
+                <Input type="email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
               </div>
               <div className="grid gap-2">
                 <Label>Phone</Label>
-                <Input value={form.phone || ''} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+1 234 567 890" />
+                <Input value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Capacity Hours</Label>
+                <Input type="number" value={form.capacityHours} onChange={(e) => setForm((prev) => ({ ...prev, capacityHours: Number(e.target.value) || 40 }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Utilization Target %</Label>
+                <Input type="number" value={form.utilizationTarget} onChange={(e) => setForm((prev) => ({ ...prev, utilizationTarget: Number(e.target.value) || 85 }))} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label>Status</Label>
-                <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as any }))}>
+                <Select value={form.status} onValueChange={(value) => setForm((prev) => ({ ...prev, status: value }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="online">Online</SelectItem>
@@ -316,214 +400,187 @@ const Team = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>Avatar Color</Label>
-                <div className="flex gap-1.5 flex-wrap pt-1">
-                  {avatarColors.map(c => (
-                    <button
-                      key={c.class}
-                      type="button"
-                      className={`h-7 w-7 rounded-full ${c.class} border-2 transition-all ${form.avatarColor === c.class ? 'border-foreground scale-110' : 'border-transparent'}`}
-                      onClick={() => setForm(f => ({ ...f, avatarColor: c.class }))}
-                      title={c.label}
-                    />
-                  ))}
-                </div>
+                <Label>Privilege Role</Label>
+                <Select value={form.privilegeRole} onValueChange={(value) => setForm((prev) => ({ ...prev, privilegeRole: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {settings?.privilegeRoles.map((role) => (
+                      <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label>Avatar Color</Label>
+              <div className="flex gap-1.5 flex-wrap pt-1">
+                {avatarColors.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`h-7 w-7 rounded-full ${color} border-2 transition-all ${form.avatarColor === color ? 'border-foreground scale-110' : 'border-transparent'}`}
+                    onClick={() => setForm((prev) => ({ ...prev, avatarColor: color }))}
+                  />
+                ))}
+              </div>
+            </div>
+            <DynamicCustomFields
+              fields={teamCustomFields}
+              values={normalizeCustomFieldValues(teamCustomFields, form.customFieldValues)}
+              onChange={(key, value) => setForm((prev) => ({ ...prev, customFieldValues: { ...(prev.customFieldValues ?? {}), [key]: value } }))}
+              columnsClassName="grid gap-4"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button onClick={handleFormSave}>{editingId ? 'Save Changes' : 'Add Member'}</Button>
+            <Button onClick={saveMember}>{editingMember ? 'Save Changes' : 'Add Member'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Member Detail Sheet */}
-      <Sheet open={!!selectedMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
+      <Sheet open={!!activeMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
         <SheetContent className="overflow-y-auto">
-          {selectedMember && (() => {
-            const completion = selectedMember.tasksAssigned > 0 ? Math.round((selectedMember.tasksCompleted / selectedMember.tasksAssigned) * 100) : 0;
-            const memberTasks = getMemberTasks(selectedMember.name);
-            const memberProjects = getMemberProjects(selectedMember);
-            return (
-              <>
-                <SheetHeader>
-                  <div className="flex items-center gap-4 pt-2">
-                    <div className="relative">
-                      <div className={`h-16 w-16 rounded-full ${selectedMember.avatarColor || 'gradient-primary'} flex items-center justify-center text-xl font-bold text-primary-foreground`}>
-                        {selectedMember.avatar}
-                      </div>
-                      <span className={`absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-background ${statusDot[selectedMember.status]}`} />
+          {activeMember && (
+            <>
+              <SheetHeader>
+                <div className="flex items-center gap-4 pt-2">
+                  <div className={`h-16 w-16 rounded-full ${activeMember.avatarColor || 'gradient-primary'} flex items-center justify-center text-xl font-bold text-primary-foreground`}>
+                    {activeMember.avatar}
+                  </div>
+                  <div className="flex-1">
+                    <SheetTitle className="text-lg">{activeMember.name}</SheetTitle>
+                    <p className="text-sm text-muted-foreground">{activeMember.role}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="outline" className="text-xs capitalize">{activeMember.status}</Badge>
+                      <Badge variant="secondary" className="text-xs">{activeMember.privilegeRole}</Badge>
+                      {currentProfileMember?.id === activeMember.id ? (
+                        <Badge className="text-xs">Linked Profile Access</Badge>
+                      ) : null}
                     </div>
-                    <div className="flex-1">
-                      <SheetTitle className="text-lg">{selectedMember.name}</SheetTitle>
-                      <p className="text-sm text-muted-foreground">{selectedMember.role}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs capitalize">{selectedMember.status}</Badge>
-                        {selectedMember.department && <Badge variant="secondary" className="text-xs">{selectedMember.department}</Badge>}
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="shrink-0" onClick={() => { openEditForm(selectedMember); }}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
                   </div>
-                </SheetHeader>
-
-                <div className="mt-6 space-y-6">
-                  {/* Contact */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Email</p>
-                      <p className="text-sm">{selectedMember.email}</p>
-                    </div>
-                    {selectedMember.phone && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Phone</p>
-                        <p className="text-sm">{selectedMember.phone}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <Separator />
-
-                  {/* Stats */}
-                  <div>
-                    <p className="text-sm font-semibold mb-3">Task Completion</p>
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-muted-foreground">{selectedMember.tasksCompleted} of {selectedMember.tasksAssigned} tasks</span>
-                      <span className="font-medium">{completion}%</span>
-                    </div>
-                    <Progress value={completion} className="h-2" />
-                  </div>
-
-                  <Separator />
-
-                  {/* Assign Buttons */}
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedTaskId(''); setAssignTaskOpen(true); }}>
-                      <UserPlus className="h-3.5 w-3.5" /> Assign to Task
-                    </Button>
-                    <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedProjectId(''); setAssignProjectOpen(true); }}>
-                      <FolderPlus className="h-3.5 w-3.5" /> Assign to Project
-                    </Button>
-                  </div>
-
-                  {/* Assigned Projects */}
-                  {memberProjects.length > 0 && (
-                    <>
-                      <Separator />
-                      <div>
-                        <p className="text-sm font-semibold mb-3">Projects ({memberProjects.length})</p>
-                        <div className="space-y-2">
-                          {memberProjects.map(p => (
-                            <div key={p.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card/50">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{p.name}</p>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Badge variant="outline" className="text-[10px]">{p.status}</Badge>
-                                  <span className="text-[10px] text-muted-foreground">{p.progress}% complete</span>
-                                </div>
-                              </div>
-                              <Progress value={p.progress} className="h-1.5 w-16" />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  <Separator />
-
-                  {/* Assigned Tasks */}
-                  <div>
-                    <p className="text-sm font-semibold mb-3">Assigned Tasks ({memberTasks.length})</p>
-                    {memberTasks.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No tasks assigned yet.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {memberTasks.map(task => (
-                          <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border bg-card/50">
-                            {task.status === 'done' ? (
-                              <CheckCircle className="h-4 w-4 mt-0.5 text-success shrink-0" />
-                            ) : task.status === 'in-progress' ? (
-                              <Clock className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-                            ) : (
-                              <AlertCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{task.title}</p>
-                              <div className="flex items-center gap-2 mt-1">
-                                <Badge variant="outline" className="text-[10px]">{task.status}</Badge>
-                                <span className={`text-[10px] font-medium ${priorityColor[task.priority]}`}>{task.priority}</span>
-                                <span className="text-[10px] text-muted-foreground">{task.projectName}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <Button className="w-full gap-2 mt-2">
-                    <Mail className="h-4 w-4" /> Send Message
+                  <Button variant="ghost" size="icon" className="shrink-0" onClick={() => openEditForm(activeMember)}>
+                    <Pencil className="h-4 w-4" />
                   </Button>
                 </div>
-              </>
-            );
-          })()}
+              </SheetHeader>
+
+              <div className="mt-6 space-y-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Email</p>
+                    <p className="text-sm">{activeMember.email || 'Not set'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Capacity</p>
+                    <p className="text-sm">{activeMember.capacityHours ?? 40}h / target {activeMember.utilizationTarget ?? 85}%</p>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold mb-3">Professional Utilization</p>
+                  <div className="flex justify-between text-xs mb-1.5">
+                    <span className="text-muted-foreground">{activeMember.assignedHours} assigned hours</span>
+                    <span className="font-medium">{activeMember.utilizationPct}%</span>
+                  </div>
+                  <Progress value={activeMember.utilizationPct} className="h-2" />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedTaskId(''); setAssignTaskOpen(true); }}>
+                    <UserPlus className="h-3.5 w-3.5" /> Assign Task
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedProjectId(''); setAssignProjectOpen(true); }}>
+                    <FolderPlus className="h-3.5 w-3.5" /> Assign Project
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold mb-3">Projects ({activeMember.assignedProjects.length})</p>
+                  <div className="space-y-2">
+                    {activeMember.assignedProjects.map((project) => (
+                      <div key={project.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{project.name}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-[10px]">{project.status}</Badge>
+                            <span className="text-[10px] text-muted-foreground">{project.progress}% complete</span>
+                          </div>
+                        </div>
+                        <Progress value={project.progress} className="h-1.5 w-16" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold mb-3">Assigned Tasks ({activeMember.assignedTasks.length})</p>
+                  <div className="space-y-2">
+                    {activeMember.assignedTasks.map((task) => (
+                      <div key={task.id} className="flex items-start gap-3 p-3 rounded-lg border bg-card/50">
+                        {task.status === 'done' ? (
+                          <CheckCircle className="h-4 w-4 mt-0.5 text-success shrink-0" />
+                        ) : (
+                          <Clock className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{task.title}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-[10px]">{task.status}</Badge>
+                            <span className="text-[10px] text-muted-foreground">{task.projectName} - {task.workloadHours ?? 0}h</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Button className="w-full gap-2 mt-2">
+                  <Mail className="h-4 w-4" /> Open direct channel
+                </Button>
+              </div>
+            </>
+          )}
         </SheetContent>
       </Sheet>
 
-      {/* Assign to Task Dialog */}
       <Dialog open={assignTaskOpen} onOpenChange={setAssignTaskOpen}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Assign Task to {selectedMember?.name}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Assign Task</DialogTitle></DialogHeader>
           <div className="py-2">
             <Label className="mb-2 block">Select a task</Label>
             <Select value={selectedTaskId} onValueChange={setSelectedTaskId}>
               <SelectTrigger><SelectValue placeholder="Choose a task..." /></SelectTrigger>
               <SelectContent>
-                {localTasks.filter(t => t.assignee !== selectedMember?.name.split(' ')[0] && t.status !== 'done').map(t => (
-                  <SelectItem key={t.id} value={t.id}>
-                    <span className="truncate">{t.title}</span>
-                    <span className="text-muted-foreground ml-2 text-xs">({t.projectName})</span>
-                  </SelectItem>
+                {tasks.filter((task) => task.status !== 'done').map((task) => (
+                  <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignTaskOpen(false)}>Cancel</Button>
-            <Button onClick={handleAssignTask} disabled={!selectedTaskId}>Assign</Button>
+            <Button onClick={assignTask} disabled={!selectedTaskId}>Assign</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Assign to Project Dialog */}
       <Dialog open={assignProjectOpen} onOpenChange={setAssignProjectOpen}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Assign Project to {selectedMember?.name}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Assign Project</DialogTitle></DialogHeader>
           <div className="py-2">
             <Label className="mb-2 block">Select a project</Label>
             <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
               <SelectTrigger><SelectValue placeholder="Choose a project..." /></SelectTrigger>
               <SelectContent>
-                {mockProjects.filter(p => !selectedMember?.assignedProjectIds?.includes(p.id)).map(p => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                    <span className="text-muted-foreground ml-2 text-xs">({p.status})</span>
-                  </SelectItem>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignProjectOpen(false)}>Cancel</Button>
-            <Button onClick={handleAssignProject} disabled={!selectedProjectId}>Assign</Button>
+            <Button onClick={assignProject} disabled={!selectedProjectId}>Assign</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

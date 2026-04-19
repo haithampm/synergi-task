@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Bot, User, RotateCcw, Zap } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bot, RotateCcw, Send, User, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
 import { streamAgentChat } from '@/lib/ai-agent';
@@ -12,10 +11,10 @@ import { toast } from 'sonner';
 type Msg = { role: 'user' | 'assistant'; content: string };
 
 const suggestions = [
-  { icon: '📊', text: "What's the status of all active projects?" },
-  { icon: '🧠', text: "Analyze risks across all projects and suggest mitigations" },
-  { icon: '📋', text: "Generate a project plan for launching a new feature" },
-  { icon: '⚡', text: "Auto-create tasks from: We need auth, API docs, and testing" },
+  { icon: 'PI', text: "What's the status of all active projects?" },
+  { icon: 'RK', text: 'Analyze risks across all projects and suggest mitigations' },
+  { icon: 'DC', text: 'Find all project charter and BRD documents in the system' },
+  { icon: 'TS', text: 'Search tasks and tickets related to finance or ERP' },
 ];
 
 const AiChat = () => {
@@ -39,10 +38,10 @@ const AiChat = () => {
     let assistantSoFar = '';
     const upsertAssistant = (chunk: string) => {
       assistantSoFar += chunk;
-      setMessages(prev => {
+      setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant') {
-          return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantSoFar } : m);
+          return prev.map((message, index) => index === prev.length - 1 ? { ...message, content: assistantSoFar } : message);
         }
         return [...prev, { role: 'assistant', content: assistantSoFar }];
       });
@@ -53,13 +52,13 @@ const AiChat = () => {
         messages: allMessages,
         onDelta: upsertAssistant,
         onDone: () => setIsLoading(false),
-        onError: (err) => {
-          toast.error(err);
+        onError: (error) => {
+          toast.info(error);
           setIsLoading(false);
         },
       });
     } catch {
-      toast.error('Failed to connect to AI agent');
+      toast.error('Failed to connect to the workspace copilot');
       setIsLoading(false);
     }
   };
@@ -67,7 +66,7 @@ const AiChat = () => {
   return (
     <AppLayout>
       <div className="flex flex-col h-screen">
-        <AppHeader title="AI Agent" subtitle="Autonomous project manager — acts on your behalf." />
+        <AppHeader title="AI Agent" subtitle="Workspace copilot for portfolio status, system-wide search, reports, documents, and planning." />
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
@@ -75,65 +74,54 @@ const AiChat = () => {
               <div className="h-16 w-16 rounded-2xl gradient-primary flex items-center justify-center mb-6 shadow-glow">
                 <Zap className="h-8 w-8 text-primary-foreground" />
               </div>
-              <h2 className="text-2xl font-bold mb-2">AI Project Manager</h2>
+              <h2 className="text-2xl font-bold mb-2">Synergi Project Copilot</h2>
               <p className="text-muted-foreground text-center max-w-md mb-8">
-                I analyze your projects, create tasks autonomously, predict risks, and make decisions on your behalf.
+                Ask for project status, delivery risks, system-wide search results, document lookups, workload insights, or a recommended execution plan based on the workspace data.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
-                {suggestions.map((s) => (
+                {suggestions.map((suggestion) => (
                   <button
-                    key={s.text}
-                    onClick={() => sendMessage(s.text)}
+                    key={suggestion.text}
+                    onClick={() => sendMessage(suggestion.text)}
                     className="p-4 rounded-xl border border-border bg-card hover:bg-muted/50 text-left text-sm transition-all hover:shadow-md hover:-translate-y-0.5 flex items-start gap-3 group"
                   >
-                    <span className="text-lg">{s.icon}</span>
-                    <span className="text-foreground/80 group-hover:text-foreground transition-colors">{s.text}</span>
+                    <span className="text-xs font-bold rounded-md bg-primary/10 text-primary px-2 py-1 min-w-8 text-center">
+                      {suggestion.icon}
+                    </span>
+                    <span className="text-foreground/80 group-hover:text-foreground transition-colors">{suggestion.text}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto p-6 space-y-6">
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`flex gap-3 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                  {msg.role === 'assistant' && (
+              {messages.map((message, index) => (
+                <div key={index} className={`flex gap-3 animate-fade-in ${message.role === 'user' ? 'justify-end' : ''}`}>
+                  {message.role === 'assistant' && (
                     <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0 mt-1">
                       <Bot className="h-4 w-4 text-primary-foreground" />
                     </div>
                   )}
-                  <div className={`max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3' : ''}`}>
-                    {msg.role === 'assistant' ? (
+                  <div className={`max-w-[85%] ${message.role === 'user' ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3' : ''}`}>
+                    {message.role === 'assistant' ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="text-sm">{msg.content}</p>
+                      <p className="text-sm">{message.content}</p>
                     )}
                   </div>
-                  {msg.role === 'user' && (
+                  {message.role === 'user' && (
                     <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-1">
                       <User className="h-4 w-4 text-muted-foreground" />
                     </div>
                   )}
                 </div>
               ))}
-              {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
-                <div className="flex gap-3 animate-fade-in">
-                  <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shrink-0">
-                    <Bot className="h-4 w-4 text-primary-foreground" />
-                  </div>
-                  <div className="flex items-center gap-1 py-3">
-                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        {/* Input */}
         <div className="p-4 border-t border-border bg-background/80 backdrop-blur-xl">
           <form
             onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
@@ -147,7 +135,7 @@ const AiChat = () => {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask the AI agent to take action..."
+              placeholder="Search projects, tasks, tickets, documents, tags, or ask for portfolio guidance..."
               className="flex-1"
               disabled={isLoading}
             />
@@ -156,7 +144,7 @@ const AiChat = () => {
             </Button>
           </form>
           <p className="text-[11px] text-muted-foreground text-center mt-2">
-            AI Agent powered by Lovable AI • Responses may contain inaccuracies
+            AI responses may contain inaccuracies. Verify important delivery decisions before acting on them.
           </p>
         </div>
       </div>

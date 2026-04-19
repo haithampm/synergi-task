@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, Mail, Lock, User as UserIcon } from 'lucide-react';
+import { ArrowRight, Lock, Mail, User as UserIcon, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -12,7 +12,8 @@ const Auth = () => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const { signIn, signUp, signInWithGoogle } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +33,16 @@ const Auth = () => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      toast.error(err.message || 'Google authentication failed');
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 gradient-hero">
       <Card className="w-full max-w-md border-border/50 bg-card/95 backdrop-blur-xl">
@@ -47,6 +58,26 @@ const Auth = () => {
           </p>
         </CardHeader>
         <CardContent>
+          {!isSignUp && (
+            <div className="space-y-3 mb-5">
+              <Button type="button" variant="outline" className="w-full" disabled={googleLoading} onClick={handleGoogleSignIn}>
+                <span className="mr-2 flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold">G</span>
+                {googleLoading ? 'Redirecting to Google...' : 'Continue with Google'}
+                {!googleLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                Use your Google account for profile access, or sign in with email and password below.
+              </p>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-[11px] uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Or continue with email</span>
+                </div>
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             {isSignUp && (
               <div className="relative">

@@ -7,39 +7,13 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `You are an autonomous AI Project Manager Agent. You are NOT a chatbot — you are a decision-making agent that acts on behalf of the user.
+const SYSTEM_PROMPT = `You are an autonomous AI project manager. Be direct, actionable, and data-driven.
 
-## Your Core Behaviors:
-1. **Act, don't just suggest.** When you identify a problem, take action (create tasks, flag risks, adjust priorities).
-2. **Monitor proactively.** Check for overdue tasks, deadline risks, and workload imbalances.
-3. **Communicate like a PM.** Be direct, data-driven, and actionable. Use project management terminology.
-4. **Remember context.** Reference past decisions and project history.
-5. **Predict and prevent.** Identify potential delays before they happen.
-
-## Your Capabilities:
-- Create and assign tasks automatically
-- Generate project plans and charters
-- Flag risks and suggest mitigation strategies
-- Analyze team workload and suggest rebalancing
-- Summarize project status with data-driven insights
-- Generate meeting agendas and action items
-- Predict timeline delays based on velocity data
-
-## Response Format:
-- Use markdown for structure
-- Include specific data points and metrics
-- End with clear action items or decisions made
-- Flag urgency levels: 🔴 Critical, 🟡 Warning, 🟢 On Track
-- When you take autonomous actions, clearly state what you did and why
-
-## Available Tools (use when appropriate):
-You can call these tools to take action:
-- create_task: Create a new task in the system
-- update_task: Update task status, priority, or assignee
-- flag_risk: Flag a project risk with severity and mitigation plan
-- generate_plan: Generate a project plan with phases and milestones
-
-Always be proactive, not reactive. If you see a problem, fix it.`;
+Core behaviors:
+1. Act, do not just suggest.
+2. Monitor overdue work, risks, and workload imbalance.
+3. Use project management terminology and specific data.
+4. End with practical next steps when useful.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -47,15 +21,14 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, action } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const { messages } = await req.json();
+    const apiKey = Deno.env.get("AI_GATEWAY_API_KEY");
+    if (!apiKey) throw new Error("AI_GATEWAY_API_KEY is not configured");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get auth user from request
     const authHeader = req.headers.get("Authorization");
     let userId: string | null = null;
     if (authHeader) {
@@ -64,48 +37,31 @@ serve(async (req) => {
       userId = user?.id || null;
     }
 
-    // Fetch context data for the agent
     let contextData = "";
     if (userId) {
-      const [projectsRes, tasksRes, memoriesRes] = await Promise.all([
+      const [projectsRes, tasksRes] = await Promise.all([
         supabase.from("projects").select("*").limit(20),
         supabase.from("tasks").select("*").limit(50),
-        supabase.from("agent_memory").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
       ]);
 
       const projects = projectsRes.data || [];
       const tasks = tasksRes.data || [];
-      const memories = memoriesRes.data || [];
+      const overdueTasks = tasks.filter((task: any) => task.due_date && new Date(task.due_date) < new Date() && task.status !== "done");
+      const atRiskProjects = projects.filter((project: any) => project.status === "at-risk");
 
-      const overdueTasks = tasks.filter((t: any) => t.due_date && new Date(t.due_date) < new Date() && t.status !== "done");
-      const atRiskProjects = projects.filter((p: any) => p.status === "at-risk");
-
-      contextData = `
-## Current Project Data:
-- ${projects.length} total projects (${projects.filter((p: any) => p.status === "active").length} active, ${atRiskProjects.length} at-risk)
-- ${tasks.length} total tasks (${overdueTasks.length} overdue)
-- ${tasks.filter((t: any) => t.status === "in-progress").length} tasks in progress
-
-### Projects:
-${projects.map((p: any) => `- ${p.name}: ${p.status}, ${p.progress}% complete, priority: ${p.priority}`).join("\n")}
-
-### Overdue Tasks:
-${overdueTasks.map((t: any) => `- 🔴 "${t.title}" due ${t.due_date}, status: ${t.status}`).join("\n") || "None"}
-
-### Recent Agent Memory:
-${memories.map((m: any) => `- [${m.memory_type}] ${JSON.stringify(m.content)}`).join("\n") || "No prior context"}
-`;
+      contextData = `Projects: ${projects.length}, active: ${projects.filter((project: any) => project.status === "active").length}, at-risk: ${atRiskProjects.length}
+Tasks: ${tasks.length}, in progress: ${tasks.filter((task: any) => task.status === "in-progress").length}, overdue: ${overdueTasks.length}`;
     }
 
     const enrichedMessages = [
-      { role: "system", content: SYSTEM_PROMPT + "\n\n" + contextData },
+      { role: "system", content: `${SYSTEM_PROMPT}\n\n${contextData}` },
       ...(messages || []),
     ];
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://ai.gateway.example.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -116,42 +72,22 @@ ${memories.map((m: any) => `- [${m.memory_type}] ${JSON.stringify(m.content)}`).
     });
 
     if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add funds in Settings → Workspace → Usage." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      const text = await response.text();
+      console.error("AI gateway error:", response.status, text);
       return new Response(JSON.stringify({ error: "AI service unavailable" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-    }
-
-    // Store this interaction in agent memory
-    if (userId && messages?.length > 0) {
-      const lastUserMsg = messages.filter((m: any) => m.role === "user").pop();
-      if (lastUserMsg) {
-        await supabase.from("agent_memory").insert({
-          user_id: userId,
-          memory_type: "context",
-          content: { query: lastUserMsg.content, timestamp: new Date().toISOString() },
-        }).catch(() => {});
-      }
     }
 
     return new Response(response.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
-  } catch (e) {
-    console.error("AI agent error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+  } catch (error) {
+    console.error("AI agent error:", error);
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

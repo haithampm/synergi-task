@@ -1,304 +1,845 @@
-import React, { useState, useMemo, Fragment } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { 
-  ChevronRight, ChevronDown, Plus, ZoomIn, ZoomOut, Calendar, 
-  Milestone, Users, MessageSquare, Filter, Share2, Eye, 
-  LayoutDashboard, Clock, CheckCircle2, Edit3, Trash2, 
-  Maximize2, Minimize2, Network, Table as TableIcon, List,
-  GripVertical, Settings, Save, X
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent } from '@/components/ui/card';
+import { addDays, differenceInCalendarDays, eachWeekOfInterval, format, isValid, parseISO, startOfWeek } from 'date-fns';
+import { Bot, Calendar as CalendarIcon, ChevronDown, ChevronRight, Link2, Milestone, Plus, Save, Users, Workflow } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
-import { useProjects, useTasks } from '@/hooks/useProjects';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Slider } from '@/components/ui/slider';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { exportToMsProjectXml } from '@/lib/ms-project';
+import { generateScheduleFromProjectNature } from '@/lib/project-schedule';
+import { useCreateTask, useProjects, useTasks, useTeamMembers, useUpdateProject, useUpdateTask, useWorkspaceSettings } from '@/hooks/useProjects';
 import { toast } from 'sonner';
 
-const Schedule = () => {
-  const [searchParams] = useSearchParams();
-  const projectId = searchParams.get('projectId');
-  const [zoom, setZoom] = useState(1);
-  const [activeTab, setActiveTab] = useState('table');
-  const [collapsedPhases, setCollapsedPhases] = useState<string[]>([]);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  
-  const { data: projects } = useProjects();
-  const { data: tasks } = useTasks();
-  
-  const currentProject = useMemo(() => 
-    projects?.find((p: any) => p.id === projectId) || projects?.[0], 
-    [projects, projectId]
-  );
-  
-  const projectTasks = useMemo(() => 
-    tasks?.filter((t: any) => t.project_id === currentProject?.id) || [], 
-    [tasks, currentProject]
-  );
+type ScheduleStatus = 'backlog' | 'todo' | 'in-progress' | 'review' | 'done';
+type Priority = 'low' | 'medium' | 'high' | 'urgent';
 
-  const togglePhase = (phase: string) => {
-    setCollapsedPhases(prev => 
-      prev.includes(phase) ? prev.filter(p => p !== phase) : [...prev, phase]
-    );
+type ScheduleTask = {
+  id: string;
+  persisted: boolean;
+  title: string;
+  description: string;
+  wbs: string;
+  parentTaskId?: string;
+  phase: string;
+  startDate: Date;
+  endDate: Date;
+  durationDays: number;
+  status: ScheduleStatus;
+  priority: Priority;
+  progress: number;
+  predecessors: string[];
+  assigneeIds: string[];
+  workloadHours: number;
+  isMilestone: boolean;
+};
+
+const phases = ['Discovery', 'Planning', 'Execution', 'Testing', 'Deployment'];
+
+const parseDate = (value?: string | null, fallback = new Date()) => {
+  if (!value) return fallback;
+  const parsed = parseISO(value);
+  return isValid(parsed) ? parsed : fallback;
+};
+
+const getDurationDays = (startDate: Date, endDate: Date) => Math.max(1, differenceInCalendarDays(endDate, startDate) + 1);
+const toDateInputValue = (value: Date) => format(value, 'yyyy-MM-dd');
+const parseDependencyInput = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, all) => all.indexOf(item) === index);
+
+const DatePickerField = ({ value, onChange }: { value?: Date; onChange: (date?: Date) => void }) => (
+  <Popover>
+    <PopoverTrigger asChild>
+      <Button variant="outline" className="h-8 w-full justify-between text-[11px] font-semibold">
+        {value ? format(value, 'dd/MM/yyyy') : 'Pick date'}
+        <CalendarIcon className="h-3.5 w-3.5" />
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-auto p-0" align="start">
+      <Calendar mode="single" selected={value} onSelect={onChange} initialFocus />
+    </PopoverContent>
+  </Popover>
+);
+
+const Schedule = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectId = searchParams.get('projectId');
+  const [activeTab, setActiveTab] = useState('summary');
+  const [collapsedPhases, setCollapsedPhases] = useState<string[]>([]);
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<string[]>([]);
+  const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [draftTask, setDraftTask] = useState<ScheduleTask | null>(null);
+  const [localTasks, setLocalTasks] = useState<ScheduleTask[]>([]);
+
+  const { data: projects = [] } = useProjects();
+  const { data: tasks = [] } = useTasks(projectId ?? undefined);
+  const { data: teamMembers = [] } = useTeamMembers();
+  const { data: settings } = useWorkspaceSettings();
+  const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+  const updateProject = useUpdateProject();
+
+  const currentProject = useMemo(() => projects.find((project) => project.id === projectId) ?? projects[0], [projectId, projects]);
+
+  useEffect(() => {
+    if (!currentProject && projects[0]) setSearchParams({ projectId: projects[0].id }, { replace: true });
+  }, [currentProject, projects, setSearchParams]);
+
+  useEffect(() => {
+    if (!currentProject) return;
+    const baseDate = parseDate(currentProject.start_date ?? currentProject.startDate, new Date());
+    const phaseCounter = new Map<string, number>();
+    const normalized = tasks.map((task, index) => {
+      const phase = task.phase ?? phases[index % phases.length];
+      const phaseIndex = phases.indexOf(phase) + 1;
+      const phasePosition = (phaseCounter.get(phase) ?? 0) + 1;
+      phaseCounter.set(phase, phasePosition);
+      const startDate = parseDate(task.start_date ?? task.due_date, addDays(baseDate, index * 3));
+      const durationDays = Number.parseInt(String(task.duration ?? '3d').replace('d', ''), 10) || 3;
+      const endDate = task.end_date ? parseDate(task.end_date, addDays(startDate, durationDays - 1)) : addDays(startDate, durationDays - 1);
+      return {
+        id: task.id,
+        persisted: true,
+        title: task.title,
+        description: task.description ?? '',
+        wbs: `${Math.max(1, phaseIndex)}.${phasePosition}`,
+        parentTaskId: task.parentTaskId,
+        phase,
+        startDate,
+        endDate,
+        durationDays: getDurationDays(startDate, endDate),
+        status: task.status,
+        priority: task.priority,
+        progress: task.progress ?? (task.status === 'done' ? 100 : task.status === 'in-progress' ? 50 : 0),
+        predecessors: task.predecessors ?? [],
+        assigneeIds: task.assignees ?? (task.assignee_id ? [task.assignee_id] : []),
+        workloadHours: task.workloadHours ?? durationDays * 8,
+        isMilestone: task.isMilestone ?? false,
+      } satisfies ScheduleTask;
+    });
+    setLocalTasks(normalized);
+  }, [currentProject, tasks]);
+
+  const dependencyAdjustedTasks = useMemo(() => {
+    const byWbs = new Map(localTasks.map((task) => [task.wbs, { ...task }]));
+    const visiting = new Set<string>();
+    const resolve = (wbs: string): ScheduleTask | undefined => {
+      const task = byWbs.get(wbs);
+      if (!task || visiting.has(wbs)) return task;
+      visiting.add(wbs);
+      const latestDependency = task.predecessors
+        .map((dependency) => resolve(dependency)?.endDate)
+        .filter((date): date is Date => Boolean(date))
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      if (latestDependency && latestDependency >= task.startDate) {
+        task.startDate = addDays(latestDependency, 1);
+        task.endDate = addDays(task.startDate, task.durationDays - 1);
+      }
+      visiting.delete(wbs);
+      byWbs.set(wbs, task);
+      return task;
+    };
+    [...byWbs.keys()].forEach(resolve);
+    return Array.from(byWbs.values());
+  }, [localTasks]);
+
+  const projectStart = dependencyAdjustedTasks.reduce<Date | null>((acc, task) => !acc || task.startDate < acc ? task.startDate : acc, null);
+  const projectEnd = dependencyAdjustedTasks.reduce<Date | null>((acc, task) => !acc || task.endDate > acc ? task.endDate : acc, null);
+  const totalDuration = projectStart && projectEnd ? getDurationDays(projectStart, projectEnd) : 0;
+  const totalDependencies = dependencyAdjustedTasks.reduce((sum, task) => sum + task.predecessors.length, 0);
+  const totalHours = dependencyAdjustedTasks.reduce((sum, task) => sum + task.workloadHours, 0);
+  const criticalPath = dependencyAdjustedTasks.filter((task) => task.predecessors.length > 0 || task.endDate.getTime() === projectEnd?.getTime()).map((task) => task.id);
+
+  const phaseTasks = phases.reduce<Record<string, ScheduleTask[]>>((acc, phase) => {
+    acc[phase] = dependencyAdjustedTasks.filter((task) => task.phase === phase);
+    return acc;
+  }, {});
+  const taskChildrenMap = useMemo(
+    () => dependencyAdjustedTasks.reduce<Record<string, ScheduleTask[]>>((acc, task) => {
+      if (!task.parentTaskId) return acc;
+      acc[task.parentTaskId] = acc[task.parentTaskId] ?? [];
+      acc[task.parentTaskId].push(task);
+      return acc;
+    }, {}),
+    [dependencyAdjustedTasks],
+  );
+  const phaseFlatTasks = useMemo(() => phases.reduce<Record<string, Array<{ task: ScheduleTask; level: number }>>>((acc, phase) => {
+    const phaseItems = phaseTasks[phase];
+    const appendTask = (task: ScheduleTask, level: number) => {
+      acc[phase].push({ task, level });
+      if (collapsedTaskIds.includes(task.id)) return;
+      (taskChildrenMap[task.id] ?? []).filter((child) => child.phase === phase).forEach((child) => appendTask(child, level + 1));
+    };
+    acc[phase] = [];
+    phaseItems
+      .filter((task) => !task.parentTaskId || !phaseItems.some((candidate) => candidate.id === task.parentTaskId))
+      .forEach((task) => appendTask(task, 0));
+    return acc;
+  }, {} as Record<string, Array<{ task: ScheduleTask; level: number }>>), [collapsedTaskIds, phaseTasks, taskChildrenMap]);
+
+  const phaseProgress = phases.reduce<Record<string, number>>((acc, phase) => {
+    const items = phaseTasks[phase];
+    acc[phase] = items.length ? Math.round(items.reduce((sum, task) => sum + task.progress, 0) / items.length) : 0;
+    return acc;
+  }, {});
+
+  const weekColumns = projectStart && projectEnd ? eachWeekOfInterval({ start: startOfWeek(projectStart), end: projectEnd }, { weekStartsOn: 1 }) : [];
+
+  const resourceRows = teamMembers.map((member) => {
+    const assignedTasks = dependencyAdjustedTasks.filter((task) => task.assigneeIds.includes(member.id));
+    const assignedHours = assignedTasks.reduce((sum, task) => sum + task.workloadHours, 0);
+    const capacity = member.capacityHours ?? 40;
+    return {
+      member,
+      assignedHours,
+      capacity,
+      utilizationPct: Math.round((assignedHours / Math.max(1, capacity)) * 100),
+      weeklyLoad: weekColumns.map((week) => ({
+        week,
+        hours: assignedTasks.filter((task) => task.startDate <= addDays(week, 6) && task.endDate >= week).reduce((sum, task) => sum + task.workloadHours, 0),
+      })),
+    };
+  });
+
+  const aiInsights = useMemo(() => {
+    const insights: string[] = [];
+    if (settings?.ai.scheduleAdvisor) {
+      if (totalDependencies > dependencyAdjustedTasks.length) insights.push('Dependency density is high. Validate predecessor logic before locking the baseline.');
+      const overloaded = resourceRows.find((row) => row.utilizationPct > (row.member.utilizationTarget ?? 85));
+      if (overloaded) insights.push(`${overloaded.member.name} is above target utilization. Rebalance or resequence tasks.`);
+      if (criticalPath.length > 0) insights.push(`${criticalPath.length} critical-path activities are still influencing the project finish date.`);
+    }
+    if (insights.length === 0) insights.push('Schedule health looks balanced. Keep progress and dependency links updated for reliable forecasts.');
+    return insights;
+  }, [criticalPath.length, dependencyAdjustedTasks.length, resourceRows, settings, totalDependencies]);
+
+  const selectedProjectProgress = dependencyAdjustedTasks.length
+    ? Math.round(dependencyAdjustedTasks.reduce((sum, task) => sum + task.progress, 0) / dependencyAdjustedTasks.length)
+    : currentProject?.progress ?? 0;
+  const overdueTasks = dependencyAdjustedTasks.filter((task) => task.endDate < new Date() && task.progress < 100).length;
+  const upcomingMilestones = dependencyAdjustedTasks.filter((task) => task.isMilestone && differenceInCalendarDays(task.startDate, new Date()) >= 0 && differenceInCalendarDays(task.startDate, new Date()) <= 21);
+  const phaseTimeline = phases
+    .map((phase) => {
+      const items = phaseTasks[phase];
+      if (!items.length || !projectStart || !projectEnd) return null;
+      const phaseStart = items.reduce<Date>((acc, task) => (task.startDate < acc ? task.startDate : acc), items[0].startDate);
+      const phaseEnd = items.reduce<Date>((acc, task) => (task.endDate > acc ? task.endDate : acc), items[0].endDate);
+      const left = totalDuration > 0 ? (differenceInCalendarDays(phaseStart, projectStart) / totalDuration) * 100 : 0;
+      const width = totalDuration > 0 ? (getDurationDays(phaseStart, phaseEnd) / totalDuration) * 100 : 0;
+      return { phase, left, width, phaseStart, phaseEnd, tasks: items.length };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  const updateLocalTask = (taskId: string, updates: Partial<ScheduleTask>) => {
+    setLocalTasks((prev) => prev.map((task) => task.id === taskId ? { ...task, ...updates } : task));
   };
 
-  const phases = ['Discovery', 'Planning', 'Execution', 'Testing', 'Deployment'];
+  const getNextPhaseWbs = (phase: string) => {
+    const phaseIndex = Math.max(1, phases.indexOf(phase) + 1);
+    const topLevelCount = localTasks.filter((task) => task.phase === phase && !task.parentTaskId).length;
+    return `${phaseIndex}.${topLevelCount + 1}`;
+  };
 
-  const TableView = () => (
-    <Card className="rounded-3xl border shadow-xl overflow-hidden bg-background">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead className="bg-muted/30 border-b">
-            <tr>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-12">WBS</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Task Name</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-24">Duration</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-32">Start</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-32">Finish</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-32">Status</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-40">Progress</th>
-              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground w-24">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-muted/10">
-            {phases.map((phase, pIdx) => (
-              <Fragment key={phase}>
-                <tr className="bg-muted/5 group cursor-pointer hover:bg-muted/10 transition-colors" onClick={() => togglePhase(phase)}>
-                  <td className="p-4 font-bold text-xs">{pIdx + 1}</td>
-                  <td className="p-4">
-                    <div className="flex items-center gap-2">
-                      {collapsedPhases.includes(phase) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      <span className="font-black text-sm">{phase} Phase</span>
-                    </div>
-                  </td>
-                  <td className="p-4"></td>
-                  <td className="p-4"></td>
-                  <td className="p-4"></td>
-                  <td className="p-4"></td>
-                  <td className="p-4">
-                    <div className="flex items-center gap-2">
-                      <Progress value={75} className="h-1.5 flex-1" />
-                      <span className="text-[10px] font-black">75%</span>
-                    </div>
-                  </td>
-                  <td className="p-4"></td>
-                </tr>
-                {!collapsedPhases.includes(phase) && projectTasks.filter(t => t.phase === phase || (!t.phase && phase === 'Execution')).map((task, tIdx) => (
-                  <tr key={task.id} className="group hover:bg-primary/5 transition-colors">
-                    <td className="p-4 text-[10px] font-bold text-muted-foreground pl-8">{pIdx + 1}.{tIdx + 1}</td>
-                    <td className="p-4">
-                      {editingTaskId === task.id ? (
-                        <Input defaultValue={task.title} className="h-8 text-xs font-bold" autoFocus onBlur={() => setEditingTaskId(null)} />
-                      ) : (
-                        <div className="flex items-center gap-2 group/title">
-                          <span className="text-sm font-bold">{task.title}</span>
-                          <Button variant="ghost" size="icon" className="h-4 w-4 opacity-0 group-hover/title:opacity-100" onClick={() => setEditingTaskId(task.id)}>
-                            <Edit3 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-4"><Input defaultValue={task.duration || '2d'} className="h-8 text-[11px] font-bold bg-transparent border-none focus:bg-background" /></td>
-                    <td className="p-4"><Input type="date" className="h-8 text-[11px] font-bold bg-transparent border-none" /></td>
-                    <td className="p-4"><Input type="date" className="h-8 text-[11px] font-bold bg-transparent border-none" /></td>
-                    <td className="p-4">
-                      <Badge variant="outline" className="text-[9px] font-black uppercase px-2 py-0.5">{task.status}</Badge>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Progress value={task.progress || 0} className="h-1.5 flex-1" />
-                        <span className="text-[10px] font-black">{task.progress || 0}%</span>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><Settings className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
+  const generateNatureSchedule = () => {
+    if (!currentProject) return;
+    const generatedTasks = generateScheduleFromProjectNature({
+      startDate: currentProject.start_date ?? currentProject.startDate ?? new Date().toISOString().slice(0, 10),
+      projectName: currentProject.name,
+      projectNature: currentProject.projectNature,
+    });
+    const phaseCounter = new Map<string, number>();
+    const mappedTasks: ScheduleTask[] = generatedTasks.map((task, index) => {
+      const phasePosition = (phaseCounter.get(task.phase) ?? 0) + 1;
+      phaseCounter.set(task.phase, phasePosition);
+      const startDate = parseDate(task.start_date);
+      const endDate = parseDate(task.end_date);
+      return {
+        id: `draft-generated-${Date.now()}-${index}`,
+        persisted: false,
+        title: task.title,
+        description: task.description,
+        wbs: `${Math.max(1, phases.indexOf(task.phase) + 1)}.${phasePosition}`,
+        parentTaskId: undefined,
+        phase: task.phase,
+        startDate,
+        endDate,
+        durationDays: getDurationDays(startDate, endDate),
+        status: task.status,
+        priority: task.priority,
+        progress: task.progress,
+        predecessors: task.predecessors,
+        assigneeIds: [],
+        workloadHours: task.workloadHours,
+        isMilestone: task.isMilestone,
+      };
+    });
+    setLocalTasks(mappedTasks);
+    setActiveTab('table');
+    toast.success('Starter schedule generated from the project nature. Review and sync when ready.');
+  };
 
-  const CADView = () => (
-    <div className="w-full h-[600px] bg-muted/5 rounded-3xl border border-dashed border-muted-foreground/20 relative flex items-center justify-center overflow-hidden p-8">
-      <div className="absolute inset-0 grid grid-cols-[repeat(40,1fr)] grid-rows-[repeat(40,1fr)] opacity-5 pointer-events-none">
-        {Array.from({ length: 1600 }).map((_, i) => <div key={i} className="border-[0.5px] border-foreground" />)}
-      </div>
-      <div className="flex gap-20 relative scale-[0.8] origin-center" style={{ transform: `scale(${zoom})` }}>
-        {phases.map((phase, idx) => (
-          <div key={phase} className="relative">
-            <Card className="w-64 rounded-2xl border-2 border-primary/20 shadow-xl overflow-hidden bg-background relative z-10">
-              <div className="p-4 bg-primary/5 border-b flex items-center justify-between">
-                <Badge className="font-black">PHASE {idx + 1}</Badge>
-                <Network className="h-4 w-4 text-primary" />
-              </div>
-              <div className="p-4 space-y-3">
-                <h3 className="font-black text-sm uppercase tracking-tight">{phase} Phase</h3>
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-black uppercase text-muted-foreground">
-                    <span>Progress</span>
-                    <span>100%</span>
-                  </div>
-                  <Progress value={100} className="h-2" />
-                </div>
-              </div>
-            </Card>
-            {idx < phases.length - 1 && (
-              <div className="absolute top-1/2 left-full w-20 h-[2px] bg-primary/20 -translate-y-1/2">
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary" />
-              </div>
-            )}
-            <div className="mt-8 space-y-4">
-               {projectTasks.slice(0, 2).map(task => (
-                 <Card key={task.id} className="w-64 rounded-xl border border-muted/50 p-3 hover:border-primary/50 transition-colors cursor-pointer">
-                   <p className="text-xs font-bold truncate">{task.title}</p>
-                   <div className="flex items-center gap-2 mt-2">
-                     <Badge variant="secondary" className="text-[8px] font-black">{task.status}</Badge>
-                     <span className="text-[9px] font-bold text-muted-foreground">{task.duration || '2d'}</span>
-                   </div>
-                 </Card>
-               ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="absolute bottom-6 right-6 flex items-center gap-2 bg-background/80 backdrop-blur-md p-2 rounded-2xl border shadow-lg">
-        <Button variant="ghost" size="icon" className="h-8 w-8"><Maximize2 className="h-4 w-4" /></Button>
-        <div className="w-[1px] h-4 bg-muted mx-1" />
-        <Button variant="ghost" size="icon" onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}><ZoomOut className="h-4 w-4" /></Button>
-        <span className="text-[10px] font-black min-w-[30px] text-center">{Math.round(zoom * 100)}%</span>
-        <Button variant="ghost" size="icon" onClick={() => setZoom(Math.min(2, zoom + 0.1))}><ZoomIn className="h-4 w-4" /></Button>
-      </div>
-    </div>
-  );
+  const addInlineTask = (phase = 'Execution') => {
+    const startDate = projectEnd ? addDays(projectEnd, 1) : new Date();
+    const newTask: ScheduleTask = {
+      id: `draft-${Date.now()}`,
+      persisted: false,
+      title: 'New schedule activity',
+      description: '',
+      wbs: getNextPhaseWbs(phase),
+      parentTaskId: undefined,
+      phase,
+      startDate,
+      endDate: addDays(startDate, 2),
+      durationDays: 3,
+      status: 'todo',
+      priority: 'medium',
+      progress: 0,
+      predecessors: [],
+      assigneeIds: [],
+      workloadHours: 24,
+      isMilestone: false,
+    };
+    setLocalTasks((prev) => [...prev, newTask]);
+    setActiveTab('table');
+  };
+
+  const addInlineSubtask = (parentTask: ScheduleTask) => {
+    const newTask: ScheduleTask = {
+      id: `draft-${Date.now()}`,
+      persisted: false,
+      title: `${parentTask.title} - subtask`,
+      description: '',
+      wbs: parentTask.wbs,
+      parentTaskId: parentTask.id,
+      phase: parentTask.phase,
+      startDate: parentTask.startDate,
+      endDate: parentTask.endDate,
+      durationDays: parentTask.durationDays,
+      status: 'todo',
+      priority: parentTask.priority,
+      progress: 0,
+      predecessors: [],
+      assigneeIds: [],
+      workloadHours: Math.max(8, Math.round(parentTask.workloadHours / 2)),
+      isMilestone: false,
+    };
+    setLocalTasks((prev) => [...prev, newTask]);
+  };
+
+  const openTaskDrawer = (task: ScheduleTask) => {
+    setDrawerTaskId(task.id);
+    setDraftTask({ ...task });
+  };
+
+  const saveDrawerTask = () => {
+    if (!draftTask) return;
+    updateLocalTask(draftTask.id, { ...draftTask, durationDays: getDurationDays(draftTask.startDate, draftTask.endDate) });
+    setDrawerTaskId(null);
+    setDraftTask(null);
+  };
+
+  const syncSchedule = async () => {
+    if (!currentProject) return;
+    for (const task of dependencyAdjustedTasks) {
+      const payload = {
+        title: task.title,
+        description: task.description,
+        phase: task.phase,
+        start_date: task.startDate.toISOString().slice(0, 10),
+        end_date: task.endDate.toISOString().slice(0, 10),
+        due_date: task.endDate.toISOString().slice(0, 10),
+        duration: `${task.durationDays}d`,
+        status: task.status,
+        priority: task.priority,
+        progress: task.progress,
+        predecessors: task.predecessors,
+        parentTaskId: task.parentTaskId,
+        assignees: task.assigneeIds,
+        workloadHours: task.workloadHours,
+        isMilestone: task.isMilestone,
+        project_id: currentProject.id,
+      };
+      if (task.persisted) await updateTask.mutateAsync({ id: task.id, ...payload });
+      else await createTask.mutateAsync(payload);
+    }
+    if (settings?.msProject.autoSyncProjectDates && projectStart && projectEnd) {
+      await updateProject.mutateAsync({
+        id: currentProject.id,
+        start_date: projectStart.toISOString().slice(0, 10),
+        end_date: projectEnd.toISOString().slice(0, 10),
+        startDate: projectStart.toISOString().slice(0, 10),
+        endDate: projectEnd.toISOString().slice(0, 10),
+      });
+    }
+    toast.success('Schedule synced to workspace');
+  };
+
+  const exportMsProject = () => {
+    if (!currentProject) return;
+    const xml = exportToMsProjectXml({
+      name: currentProject.name,
+      tasks: dependencyAdjustedTasks.map((task) => ({
+        title: `${task.wbs} ${task.title}`,
+        status: task.status,
+        priority: task.priority,
+        due_date: task.endDate.toISOString().slice(0, 10),
+        description: `${task.description}\nPhase: ${task.phase}\nDependencies: ${task.predecessors.join(', ') || 'None'}`,
+        progress: task.progress,
+      })),
+    });
+    const blob = new Blob([xml], { type: 'application/xml' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${currentProject.name.replace(/\s+/g, '_')}_schedule.xml`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success('MS Project XML exported');
+  };
+
+  const ganttOrigin = projectStart ?? new Date();
 
   return (
     <AppLayout>
-      <AppHeader 
-        title={currentProject?.name || "Master Schedule"} 
-        subtitle="Enterprise Project Governance • Smart WBS Management" 
-      />
-      
+      <AppHeader title={currentProject?.name ?? 'Master Schedule'} subtitle="Advanced schedule control with dependencies, resource loading, AI guidance, and MS Project export." />
       <div className="p-6 space-y-6 animate-fade-in">
         <div className="flex items-center justify-between gap-4 flex-wrap bg-card p-4 rounded-2xl border shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="bg-primary/10 p-2.5 rounded-xl">
-              <Calendar className="h-6 w-6 text-primary" />
-            </div>
+          <div className="flex items-center gap-4 flex-wrap">
+            <Select value={currentProject?.id} onValueChange={(value) => setSearchParams({ projectId: value }, { replace: true })}>
+              <SelectTrigger className="w-64"><SelectValue placeholder="Select project" /></SelectTrigger>
+              <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
+            </Select>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Active Workspace</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Project Window</p>
               <h2 className="text-xl font-black tracking-tight">{currentProject?.name}</h2>
+              <p className="text-[11px] text-muted-foreground font-semibold mt-1">Start: {projectStart ? format(projectStart, 'dd/MM/yyyy') : '--'} - End: {projectEnd ? format(projectEnd, 'dd/MM/yyyy') : '--'}</p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-xl border mr-2">
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => setZoom(Math.max(0.5, zoom - 0.2))}><ZoomOut className="h-4 w-4" /></Button>
-              <span className="text-[10px] font-black px-2">{Math.round(zoom * 100)}%</span>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => setZoom(Math.min(2, zoom + 0.2))}><ZoomIn className="h-4 w-4" /></Button>
-            </div>
-            <Button variant="outline" size="sm" className="h-10 rounded-xl font-bold border-muted/50"><Filter className="h-4 w-4 mr-2" /> Critical Path</Button>
-            <Button variant="outline" size="sm" className="h-10 rounded-xl font-bold border-muted/50"><Share2 className="h-4 w-4 mr-2" /> Export XML</Button>
-            <Button className="gradient-primary text-primary-foreground h-10 px-5 rounded-xl font-bold shadow-glow"><Plus className="h-4 w-4 mr-2" /> New Task</Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" onClick={generateNatureSchedule}>Generate Nature Plan</Button>
+            <Button variant="outline" onClick={exportMsProject}>Export MS Project XML</Button>
+            <Button variant="outline" onClick={addInlineTask}><Plus className="h-4 w-4 mr-2" /> New Activity</Button>
+            <Button className="gradient-primary text-primary-foreground" onClick={syncSchedule}><Save className="h-4 w-4 mr-2" /> Sync Schedule</Button>
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="flex items-center justify-between mb-6">
-            <TabsList className="bg-muted/20 p-1 rounded-2xl inline-flex border border-muted/30">
-              <TabsTrigger value="table" className="rounded-xl px-6 py-2.5 font-black text-xs uppercase tracking-widest data-[state=active]:shadow-glow flex items-center gap-2">
-                <TableIcon className="h-3.5 w-3.5" /> Table View
-              </TabsTrigger>
-              <TabsTrigger value="gantt" className="rounded-xl px-6 py-2.5 font-black text-xs uppercase tracking-widest data-[state=active]:shadow-glow flex items-center gap-2">
-                <LayoutDashboard className="h-3.5 w-3.5" /> Gantt Chart
-              </TabsTrigger>
-              <TabsTrigger value="cad" className="rounded-xl px-6 py-2.5 font-black text-xs uppercase tracking-widest data-[state=active]:shadow-glow flex items-center gap-2">
-                <Network className="h-3.5 w-3.5" /> CAD View
-              </TabsTrigger>
-              <TabsTrigger value="milestones" className="rounded-xl px-6 py-2.5 font-black text-xs uppercase tracking-widest data-[state=active]:shadow-glow flex items-center gap-2">
-                <Milestone className="h-3.5 w-3.5" /> Milestones
-              </TabsTrigger>
-            </TabsList>
-            
-            <div className="flex items-center gap-2">
-               <Button variant="ghost" size="sm" className="font-black text-[10px] uppercase tracking-tighter" onClick={() => setCollapsedPhases(phases)}>Collapse All</Button>
-               <Button variant="ghost" size="sm" className="font-black text-[10px] uppercase tracking-tighter" onClick={() => setCollapsedPhases([])}>Expand All</Button>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+          {[
+            { label: 'Total Duration', value: `${totalDuration}d`, detail: 'End-to-end baseline' },
+            { label: 'Total Hours', value: `${totalHours}h`, detail: 'Planned workload' },
+            { label: 'Dependencies', value: totalDependencies, detail: 'Linked activities' },
+            { label: 'Critical Path', value: criticalPath.length, detail: 'Tasks driving finish' },
+            { label: 'Milestones', value: dependencyAdjustedTasks.filter((task) => task.isMilestone).length, detail: 'Zero-duration controls' },
+          ].map((metric) => (
+            <Card key={metric.label} className="glass"><CardContent className="p-5"><p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.label}</p><p className="text-3xl font-bold mt-1">{metric.value}</p><p className="text-xs text-muted-foreground mt-1">{metric.detail}</p></CardContent></Card>
+          ))}
+        </div>
 
-          <TabsContent value="table" className="mt-0">
-            <TableView />
+        <Card className="glass">
+          <CardContent className="p-5 space-y-5">
+            <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Selected Project Timeline</p>
+                    <h3 className="text-xl font-bold mt-1">{currentProject?.name ?? 'Project timeline'}</h3>
+                  </div>
+                  <Badge variant="outline">{selectedProjectProgress}% progress</Badge>
+                </div>
+                <Progress value={selectedProjectProgress} className="h-2" />
+                <div className="relative h-20 rounded-2xl border bg-muted/10 overflow-hidden">
+                  {phaseTimeline.map((segment) => (
+                    <button
+                      key={segment.phase}
+                      type="button"
+                      className="absolute top-5 h-10 rounded-xl border bg-primary/15 px-3 text-left text-xs font-semibold text-primary"
+                      style={{ left: `${segment.left}%`, width: `${Math.max(segment.width, 8)}%` }}
+                      onClick={() => setCollapsedPhases((prev) => prev.filter((item) => item !== segment.phase))}
+                    >
+                      <span className="block truncate">{segment.phase}</span>
+                      <span className="block text-[10px] text-muted-foreground">{format(segment.phaseStart, 'dd MMM')} - {format(segment.phaseEnd, 'dd MMM')}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {phaseTimeline.map((segment) => (
+                    <Badge key={segment.phase} variant="secondary">{segment.phase}: {segment.tasks} tasks</Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div className="rounded-2xl border p-4 bg-card/40">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Overdue Tasks</p>
+                  <p className="mt-1 text-2xl font-bold">{overdueTasks}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Activities behind the current date.</p>
+                </div>
+                <div className="rounded-2xl border p-4 bg-card/40">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Upcoming Milestones</p>
+                  <p className="mt-1 text-2xl font-bold">{upcomingMilestones.length}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{upcomingMilestones[0] ? `${upcomingMilestones[0].title} on ${format(upcomingMilestones[0].startDate, 'dd MMM yyyy')}` : 'No milestone due in the next 21 days.'}</p>
+                </div>
+                <div className="rounded-2xl border p-4 bg-card/40">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Resource Footprint</p>
+                  <p className="mt-1 text-2xl font-bold">{resourceRows.filter((row) => row.assignedHours > 0).length}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Assigned team members contributing to this plan.</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <Card className="glass xl:col-span-2"><CardContent className="p-5 space-y-3"><div className="flex items-center gap-2"><Workflow className="h-4 w-4 text-primary" /><p className="font-medium">Schedule AI Advisor</p></div>{aiInsights.map((insight) => <div key={insight} className="rounded-xl border p-3 bg-card/40 flex items-start gap-3"><Bot className="h-4 w-4 text-primary mt-0.5" /><p className="text-sm">{insight}</p></div>)}</CardContent></Card>
+          <Card className="glass"><CardContent className="p-5 space-y-3"><div className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" /><p className="font-medium">Resource Signal</p></div>{resourceRows.slice(0, 4).map((row) => <div key={row.member.id} className="rounded-xl border p-3 bg-card/40"><div className="flex items-center justify-between"><p className="text-sm font-medium">{row.member.name}</p><Badge variant={row.utilizationPct > (row.member.utilizationTarget ?? 85) ? 'destructive' : 'outline'} className="text-[10px]">{row.utilizationPct}%</Badge></div><div className="flex items-center justify-between text-xs text-muted-foreground mt-2"><span>{row.assignedHours}h assigned</span><span>{row.capacity}h capacity</span></div><Progress value={row.utilizationPct} className="h-1.5 mt-2" /></div>)}</CardContent></Card>
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="bg-muted/20 p-1 rounded-2xl inline-flex border border-muted/30">
+            <TabsTrigger value="summary">Summary</TabsTrigger>
+            <TabsTrigger value="table">Table</TabsTrigger>
+            <TabsTrigger value="gantt">Gantt</TabsTrigger>
+            <TabsTrigger value="resources">Resources</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="summary" className="mt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="glass">
+                <CardContent className="p-5 space-y-4">
+                  <p className="text-sm font-semibold">Phase Performance</p>
+                  {phases.map((phase) => (
+                    <div key={phase} className="rounded-xl border p-3 bg-card/40">
+                      <div className="flex items-center justify-between text-sm">
+                        <span>{phase}</span>
+                        <span>{phaseTasks[phase].length} tasks</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <Progress value={phaseProgress[phase]} className="h-2 flex-1" />
+                        <span className="text-xs text-muted-foreground">{phaseProgress[phase]}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card className="glass">
+                <CardContent className="p-5 space-y-4">
+                  <p className="text-sm font-semibold">Milestones & Dependencies</p>
+                  {dependencyAdjustedTasks.slice(0, 6).map((task) => (
+                    <div key={task.id} className="rounded-xl border p-3 bg-card/40">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{task.wbs} {task.title}</p>
+                          <p className="text-xs text-muted-foreground">{task.phase} - {format(task.startDate, 'dd MMM')} to {format(task.endDate, 'dd MMM')}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {task.isMilestone && <Milestone className="h-4 w-4 text-primary" />}
+                          {task.predecessors.length > 0 && <Link2 className="h-4 w-4 text-muted-foreground" />}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
-          <TabsContent value="gantt" className="mt-0 space-y-6">
-            <Card className="rounded-3xl border shadow-2xl overflow-hidden bg-background">
-              <div className="flex h-[600px]">
-                <div className="w-[350px] border-r border-muted/20 flex flex-col">
-                  <div className="p-4 bg-muted/10 border-b font-black text-[10px] uppercase tracking-widest">Task Structure</div>
-                  <div className="flex-1 overflow-y-auto divide-y divide-muted/10">
-                    {phases.map(phase => (
-                      <div key={phase} className="p-4 flex items-center gap-3 hover:bg-muted/5 cursor-pointer" onClick={() => togglePhase(phase)}>
-                        {collapsedPhases.includes(phase) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        <span className="text-sm font-black">{phase} Phase</span>
-                      </div>
+          <TabsContent value="table" className="mt-6">
+            <Card className="glass overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/20 border-b">
+                    <tr>
+                      <th className="p-3 text-xs font-black uppercase">WBS</th>
+                      <th className="p-3 text-xs font-black uppercase">Task</th>
+                      <th className="p-3 text-xs font-black uppercase">Start</th>
+                      <th className="p-3 text-xs font-black uppercase">Finish</th>
+                      <th className="p-3 text-xs font-black uppercase">Duration</th>
+                      <th className="p-3 text-xs font-black uppercase">Dependencies</th>
+                      <th className="p-3 text-xs font-black uppercase">Progress</th>
+                      <th className="p-3 text-xs font-black uppercase text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {phases.map((phase, index) => (
+                      <Fragment key={phase}>
+                        <tr className="bg-muted/5 cursor-pointer" onClick={() => setCollapsedPhases((prev) => prev.includes(phase) ? prev.filter((item) => item !== phase) : [...prev, phase])}>
+                          <td className="p-3 font-bold">{index + 1}</td>
+                          <td className="p-3 font-bold flex items-center gap-2">{collapsedPhases.includes(phase) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}{phase}</td>
+                          <td className="p-3" colSpan={5}><div className="flex items-center gap-3"><Progress value={phaseProgress[phase]} className="h-1.5 w-48" /><span className="text-xs text-muted-foreground">{phaseProgress[phase]}%</span></div></td>
+                          <td className="p-3 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                addInlineTask(phase);
+                              }}
+                            >
+                              <Plus className="mr-2 h-4 w-4" />Add Task
+                            </Button>
+                          </td>
+                        </tr>
+                        {!collapsedPhases.includes(phase) && phaseFlatTasks[phase].map(({ task, level }) => (
+                          <tr key={task.id} className={cn('border-b align-top', criticalPath.includes(task.id) && 'bg-amber-50')}>
+                            <td className="p-3 text-xs">{task.wbs}</td>
+                            <td className="p-3 min-w-[240px]">
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2" style={{ paddingLeft: `${level * 18}px` }}>
+                                  {(taskChildrenMap[task.id] ?? []).filter((child) => child.phase === phase).length ? (
+                                    <button type="button" onClick={() => setCollapsedTaskIds((prev) => prev.includes(task.id) ? prev.filter((item) => item !== task.id) : [...prev, task.id])}>
+                                      {collapsedTaskIds.includes(task.id) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                    </button>
+                                  ) : <span className="w-4" />}
+                                  <Input
+                                    value={task.title}
+                                    onChange={(event) => updateLocalTask(task.id, { title: event.target.value })}
+                                    className="h-8 text-xs font-medium"
+                                  />
+                                </div>
+                                <Badge variant="outline" className="w-fit">{task.phase}</Badge>
+                                {task.parentTaskId ? <Badge variant="secondary" className="w-fit">Subtask</Badge> : null}
+                              </div>
+                            </td>
+                            <td className="p-3 min-w-[135px]">
+                              <Input
+                                type="date"
+                                value={toDateInputValue(task.startDate)}
+                                className="h-8 text-xs"
+                                onChange={(event) => {
+                                  const nextStart = parseDate(event.target.value, task.startDate);
+                                  updateLocalTask(task.id, {
+                                    startDate: nextStart,
+                                    endDate: addDays(nextStart, task.durationDays - 1),
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td className="p-3 min-w-[135px]">
+                              <Input
+                                type="date"
+                                value={toDateInputValue(task.endDate)}
+                                className="h-8 text-xs"
+                                onChange={(event) => {
+                                  const nextEnd = parseDate(event.target.value, task.endDate);
+                                  updateLocalTask(task.id, {
+                                    endDate: nextEnd,
+                                    durationDays: getDurationDays(task.startDate, nextEnd),
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td className="p-3 min-w-[170px]">
+                              <div className="grid grid-cols-2 gap-2">
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={task.durationDays}
+                                  className="h-8 text-xs"
+                                  onChange={(event) => {
+                                    const nextDuration = Math.max(1, Number(event.target.value) || 1);
+                                    updateLocalTask(task.id, {
+                                      durationDays: nextDuration,
+                                      endDate: addDays(task.startDate, nextDuration - 1),
+                                    });
+                                  }}
+                                />
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={task.workloadHours}
+                                  className="h-8 text-xs"
+                                  onChange={(event) => updateLocalTask(task.id, { workloadHours: Math.max(0, Number(event.target.value) || 0) })}
+                                />
+                              </div>
+                              <p className="mt-1 text-[10px] text-muted-foreground">days / hours</p>
+                            </td>
+                            <td className="p-3 min-w-[180px]">
+                              <Input
+                                value={task.predecessors.join(', ')}
+                                className="h-8 text-xs"
+                                placeholder="1.1, 2.3"
+                                onChange={(event) => updateLocalTask(task.id, { predecessors: parseDependencyInput(event.target.value) })}
+                              />
+                            </td>
+                            <td className="p-3 min-w-[160px]">
+                              <div className="space-y-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={task.progress}
+                                  className="h-8 text-xs"
+                                  onChange={(event) => updateLocalTask(task.id, { progress: Math.min(100, Math.max(0, Number(event.target.value) || 0)) })}
+                                />
+                                <Progress value={task.progress} className="h-1.5" />
+                              </div>
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => openTaskDrawer(task)}>Details</Button>
+                                <Button size="sm" variant="outline" onClick={() => addInlineSubtask(task)}>Subtask</Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
                     ))}
-                  </div>
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="gantt" className="mt-6">
+            <Card className="glass overflow-hidden">
+              <div className="flex">
+                <div className="w-[280px] border-r border-muted/20">
+                  {dependencyAdjustedTasks.map((task) => <div key={task.id} className="h-12 border-b px-4 flex items-center text-sm font-medium">{task.wbs} {task.title}</div>)}
                 </div>
-                <div className="flex-1 overflow-x-auto bg-muted/5 relative p-8">
-                  <div className="absolute top-0 left-0 right-0 h-10 border-b bg-muted/10 flex items-center">
-                     {['Oct 24', 'Oct 25', 'Oct 26', 'Oct 27', 'Oct 28', 'Oct 29'].map(d => (
-                       <div key={d} className="w-40 border-l px-4 text-[10px] font-black uppercase text-muted-foreground">{d}</div>
-                     ))}
-                  </div>
-                  <div className="mt-12 space-y-12">
-                    {phases.map((p, i) => (
-                      <div key={p} className="h-8 bg-primary/20 rounded-full border border-primary/30 relative" style={{ width: '400px', marginLeft: `${i * 60}px` }}>
-                        <div className="absolute inset-y-0 left-0 bg-primary/40 rounded-full" style={{ width: '70%' }} />
-                      </div>
-                    ))}
+                <div className="flex-1 overflow-x-auto bg-muted/5">
+                  <div className="min-w-[900px]">
+                    <div className="flex h-12 border-b bg-muted/10">{weekColumns.map((week) => <div key={week.toISOString()} className="w-40 border-l px-3 py-3 text-xs font-black uppercase text-muted-foreground">{format(week, 'dd MMM')}</div>)}</div>
+                    <div>{dependencyAdjustedTasks.map((task) => {
+                      const offset = differenceInCalendarDays(task.startDate, ganttOrigin) * 22;
+                      const width = Math.max(60, task.durationDays * 22);
+                      return <div key={task.id} className="h-12 border-b relative"><button className={cn('absolute top-2 h-8 rounded-full border px-3 text-xs font-medium text-left', criticalPath.includes(task.id) ? 'bg-amber-200 border-amber-300' : 'bg-primary/15 border-primary/30')} style={{ left: `${offset}px`, width: `${width}px` }} onClick={() => openTaskDrawer(task)}>{task.title}</button></div>;
+                    })}</div>
                   </div>
                 </div>
               </div>
             </Card>
           </TabsContent>
 
-          <TabsContent value="cad" className="mt-0">
-            <CADView />
-          </TabsContent>
-
-          <TabsContent value="milestones" className="mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {phases.map(p => (
-                <Card key={p} className="rounded-2xl shadow-sm border overflow-hidden">
-                  <div className="p-4 bg-muted/5 border-b flex items-center justify-between">
-                    <h4 className="text-xs font-black uppercase tracking-widest">{p} Milestones</h4>
-                    <Milestone className="h-4 w-4 text-primary" />
-                  </div>
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex items-center gap-3 p-3 bg-success/5 border border-success/20 rounded-xl">
-                      <CheckCircle2 className="h-4 w-4 text-success" />
-                      <div>
-                        <p className="text-xs font-bold uppercase">Gate Approved</p>
-                        <p className="text-[9px] text-muted-foreground font-black">COMPLETED • OCT 26</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+          <TabsContent value="resources" className="mt-6">
+            <Card className="glass overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/20 border-b">
+                    <tr>
+                      <th className="p-3 text-xs font-black uppercase">Team Member</th>
+                      <th className="p-3 text-xs font-black uppercase">Assigned</th>
+                      <th className="p-3 text-xs font-black uppercase">Capacity</th>
+                      <th className="p-3 text-xs font-black uppercase">Utilization</th>
+                      {weekColumns.map((week) => <th key={week.toISOString()} className="p-3 text-xs font-black uppercase whitespace-nowrap">{format(week, 'dd MMM')}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resourceRows.map((row) => (
+                      <tr key={row.member.id} className="border-b">
+                        <td className="p-3 text-sm font-medium">{row.member.name}</td>
+                        <td className="p-3 text-sm">{row.assignedHours}h</td>
+                        <td className="p-3 text-sm">{row.capacity}h</td>
+                        <td className="p-3 text-sm">{row.utilizationPct}%</td>
+                        {row.weeklyLoad.map((entry) => <td key={entry.week.toISOString()} className={cn('p-3 text-xs', entry.hours > row.capacity ? 'bg-red-100/70' : entry.hours > row.capacity * 0.8 ? 'bg-amber-100/70' : 'bg-emerald-100/50')}>{entry.hours}h</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </TabsContent>
         </Tabs>
+
+        <Sheet open={!!drawerTaskId} onOpenChange={(open) => { if (!open) { setDrawerTaskId(null); setDraftTask(null); } }}>
+          <SheetContent className="w-[520px] sm:max-w-[520px] overflow-y-auto">
+            <SheetHeader><SheetTitle>Schedule Activity</SheetTitle></SheetHeader>
+            {draftTask && (
+              <div className="mt-6 space-y-4">
+                <div><p className="text-xs font-bold mb-1">Task Name</p><Input value={draftTask.title} onChange={(e) => setDraftTask((prev) => prev ? { ...prev, title: e.target.value } : prev)} /></div>
+                <div><p className="text-xs font-bold mb-1">Description</p><Textarea value={draftTask.description} onChange={(e) => setDraftTask((prev) => prev ? { ...prev, description: e.target.value } : prev)} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><p className="text-xs font-bold mb-1">Start Date</p><DatePickerField value={draftTask.startDate} onChange={(date) => date && setDraftTask((prev) => prev ? { ...prev, startDate: date, endDate: addDays(date, prev.durationDays - 1) } : prev)} /></div>
+                  <div><p className="text-xs font-bold mb-1">End Date</p><DatePickerField value={draftTask.endDate} onChange={(date) => date && setDraftTask((prev) => prev ? { ...prev, endDate: date, durationDays: getDurationDays(prev.startDate, date) } : prev)} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><p className="text-xs font-bold mb-1">Duration (days)</p><Input type="number" value={draftTask.durationDays} onChange={(e) => setDraftTask((prev) => prev ? { ...prev, durationDays: Number(e.target.value) || 1, endDate: addDays(prev.startDate, (Number(e.target.value) || 1) - 1) } : prev)} /></div>
+                  <div><p className="text-xs font-bold mb-1">Workload Hours</p><Input type="number" value={draftTask.workloadHours} onChange={(e) => setDraftTask((prev) => prev ? { ...prev, workloadHours: Number(e.target.value) || 8 } : prev)} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs font-bold mb-1">Status</p>
+                    <Select value={draftTask.status} onValueChange={(value: ScheduleStatus) => setDraftTask((prev) => prev ? { ...prev, status: value } : prev)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="backlog">Backlog</SelectItem>
+                        <SelectItem value="todo">To Do</SelectItem>
+                        <SelectItem value="in-progress">In Progress</SelectItem>
+                        <SelectItem value="review">Review</SelectItem>
+                        <SelectItem value="done">Done</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold mb-1">Priority</p>
+                    <Select value={draftTask.priority} onValueChange={(value: Priority) => setDraftTask((prev) => prev ? { ...prev, priority: value } : prev)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div><p className="text-xs font-bold mb-1">Progress ({draftTask.progress}%)</p><Slider value={[draftTask.progress]} max={100} step={1} onValueChange={([value]) => setDraftTask((prev) => prev ? { ...prev, progress: value } : prev)} /></div>
+                <div>
+                  <p className="text-xs font-bold mb-2">Predecessors</p>
+                  <div className="flex flex-wrap gap-2">
+                    {dependencyAdjustedTasks.filter((task) => task.id !== draftTask.id).map((task) => {
+                      const checked = draftTask.predecessors.includes(task.wbs);
+                      return <Button key={task.id} type="button" size="sm" variant={checked ? 'default' : 'outline'} onClick={() => setDraftTask((prev) => prev ? { ...prev, predecessors: checked ? prev.predecessors.filter((item) => item !== task.wbs) : [...prev.predecessors, task.wbs] } : prev)}>{task.wbs}</Button>;
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-bold mb-2">Assigned Team Members</p>
+                  <div className="flex flex-wrap gap-2">
+                    {teamMembers.map((member) => {
+                      const checked = draftTask.assigneeIds.includes(member.id);
+                      return <Button key={member.id} type="button" size="sm" variant={checked ? 'default' : 'outline'} onClick={() => setDraftTask((prev) => prev ? { ...prev, assigneeIds: checked ? prev.assigneeIds.filter((item) => item !== member.id) : [...prev.assigneeIds, member.id] } : prev)}>{member.name}</Button>;
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-bold mb-1">Parent Task</p>
+                  <Select value={draftTask.parentTaskId || '__none__'} onValueChange={(value) => setDraftTask((prev) => prev ? { ...prev, parentTaskId: value === '__none__' ? undefined : value } : prev)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Main task</SelectItem>
+                      {dependencyAdjustedTasks.filter((task) => task.id !== draftTask.id && task.phase === draftTask.phase).map((task) => (
+                        <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border p-3">
+                  <span className="text-sm">Mark as milestone</span>
+                  <Button size="sm" variant={draftTask.isMilestone ? 'default' : 'outline'} onClick={() => setDraftTask((prev) => prev ? { ...prev, isMilestone: !prev.isMilestone, durationDays: prev.isMilestone ? prev.durationDays : 1, endDate: prev.isMilestone ? prev.endDate : prev.startDate } : prev)}>{draftTask.isMilestone ? 'Milestone' : 'Standard'}</Button>
+                </div>
+                <div className="pt-2 flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => { setDrawerTaskId(null); setDraftTask(null); }}>Cancel</Button>
+                  <Button onClick={saveDrawerTask}>Apply</Button>
+                </div>
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
       </div>
     </AppLayout>
   );

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Check, X, Calendar, User, Tag, Clock, MessageSquare, Paperclip, PlayCircle, MoreVertical, Milestone, FileText, ChevronRight, Share2 } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Plus, Pencil, Trash2, Check, X, Calendar, User, Tag, Clock, MessageSquare, Paperclip, PlayCircle, MoreVertical, Milestone, FileText, ChevronRight, Share2, GitBranch, LayoutGrid, Table as TableIcon, ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,10 +11,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
-import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useProjects } from '@/hooks/useProjects';
+import DynamicCustomFields from '@/components/forms/DynamicCustomFields';
+import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useProjects, useTeamMembers, useWorkspaceSettings } from '@/hooks/useProjects';
+import { getActiveCustomFields, normalizeCustomFieldValues } from '@/lib/custom-fields';
 import { tasks as mockTasks } from '@/lib/mock-data';
+import { getTaskLifecycleStage } from '@/lib/project-activities';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useSearchParams } from 'react-router-dom';
 
 const columns = [
   { id: 'backlog', label: 'Backlog', color: 'bg-slate-400' },
@@ -32,10 +36,14 @@ const priorityColor: Record<string, string> = {
 };
 
 const Tasks = () => {
+  const [viewMode, setViewMode] = useState<'board' | 'table' | 'tree'>('board');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [taskDetailOpen, setTaskDetailOpen] = useState(false);
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<string[]>([]);
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [newTimesheetEntry, setNewTimesheetEntry] = useState({ date: new Date().toISOString().slice(0, 10), member: '', hours: '8', activity: '', notes: '' });
   const [newTask, setNewTask] = useState({ 
     title: '', 
     description: '', 
@@ -44,19 +52,80 @@ const Tasks = () => {
     dueDate: '', 
     assignee: '', 
     project_id: '',
+    parentTaskId: '',
     phase: 'Execution',
-    isMilestone: false
+    isMilestone: false,
+    customFieldValues: {} as Record<string, string | number | boolean>,
   });
 
   const { data: dbTasks, isLoading } = useTasks();
   const { data: projects } = useProjects();
+  const { data: teamMembers = [] } = useTeamMembers();
+  const { data: settings } = useWorkspaceSettings();
+  const taskCustomFields = useMemo(() => getActiveCustomFields(settings, 'task'), [settings]);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTaskMutation = useDeleteTask();
+  const projectFilterId = searchParams.get('projectId') ?? '';
+  const stageFilter = searchParams.get('stage') ?? '';
+  const statusFilter = searchParams.get('status') ?? '';
+  const filteredProject = projects?.find((project: any) => project.id === projectFilterId);
 
   const allTasks = useMemo(() => {
     return dbTasks?.length ? dbTasks : mockTasks;
   }, [dbTasks]);
+
+  const visibleTasks = useMemo(
+    () =>
+      allTasks.filter((task: any) => {
+        const matchesProject = !projectFilterId || (task.project_id ?? task.projectId) === projectFilterId;
+        const matchesStage = !stageFilter || getTaskLifecycleStage(task) === stageFilter;
+        const matchesStatus = !statusFilter || task.status === statusFilter;
+        return matchesProject && matchesStage && matchesStatus;
+      }),
+    [allTasks, projectFilterId, stageFilter, statusFilter],
+  );
+  const parentTaskOptions = useMemo(
+    () => visibleTasks.filter((task: any) => !selectedTask || task.id !== selectedTask.id),
+    [selectedTask, visibleTasks],
+  );
+  const taskChildrenMap = useMemo(
+    () => visibleTasks.reduce<Record<string, any[]>>((acc, task: any) => {
+      if (!task.parentTaskId) return acc;
+      acc[task.parentTaskId] = acc[task.parentTaskId] ?? [];
+      acc[task.parentTaskId].push(task);
+      return acc;
+    }, {}),
+    [visibleTasks],
+  );
+  const rootTasks = useMemo(
+    () => visibleTasks.filter((task: any) => !task.parentTaskId || !visibleTasks.some((candidate: any) => candidate.id === task.parentTaskId)),
+    [visibleTasks],
+  );
+  const flattenedTasks = useMemo(() => {
+    const ordered: Array<{ task: any; level: number }> = [];
+    const appendTask = (task: any, level: number) => {
+      ordered.push({ task, level });
+      if (collapsedTaskIds.includes(task.id)) return;
+      (taskChildrenMap[task.id] ?? []).forEach((child) => appendTask(child, level + 1));
+    };
+    rootTasks.forEach((task) => appendTask(task, 0));
+    return ordered;
+  }, [collapsedTaskIds, rootTasks, taskChildrenMap]);
+
+  useEffect(() => {
+    if (searchParams.get('action') === 'create') {
+      setDialogOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    setNewTask((current) => ({
+      ...current,
+      customFieldValues: normalizeCustomFieldValues(taskCustomFields, current.customFieldValues),
+    }));
+  }, [taskCustomFields]);
 
   const handleCreate = async () => {
     if (!newTask.title.trim()) return;
@@ -64,7 +133,7 @@ const Tasks = () => {
       await createTask.mutateAsync(newTask);
       toast.success('Task created successfully');
       setDialogOpen(false);
-      setNewTask({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', assignee: '', project_id: '', phase: 'Execution', isMilestone: false });
+      setNewTask({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', assignee: '', project_id: '', parentTaskId: '', phase: 'Execution', isMilestone: false, customFieldValues: normalizeCustomFieldValues(taskCustomFields, {}) });
     } catch { toast.error('Create failed'); }
   };
 
@@ -78,9 +147,45 @@ const Tasks = () => {
   };
 
   const openTaskDetail = (task: any) => {
-    setSelectedTask({ ...task });
+    setSelectedTask({ ...task, customFieldValues: normalizeCustomFieldValues(taskCustomFields, task.customFieldValues) });
+    setNewTimesheetEntry({ date: new Date().toISOString().slice(0, 10), member: task.assignee || '', hours: '8', activity: '', notes: '' });
     setTaskDetailOpen(true);
     setIsEditing(true);
+  };
+
+  const openCreateSubtask = (parentTask: any) => {
+    setNewTask({
+      title: '',
+      description: '',
+      priority: parentTask.priority ?? 'medium',
+      status: parentTask.status ?? 'todo',
+      dueDate: parentTask.due_date ?? parentTask.dueDate ?? '',
+      assignee: parentTask.assignee ?? '',
+      project_id: parentTask.project_id ?? parentTask.projectId ?? '',
+      parentTaskId: parentTask.id,
+      phase: parentTask.phase ?? 'Execution',
+      isMilestone: false,
+      customFieldValues: normalizeCustomFieldValues(taskCustomFields, {}),
+    });
+    setDialogOpen(true);
+  };
+
+  const addTimesheetEntry = () => {
+    if (!selectedTask || !newTimesheetEntry.activity.trim()) return;
+    const entry = {
+      id: `timesheet-${Date.now()}`,
+      date: newTimesheetEntry.date,
+      member: newTimesheetEntry.member || selectedTask.assignee || 'Unassigned',
+      hours: Number(newTimesheetEntry.hours || 0),
+      activity: newTimesheetEntry.activity.trim(),
+      notes: newTimesheetEntry.notes.trim(),
+    };
+    setSelectedTask((current: any) => ({
+      ...current,
+      timesheetEntries: [...(current?.timesheetEntries || []), entry],
+    }));
+    setNewTimesheetEntry({ date: new Date().toISOString().slice(0, 10), member: selectedTask.assignee || '', hours: '8', activity: '', notes: '' });
+    toast.success('Daily timesheet entry added');
   };
 
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
@@ -97,10 +202,18 @@ const Tasks = () => {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold">Workspace Pipeline</h2>
-            <Badge variant="secondary" className="rounded-full">{allTasks.length}</Badge>
+            <Badge variant="secondary" className="rounded-full">{visibleTasks.length}</Badge>
+            {filteredProject ? <Button variant="outline" size="sm" onClick={() => setSearchParams({}, { replace: true })}>{filteredProject.name}</Button> : null}
+            {stageFilter ? <Button variant="outline" size="sm" onClick={() => setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('stage'); return next; }, { replace: true })}>{stageFilter}</Button> : null}
+            {statusFilter ? <Button variant="outline" size="sm" onClick={() => setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); return next; }, { replace: true })}>{statusFilter}</Button> : null}
           </div>
           
           <div className="flex items-center gap-2">
+            <div className="flex items-center rounded-xl border bg-muted/30 p-1">
+              <Button variant={viewMode === 'board' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('board')}><LayoutGrid className="h-4 w-4 mr-2" />Board</Button>
+              <Button variant={viewMode === 'table' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('table')}><TableIcon className="h-4 w-4 mr-2" />Table</Button>
+              <Button variant={viewMode === 'tree' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('tree')}><GitBranch className="h-4 w-4 mr-2" />Tree</Button>
+            </div>
             <Button variant="outline" size="sm"><Share2 className="h-4 w-4 mr-2" /> Export</Button>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
@@ -114,7 +227,7 @@ const Tasks = () => {
                   <CardDescription>Assign to projects, set milestones, and define schedule.</CardDescription>
                 </DialogHeader>
                 
-                <div className="grid grid-cols-2 gap-6 mt-4">
+                <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-xs font-bold uppercase text-muted-foreground">Basic Info</label>
@@ -143,6 +256,16 @@ const Tasks = () => {
                         <SelectTrigger><SelectValue placeholder="Select Project *" /></SelectTrigger>
                         <SelectContent>{projects?.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
                       </Select>
+
+                      <Select value={newTask.parentTaskId || '__none__'} onValueChange={v => setNewTask(t => ({ ...t, parentTaskId: v === '__none__' ? '' : v }))}>
+                        <SelectTrigger><SelectValue placeholder="Parent Task (optional)" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Main task</SelectItem>
+                          {visibleTasks
+                            .filter((task: any) => !newTask.project_id || (task.project_id ?? task.projectId) === newTask.project_id)
+                            .map((task: any) => <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                       
                       <Select value={newTask.phase} onValueChange={v => setNewTask(t => ({ ...t, phase: v }))}>
                         <SelectTrigger><SelectValue placeholder="Project Phase" /></SelectTrigger>
@@ -155,7 +278,7 @@ const Tasks = () => {
                         </SelectContent>
                       </Select>
                       
-                      <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <Input type="date" value={newTask.dueDate} onChange={e => setNewTask(t => ({ ...t, dueDate: e.target.value }))} className="text-xs" />
                         <Select value={newTask.priority} onValueChange={v => setNewTask(t => ({ ...t, priority: v }))}>
                           <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
@@ -172,6 +295,11 @@ const Tasks = () => {
                     </div>
                   </div>
                 </div>
+                <DynamicCustomFields
+                  fields={taskCustomFields}
+                  values={normalizeCustomFieldValues(taskCustomFields, newTask.customFieldValues)}
+                  onChange={(key, value) => setNewTask((current) => ({ ...current, customFieldValues: { ...current.customFieldValues, [key]: value } }))}
+                />
                 
                 <DialogFooter className="mt-6">
                   <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
@@ -182,6 +310,7 @@ const Tasks = () => {
           </div>
         </div>
 
+        {viewMode === 'board' ? (
         <div className="flex gap-5 overflow-x-auto pb-6 scrollbar-hide">
           {columns.map(col => (
             <div key={col.id} className="min-w-[320px] w-[320px] bg-muted/30 rounded-3xl p-4 flex flex-col h-[calc(100vh-280px)]" onDragOver={e => e.preventDefault()} onDrop={e => handleDrop(e, col.id)}>
@@ -190,11 +319,11 @@ const Tasks = () => {
                   <div className={cn("w-3 h-3 rounded-full shadow-sm", col.color)} />
                   <span className="text-sm font-bold uppercase tracking-wider text-muted-foreground">{col.label}</span>
                 </div>
-                <Badge variant="secondary" className="rounded-md font-mono">{allTasks.filter((t: any) => t.status === col.id).length}</Badge>
+                <Badge variant="secondary" className="rounded-md font-mono">{visibleTasks.filter((t: any) => t.status === col.id).length}</Badge>
               </div>
               
               <div className="space-y-4 flex-1 overflow-y-auto pr-1">
-                {allTasks.filter((t: any) => t.status === col.id).map((task: any) => (
+                {visibleTasks.filter((t: any) => t.status === col.id).map((task: any) => (
                   <Card 
                     key={task.id} 
                     draggable 
@@ -230,6 +359,91 @@ const Tasks = () => {
             </div>
           ))}
         </div>
+        ) : viewMode === 'table' ? (
+          <Card className="glass overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-muted/30">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">Task</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">Project</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">Due</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">Assignee</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flattenedTasks.map(({ task, level }) => {
+                    const children = taskChildrenMap[task.id] ?? [];
+                    const collapsed = collapsedTaskIds.includes(task.id);
+                    return (
+                      <tr key={task.id} className="border-t">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2" style={{ paddingLeft: `${level * 20}px` }}>
+                            {children.length ? (
+                              <button type="button" onClick={() => setCollapsedTaskIds((prev) => collapsed ? prev.filter((item) => item !== task.id) : [...prev, task.id])}>
+                                {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </button>
+                            ) : <span className="w-4" />}
+                            <button type="button" className="text-left font-medium hover:text-primary" onClick={() => openTaskDetail(task)}>
+                              {task.title}
+                            </button>
+                            {task.parentTaskId ? <Badge variant="outline">Subtask</Badge> : <Badge variant="secondary">Main</Badge>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">{projects?.find((project: any) => project.id === (task.project_id ?? task.projectId))?.name || 'Unassigned'}</td>
+                        <td className="px-4 py-3"><Badge variant="outline">{task.status}</Badge></td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">{task.due_date || task.dueDate || 'No date'}</td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">{task.assignee || 'Unassigned'}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openTaskDetail(task)}>Edit</Button>
+                            <Button size="sm" variant="outline" onClick={() => openCreateSubtask(task)}>Add Subtask</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            {rootTasks.map((task: any) => (
+              <Card key={task.id} className="glass">
+                <CardContent className="p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <button type="button" className="text-left text-lg font-semibold hover:text-primary" onClick={() => openTaskDetail(task)}>{task.title}</button>
+                      <p className="mt-1 text-sm text-muted-foreground">{task.description || 'No description entered yet.'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge variant="secondary">Main Task</Badge>
+                      <Button size="sm" variant="outline" onClick={() => openCreateSubtask(task)}>Add Subtask</Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {(taskChildrenMap[task.id] ?? []).length === 0 ? (
+                      <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">No subtasks yet.</div>
+                    ) : (
+                      (taskChildrenMap[task.id] ?? []).map((child: any) => (
+                        <button key={child.id} type="button" className="rounded-2xl border p-4 text-left hover:bg-muted/20" onClick={() => openTaskDetail(child)}>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium">{child.title}</p>
+                            <Badge variant="outline">{child.status}</Badge>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">{child.due_date || child.dueDate || 'No due date'} | {child.assignee || 'Unassigned'}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <Dialog open={taskDetailOpen} onOpenChange={setTaskDetailOpen}>
@@ -259,8 +473,8 @@ const Tasks = () => {
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                <div className="grid grid-cols-12 h-full">
-                  <div className="col-span-8 p-8 space-y-8 border-r">
+                <div className="grid h-full grid-cols-1 xl:grid-cols-12">
+                  <div className="space-y-8 border-b p-6 xl:col-span-8 xl:border-b-0 xl:border-r xl:p-8">
                     <div className="space-y-3">
                       <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2">
                         <FileText className="h-3 w-3" /> Description & Scope
@@ -283,6 +497,7 @@ const Tasks = () => {
                       <TabsList className="bg-muted/20 p-1 rounded-xl">
                         <TabsTrigger value="activity" className="flex-1 rounded-lg text-xs font-bold">Activity Feed</TabsTrigger>
                         <TabsTrigger value="files" className="flex-1 rounded-lg text-xs font-bold">Files ({selectedTask.files?.length || 0})</TabsTrigger>
+                        <TabsTrigger value="timesheets" className="flex-1 rounded-lg text-xs font-bold">Timesheets ({selectedTask.timesheetEntries?.length || 0})</TabsTrigger>
                         <TabsTrigger value="checklists" className="flex-1 rounded-lg text-xs font-bold">Checklist</TabsTrigger>
                       </TabsList>
                       
@@ -313,10 +528,47 @@ const Tasks = () => {
                           </div>
                         </div>
                       </TabsContent>
+
+                      <TabsContent value="timesheets" className="pt-6 space-y-4">
+                        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-muted/40 bg-muted/10 p-4 sm:grid-cols-2">
+                          <Input type="date" value={newTimesheetEntry.date} onChange={e => setNewTimesheetEntry((current) => ({ ...current, date: e.target.value }))} />
+                          <Select value={newTimesheetEntry.member} onValueChange={value => setNewTimesheetEntry((current) => ({ ...current, member: value }))}>
+                            <SelectTrigger><SelectValue placeholder="Team member" /></SelectTrigger>
+                            <SelectContent>
+                              {teamMembers.map((member: any) => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <Input type="number" min="0.5" step="0.5" placeholder="Hours" value={newTimesheetEntry.hours} onChange={e => setNewTimesheetEntry((current) => ({ ...current, hours: e.target.value }))} />
+                          <Input placeholder="Daily activity" value={newTimesheetEntry.activity} onChange={e => setNewTimesheetEntry((current) => ({ ...current, activity: e.target.value }))} />
+                          <div className="col-span-2 flex gap-3">
+                            <Textarea rows={2} placeholder="Notes" value={newTimesheetEntry.notes} onChange={e => setNewTimesheetEntry((current) => ({ ...current, notes: e.target.value }))} />
+                            <Button className="self-end" onClick={addTimesheetEntry}>Add Entry</Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {(selectedTask.timesheetEntries?.length || 0) === 0 ? (
+                            <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">No daily task entries yet.</div>
+                          ) : (
+                            selectedTask.timesheetEntries.map((entry: any) => (
+                              <div key={entry.id} className="rounded-2xl border p-4 bg-muted/10">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-bold">{entry.activity}</p>
+                                    <p className="text-[11px] text-muted-foreground">{entry.member} • {entry.date}</p>
+                                  </div>
+                                  <Badge variant="secondary">{entry.hours}h</Badge>
+                                </div>
+                                {entry.notes && <p className="mt-2 text-xs text-muted-foreground">{entry.notes}</p>}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </TabsContent>
                     </Tabs>
                   </div>
 
-                  <div className="col-span-4 bg-muted/10 p-8 space-y-8">
+                  <div className="space-y-8 bg-muted/10 p-6 xl:col-span-4 xl:p-8">
                     <div className="space-y-6">
                       <div className="flex flex-col gap-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -366,6 +618,45 @@ const Tasks = () => {
 
                       <div className="flex flex-col gap-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                          <GitBranch className="h-3 w-3" /> Hierarchy
+                        </span>
+                        <div className="space-y-3 bg-background p-4 rounded-2xl border border-muted/50">
+                          <div className="flex justify-between items-center gap-3">
+                            <span className="text-[10px] text-muted-foreground">Project</span>
+                            {isEditing ? (
+                              <Select value={selectedTask.project_id ?? selectedTask.projectId ?? '__none__'} onValueChange={v => setSelectedTask({ ...selectedTask, project_id: v === '__none__' ? '' : v, projectId: v === '__none__' ? '' : v })}>
+                                <SelectTrigger className="h-8 w-40 text-[10px] rounded-lg"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">No project</SelectItem>
+                                  {projects?.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-xs font-bold">{projects?.find((project: any) => project.id === (selectedTask.project_id ?? selectedTask.projectId))?.name || 'No project'}</span>
+                            )}
+                          </div>
+                          <div className="flex justify-between items-center gap-3">
+                            <span className="text-[10px] text-muted-foreground">Parent</span>
+                            {isEditing ? (
+                              <Select value={selectedTask.parentTaskId || '__none__'} onValueChange={v => setSelectedTask({ ...selectedTask, parentTaskId: v === '__none__' ? '' : v })}>
+                                <SelectTrigger className="h-8 w-40 text-[10px] rounded-lg"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Main task</SelectItem>
+                                  {parentTaskOptions
+                                    .filter((task: any) => task.id !== selectedTask.id && (!selectedTask.project_id || (task.project_id ?? task.projectId) === (selectedTask.project_id ?? selectedTask.projectId)))
+                                    .map((task: any) => <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-xs font-bold">{visibleTasks.find((task: any) => task.id === selectedTask.parentTaskId)?.title || 'Main task'}</span>
+                            )}
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => openCreateSubtask(selectedTask)}>Add Subtask</Button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                           <ChevronRight className="h-3 w-3" /> Status Pipeline
                         </span>
                         <Select value={selectedTask.status} onValueChange={v => setSelectedTask({...selectedTask, status: v})} disabled={!isEditing}>
@@ -377,6 +668,14 @@ const Tasks = () => {
                           </SelectContent>
                         </Select>
                       </div>
+
+                      <DynamicCustomFields
+                        fields={taskCustomFields}
+                        values={normalizeCustomFieldValues(taskCustomFields, selectedTask.customFieldValues)}
+                        disabled={!isEditing}
+                        columnsClassName="grid gap-3"
+                        onChange={(key, value) => setSelectedTask({ ...selectedTask, customFieldValues: { ...(selectedTask.customFieldValues ?? {}), [key]: value } })}
+                      />
                     </div>
 
                     <Card className="shadow-none bg-primary/5 border-primary/10 mt-6">
@@ -390,6 +689,26 @@ const Tasks = () => {
                         </div>
                         <Progress value={selectedTask.status === 'done' ? 100 : 35} className="h-2" />
                         <p className="text-[9px] text-muted-foreground">Based on sub-tasks and checklists completion.</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="shadow-none bg-muted/20 border-muted/30 mt-6">
+                      <CardHeader className="p-4 pb-0">
+                        <CardTitle className="text-[10px] font-bold uppercase text-muted-foreground">Subtasks</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-4 pt-2 space-y-2">
+                        {(taskChildrenMap[selectedTask.id] ?? []).length === 0 ? (
+                          <p className="text-[10px] text-muted-foreground">No subtasks linked yet.</p>
+                        ) : (
+                          (taskChildrenMap[selectedTask.id] ?? []).map((child: any) => (
+                            <button key={child.id} type="button" className="w-full rounded-xl border p-3 text-left hover:bg-background/80" onClick={() => openTaskDetail(child)}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold">{child.title}</span>
+                                <Badge variant="outline" className="text-[9px]">{child.status}</Badge>
+                              </div>
+                            </button>
+                          ))
+                        )}
                       </CardContent>
                     </Card>
                   </div>
