@@ -23,7 +23,14 @@ export default defineConfig(({ mode }) => ({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
-            if (id.includes("react/") || id.includes("react-dom") || id.includes("scheduler")) return "react-core";
+            if (
+              id.includes(`${path.sep}node_modules${path.sep}react${path.sep}`) ||
+              id.includes(`${path.sep}node_modules${path.sep}react${path.sep}index.js`) ||
+              id.includes(`${path.sep}node_modules${path.sep}react-dom${path.sep}`) ||
+              id.includes(`${path.sep}node_modules${path.sep}scheduler${path.sep}`)
+            ) {
+              return "react-core";
+            }
             if (id.includes("recharts")) return "charts";
             if (id.includes("@radix-ui")) return "radix-ui";
             if (id.includes("@supabase")) return "supabase";
