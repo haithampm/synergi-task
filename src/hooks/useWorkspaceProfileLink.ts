@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { useTeamMembers, useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
+import {
+  useRegisterUserAccess,
+  useTeamMembers,
+  useUpdateWorkspaceSettings,
+  useUserAccounts,
+  useWorkspaceSettings,
+} from '@/hooks/useProjects';
 
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 
@@ -33,6 +39,7 @@ export function useWorkspaceProfileLink(user: User | null) {
   const { data: teamMembers = [] } = useTeamMembers();
   const { data: userAccounts = [] } = useUserAccounts();
   const updateSettings = useUpdateWorkspaceSettings();
+  const registerUserAccess = useRegisterUserAccess();
 
   useEffect(() => {
     if (!user || !settings || updateSettings.isPending) return;
@@ -94,4 +101,31 @@ export function useWorkspaceProfileLink(user: User | null) {
 
     updateSettings.mutate(nextSettings);
   }, [settings, teamMembers, updateSettings, user, userAccounts]);
+
+  useEffect(() => {
+    if (!user || !settings || registerUserAccess.isPending) return;
+
+    const authEmail = normalizeText(user.email);
+    const linkedAccount =
+      (settings.currentUser.userAccountId
+        ? userAccounts.find((account) => account.id === settings.currentUser.userAccountId)
+        : undefined) ??
+      (authEmail ? userAccounts.find((account) => normalizeText(account.email) === authEmail) : undefined);
+
+    if (!linkedAccount || linkedAccount.status === 'suspended') return;
+
+    const lastAccessAge = linkedAccount.lastAccessAt
+      ? Date.now() - new Date(linkedAccount.lastAccessAt).getTime()
+      : Number.POSITIVE_INFINITY;
+
+    if (lastAccessAge < 15 * 60 * 1000 && linkedAccount.status === 'active') return;
+
+    const displayName = getAuthDisplayName(user) || linkedAccount.fullName || settings.currentUser.displayName;
+    registerUserAccess.mutate({
+      userAccountId: linkedAccount.id,
+      email: user.email,
+      displayName,
+      authUserId: user.id,
+    });
+  }, [registerUserAccess, settings, user, userAccounts]);
 }

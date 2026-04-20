@@ -22,6 +22,9 @@ import {
   useCreateUserAccount,
   useDashboards,
   useProjectTemplates,
+  useRecordUserInvitation,
+  useRecordUserPasswordReset,
+  useSendUserNotification,
   useTeamMembers,
   useUpdateDashboard,
   useUpdateUserAccount,
@@ -69,8 +72,10 @@ const statusVariant: Record<WorkspaceUserAccount['status'], 'default' | 'seconda
   suspended: 'destructive',
 };
 
+const formatOptionalDateTime = (value?: string) => value ? new Date(value).toLocaleString() : 'Not yet';
+
 const Settings = () => {
-  const { user, updatePassword } = useAuth();
+  const { user, updatePassword, sendInvitationEmail, sendPasswordResetEmail } = useAuth();
   const { data } = useWorkspaceSettings();
   const { data: members = [] } = useTeamMembers();
   const { data: userAccounts = [] } = useUserAccounts();
@@ -84,10 +89,16 @@ const Settings = () => {
   const createDashboard = useCreateDashboard();
   const createUserAccount = useCreateUserAccount();
   const updateUserAccount = useUpdateUserAccount();
+  const recordUserInvitation = useRecordUserInvitation();
+  const recordUserPasswordReset = useRecordUserPasswordReset();
+  const sendUserNotification = useSendUserNotification();
   const [draft, setDraft] = useState(data);
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<WorkspaceUserAccount | null>(null);
   const [userForm, setUserForm] = useState(emptyUserForm);
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [notificationTarget, setNotificationTarget] = useState<WorkspaceUserAccount | null>(null);
+  const [notificationMessage, setNotificationMessage] = useState('');
   const [selectedMetadataKey, setSelectedMetadataKey] = useState('');
   const [metadataDraftLabel, setMetadataDraftLabel] = useState('');
   const [passwordForm, setPasswordForm] = useState({ next: '', confirm: '' });
@@ -144,6 +155,13 @@ const Settings = () => {
     }),
     [userAccounts],
   );
+
+  const recentUserLogs = useMemo(
+    () => auditLogs.filter((log) => log.entityType === 'user').slice(0, 8),
+    [auditLogs],
+  );
+
+  const currentActorName = linkedUserAccount?.fullName ?? draft?.currentUser.displayName ?? 'Admin User';
 
   if (!draft) return null;
 
@@ -209,14 +227,71 @@ const Settings = () => {
       await updateUserAccount.mutateAsync({ id: editingUser.id, ...userForm });
       toast.success('User access updated');
     } else {
-      await createUserAccount.mutateAsync({
+      const created = await createUserAccount.mutateAsync({
         ...userForm,
         invitedBy: linkedUserAccount?.fullName ?? draft.currentUser.displayName,
       });
-      toast.success('User profile created');
+      if (created && created.authProvider !== 'google') {
+        try {
+          await sendInvitationEmail(created.email, created.fullName);
+          await recordUserInvitation.mutateAsync({ id: created.id, actorName: currentActorName });
+          toast.success('User profile created and invitation email sent');
+        } catch (error) {
+          console.warn('Invitation email failed', error);
+          toast.warning('User profile created, but the invitation email could not be sent. Check Supabase email auth.');
+        }
+      } else {
+        toast.success('User profile created');
+      }
     }
 
     setUserDialogOpen(false);
+  };
+
+  const sendAccessInvitation = async (account: WorkspaceUserAccount) => {
+    try {
+      await sendInvitationEmail(account.email, account.fullName);
+      await recordUserInvitation.mutateAsync({ id: account.id, actorName: currentActorName });
+      toast.success(`Invitation email sent to ${account.fullName}`);
+    } catch (error) {
+      console.warn('Invitation email failed', error);
+      toast.error('Invitation email could not be sent. Check Supabase email auth settings.');
+    }
+  };
+
+  const sendResetPasswordLink = async (account: WorkspaceUserAccount) => {
+    try {
+      await sendPasswordResetEmail(account.email);
+      await recordUserPasswordReset.mutateAsync({ id: account.id, actorName: currentActorName });
+      toast.success(`Password reset email sent to ${account.fullName}`);
+    } catch (error) {
+      console.warn('Password reset email failed', error);
+      toast.error('Password reset email could not be sent. Check Supabase auth configuration.');
+    }
+  };
+
+  const openNotificationComposer = (account: WorkspaceUserAccount) => {
+    setNotificationTarget(account);
+    setNotificationMessage(`Please review your assigned work in ${draft?.namespace.organization ?? 'the workspace'}.`);
+    setNotificationDialogOpen(true);
+  };
+
+  const postUserNotification = async () => {
+    if (!notificationTarget || !notificationMessage.trim()) {
+      toast.error('Notification message is required');
+      return;
+    }
+
+    await sendUserNotification.mutateAsync({
+      id: notificationTarget.id,
+      message: notificationMessage.trim(),
+      actorName: currentActorName,
+    });
+
+    toast.success(`Notification sent to ${notificationTarget.fullName} in the app activity feed`);
+    setNotificationDialogOpen(false);
+    setNotificationTarget(null);
+    setNotificationMessage('');
   };
 
   const linkedMemberForAccount = (account: WorkspaceUserAccount) =>
@@ -589,6 +664,7 @@ const Settings = () => {
                       <TableHead>Provider</TableHead>
                       <TableHead>Linked Team</TableHead>
                       <TableHead>Access</TableHead>
+                      <TableHead>Lifecycle</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -621,10 +697,28 @@ const Settings = () => {
                               {role?.permissions.slice(0, 3).join(', ') || 'No permissions configured'}
                             </p>
                           </TableCell>
+                          <TableCell className="min-w-[220px]">
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <p>Created: {formatOptionalDateTime(account.createdAt)}</p>
+                              <p>Invited: {formatOptionalDateTime(account.invitationSentAt)}</p>
+                              <p>Last access: {formatOptionalDateTime(account.lastAccessAt)}</p>
+                              <p>Reset email: {formatOptionalDateTime(account.passwordResetSentAt)}</p>
+                              <p>Notifications: {account.notificationCount ?? 0}</p>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex flex-wrap justify-end gap-2">
                               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openEditUser(account)}>
                                 <Pencil className="h-3.5 w-3.5" /> Edit
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => void sendAccessInvitation(account)}>
+                                Invite
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => void sendResetPasswordLink(account)}>
+                                Reset Password
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openNotificationComposer(account)}>
+                                Notify
                               </Button>
                               <Button variant="outline" size="sm" onClick={() => void toggleAccountStatus(account)}>
                                 {account.status === 'suspended' ? 'Activate' : 'Suspend'}
@@ -641,6 +735,38 @@ const Settings = () => {
                 </Table>
               </div>
             )}
+            <div className="rounded-xl border bg-card/40 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Access & Notification Log</p>
+                  <p className="text-xs text-muted-foreground">
+                    User invitations, access events, password resets, and manual notifications are recorded here and in App Monitor.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/app-monitor?tab=history">Open Full History</Link>
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {recentUserLogs.length ? recentUserLogs.map((log) => (
+                  <div key={log.id} className="rounded-lg border bg-background/60 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">user</Badge>
+                        <p className="text-sm font-medium">{log.action}</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</p>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{log.actorName}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{log.detail}</p>
+                  </div>
+                )) : (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    No user-access audit events recorded yet.
+                  </div>
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -1013,15 +1139,16 @@ const Settings = () => {
               <CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4" /> Notifications</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {[
-                ['Email notifications', 'email'],
-                ['Push notifications', 'push'],
-                ['Task reminders', 'reminders'],
-                ['Weekly digest', 'digest'],
-              ].map(([label, key]) => (
-                <div key={key} className="flex items-center justify-between">
-                  <span className="text-sm">{label}</span>
-                  <Switch
+                {[
+                  ['Email notifications', 'email'],
+                  ['Push notifications', 'push'],
+                  ['Task reminders', 'reminders'],
+                  ['Weekly digest', 'digest'],
+                  ['In-app notification feed', 'inApp'],
+                ].map(([label, key]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-sm">{label}</span>
+                    <Switch
                     checked={draft.notifications[key as keyof typeof draft.notifications]}
                     onCheckedChange={(checked) =>
                       setDraft((prev) => prev ? ({ ...prev, notifications: { ...prev.notifications, [key]: checked } }) : prev)
@@ -1166,13 +1293,21 @@ const Settings = () => {
                 <span className="text-sm">Dark mode</span>
                 <Switch checked={draft.appearance.darkMode} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, darkMode: checked } }) : prev)} />
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Compact view</span>
-                <Switch checked={draft.appearance.compactView} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, compactView: checked } }) : prev)} />
-              </div>
-              <div>
-                <Label className="text-xs">Language</Label>
-                <Select value={draft.appearance.language} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, language: value as 'en' | 'ar' } }) : prev)}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Compact view</span>
+                  <Switch checked={draft.appearance.compactView} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, compactView: checked } }) : prev)} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Collapsed desktop sidebar</span>
+                  <Switch checked={draft.appearance.sidebarCollapsed} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, sidebarCollapsed: checked } }) : prev)} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Auto-hide sidebar on mobile</span>
+                  <Switch checked={draft.appearance.sidebarAutoHide} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, sidebarAutoHide: checked } }) : prev)} />
+                </div>
+                <div>
+                  <Label className="text-xs">Language</Label>
+                  <Select value={draft.appearance.language} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, language: value as 'en' | 'ar' } }) : prev)}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(['en', 'ar'] as const).map((language) => (
@@ -1227,6 +1362,33 @@ const Settings = () => {
         </Tabs>
         <Button size="sm" className="gradient-primary text-primary-foreground" onClick={save}>Save Changes</Button>
       </div>
+
+      <Dialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send User Notification</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="rounded-xl border bg-card/40 p-4">
+              <p className="text-sm font-medium">{notificationTarget?.fullName ?? 'No user selected'}</p>
+              <p className="text-xs text-muted-foreground">{notificationTarget?.email ?? 'Choose a user from the directory'}</p>
+            </div>
+            <div className="grid gap-2">
+              <Label>Message</Label>
+              <Textarea
+                value={notificationMessage}
+                onChange={(e) => setNotificationMessage(e.target.value)}
+                className="min-h-[120px]"
+                placeholder="Write the notification you want the user to receive in the app activity feed."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNotificationDialogOpen(false)}>Cancel</Button>
+            <Button onClick={postUserNotification}>Send Notification</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -1307,6 +1469,11 @@ const Settings = () => {
               <Label>Access Notes</Label>
               <Textarea value={userForm.notes} onChange={(e) => setUserForm((prev) => ({ ...prev, notes: e.target.value }))} className="min-h-[96px]" />
             </div>
+            {!editingUser && userForm.authProvider !== 'google' ? (
+              <p className="text-xs text-muted-foreground">
+                A workspace invitation email will be sent automatically after the user profile is created.
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUserDialogOpen(false)}>Cancel</Button>

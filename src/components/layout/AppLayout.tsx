@@ -13,6 +13,7 @@ interface AppLayoutProps {
 const AppLayout = ({ children }: AppLayoutProps) => {
   const { data: settings } = useWorkspaceSettings();
   const isArabic = settings?.appearance.language === 'ar';
+  const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -24,7 +25,17 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   return (
     <div className="min-h-screen bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
       <AppSidebar />
-      <main className={`${isArabic ? 'pr-[68px] md:pr-[240px]' : 'pl-[68px] md:pl-[240px]'} pb-24 transition-all duration-300`}>
+      <main
+        className={`pb-24 transition-all duration-300 ${
+          isArabic
+            ? sidebarCollapsed
+              ? 'lg:pr-[68px]'
+              : 'lg:pr-[240px]'
+            : sidebarCollapsed
+              ? 'lg:pl-[68px]'
+              : 'lg:pl-[240px]'
+        }`}
+      >
         {children}
       </main>
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>

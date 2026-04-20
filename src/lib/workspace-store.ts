@@ -185,6 +185,10 @@ export interface WorkspaceUserAccount {
   department?: string;
   createdAt: string;
   lastAccessAt?: string;
+  invitationSentAt?: string;
+  passwordResetSentAt?: string;
+  lastNotificationAt?: string;
+  notificationCount?: number;
   invitedBy?: string;
   notes?: string;
 }
@@ -404,11 +408,14 @@ export interface WorkspaceSettings {
     push: boolean;
     reminders: boolean;
     digest: boolean;
+    inApp: boolean;
   };
   appearance: {
     darkMode: boolean;
     compactView: boolean;
     language: "en" | "ar";
+    sidebarCollapsed: boolean;
+    sidebarAutoHide: boolean;
   };
   security: {
     twoFactor: boolean;
@@ -771,11 +778,14 @@ const defaultSettings: WorkspaceSettings = {
     push: true,
     reminders: true,
     digest: true,
+    inApp: true,
   },
   appearance: {
     darkMode: false,
     compactView: false,
     language: "en",
+    sidebarCollapsed: false,
+    sidebarAutoHide: true,
   },
   security: {
     twoFactor: false,
@@ -1055,7 +1065,10 @@ const createDefaultUserAccounts = (teamMembers: WorkspaceTeamMember[]): Workspac
     status: "active",
     authProvider: "hybrid",
     createdAt: "2026-04-01",
+    invitationSentAt: "2026-04-01T07:45:00.000Z",
     lastAccessAt: "2026-04-17T08:00:00.000Z",
+    lastNotificationAt: "2026-04-17T08:15:00.000Z",
+    notificationCount: 3,
     invitedBy: "System",
     notes: "Default workspace administrator for user access and permission control.",
   },
@@ -1070,7 +1083,10 @@ const createDefaultUserAccounts = (teamMembers: WorkspaceTeamMember[]): Workspac
     title: member.role,
     department: member.department,
     createdAt: `2026-04-${String(Math.min(9 + index, 28)).padStart(2, "0")}`,
+    invitationSentAt: `2026-04-${String(Math.min(9 + index, 28)).padStart(2, "0")}T08:00:00.000Z`,
     lastAccessAt: index < 3 ? `2026-04-1${index}T09:00:00.000Z` : undefined,
+    lastNotificationAt: index < 3 ? `2026-04-1${index}T10:30:00.000Z` : undefined,
+    notificationCount: index < 3 ? index + 1 : 0,
     invitedBy: "Admin User",
     notes: `Managed access profile for ${member.name}.`,
   })),

@@ -850,6 +850,183 @@ export function useUpdateUserAccount() {
   });
 }
 
+export function useRecordUserInvitation() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, actorName }: { id: string; actorName?: string }) => {
+      const sentAt = new Date().toISOString();
+      return updateWorkspaceData((current) => {
+        const existing = current.userAccounts.find((account) => account.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === id
+                ? {
+                    ...account,
+                    status: account.status === "suspended" ? account.status : "invited",
+                    invitationSentAt: sentAt,
+                  }
+                : account,
+            ),
+          },
+          {
+            action: "Invitation email sent",
+            entityType: "user",
+            entityId: id,
+            actorName,
+            detail: `${existing.fullName} received a workspace invitation email at ${existing.email}.`,
+          },
+        );
+      }).userAccounts.find((account) => account.id === id);
+    },
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
+export function useRecordUserPasswordReset() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, actorName }: { id: string; actorName?: string }) => {
+      const sentAt = new Date().toISOString();
+      return updateWorkspaceData((current) => {
+        const existing = current.userAccounts.find((account) => account.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === id
+                ? {
+                    ...account,
+                    passwordResetSentAt: sentAt,
+                  }
+                : account,
+            ),
+          },
+          {
+            action: "Password reset email sent",
+            entityType: "user",
+            entityId: id,
+            actorName,
+            detail: `${existing.fullName} received a password reset email at ${existing.email}.`,
+          },
+        );
+      }).userAccounts.find((account) => account.id === id);
+    },
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
+export function useSendUserNotification() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      message,
+      actorName,
+    }: {
+      id: string;
+      message: string;
+      actorName?: string;
+    }) => {
+      const sentAt = new Date().toISOString();
+      return updateWorkspaceData((current) => {
+        const existing = current.userAccounts.find((account) => account.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === id
+                ? {
+                    ...account,
+                    lastNotificationAt: sentAt,
+                    notificationCount: (account.notificationCount ?? 0) + 1,
+                  }
+                : account,
+            ),
+          },
+          {
+            action: "User notification sent",
+            entityType: "user",
+            entityId: id,
+            actorName,
+            detail: `${existing.fullName} was notified: ${message.trim()}.`,
+          },
+        );
+      }).userAccounts.find((account) => account.id === id);
+    },
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
+export function useRegisterUserAccess() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      userAccountId,
+      email,
+      displayName,
+      authUserId,
+    }: {
+      userAccountId?: string;
+      email?: string;
+      displayName?: string;
+      authUserId?: string;
+    }) => {
+      const accessAt = new Date().toISOString();
+      const normalizedEmail = (email ?? "").trim().toLowerCase();
+      return updateWorkspaceData((current) => {
+        const existing = current.userAccounts.find((account) =>
+          userAccountId ? account.id === userAccountId : account.email.trim().toLowerCase() === normalizedEmail,
+        );
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === existing.id
+                ? {
+                    ...account,
+                    status: account.status === "suspended" ? "suspended" : "active",
+                    lastAccessAt: accessAt,
+                  }
+                : account,
+            ),
+            settings: {
+              ...current.settings,
+              currentUser: {
+                ...current.settings.currentUser,
+                authUserId: authUserId ?? current.settings.currentUser.authUserId,
+                userAccountId: existing.id,
+                displayName: displayName ?? current.settings.currentUser.displayName,
+              },
+            },
+          },
+          {
+            action: "Account access recorded",
+            entityType: "user",
+            entityId: existing.id,
+            actorName: displayName ?? existing.fullName,
+            detail: `${existing.fullName} accessed the application using ${existing.authProvider} authentication.`,
+          },
+        );
+      }).userAccounts.find((account) => account.id === userAccountId || account.email.trim().toLowerCase() === normalizedEmail);
+    },
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
 export function useCreateTicket() {
   const qc = useQueryClient();
 

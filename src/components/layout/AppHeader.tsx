@@ -1,9 +1,9 @@
-import { Bell, Search, Plus, CheckCheck } from 'lucide-react';
+import { Bell, Search, Plus, CheckCheck, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useWorkspaceSettings } from '@/hooks/useProjects';
+import { useAuditLogs, useTasks, useWorkspaceSettings } from '@/hooks/useProjects';
 import { translateText } from '@/lib/i18n';
 
 interface AppHeaderProps {
@@ -11,31 +11,83 @@ interface AppHeaderProps {
   subtitle?: string;
 }
 
-const initialNotifications = [
-  { id: 1, title: 'Task overdue', message: '"Design Review" is 2 days overdue', time: '2h ago', read: false },
-  { id: 2, title: 'New comment', message: 'Ahmed left a comment on "Sprint Planning"', time: '5h ago', read: false },
-  { id: 3, title: 'Project update', message: 'EPM 940 Phase 5 status changed to Active', time: '1d ago', read: false },
-];
+const entityPathMap: Record<string, string> = {
+  project: '/projects',
+  task: '/tasks',
+  ticket: '/tickets',
+  team: '/team',
+  meeting: '/calendar',
+  event: '/calendar',
+  chat: '/team-chat',
+  document: '/documents',
+  settings: '/settings',
+  user: '/settings',
+  'sticky-note': '/sticky-notes',
+};
+
+const formatRelativeTime = (value: string) => {
+  const diffMs = Date.now() - new Date(value).getTime();
+  const diffMinutes = Math.max(1, Math.round(diffMs / (60 * 1000)));
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+};
 
 const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const [readIds, setReadIds] = useState<string[]>([]);
   const navigate = useNavigate();
   const { data: settings } = useWorkspaceSettings();
+  const { data: auditLogs = [] } = useAuditLogs();
+  const { data: tasks = [] } = useTasks();
   const language = settings?.appearance.language ?? 'en';
   const isArabic = language === 'ar';
   const localizedTitle = useMemo(() => translateText(language, title), [language, title]);
   const localizedSubtitle = useMemo(() => (subtitle ? translateText(language, subtitle) : undefined), [language, subtitle]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const notifications = useMemo(() => {
+    if (settings?.notifications.inApp === false) {
+      return [];
+    }
+
+    const overdueTaskItems = tasks
+      .filter((task) => {
+        const dueDate = task.due_date ?? task.dueDate;
+        return dueDate && new Date(dueDate) < new Date() && task.status !== 'done';
+      })
+      .slice(0, 3)
+      .map((task) => ({
+        id: `task-overdue-${task.id}`,
+        title: 'Task overdue',
+        message: `${task.title} is overdue for ${task.assignee || 'the assigned owner'}.`,
+        time: task.due_date ?? task.dueDate ?? new Date().toISOString(),
+        path: `/tasks?projectId=${task.project_id ?? task.projectId ?? ''}`,
+      }));
+
+    const auditItems = auditLogs.slice(0, 7).map((log) => ({
+      id: `audit-${log.id}`,
+      title: log.action,
+      message: log.detail,
+      time: log.createdAt,
+      path: entityPathMap[log.entityType] ?? '/app-monitor',
+    }));
+
+    return [...overdueTaskItems, ...auditItems]
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+      .slice(0, 8);
+  }, [auditLogs, settings?.notifications.inApp, tasks]);
+
+  const unreadCount = notifications.filter((notification) => !readIds.includes(notification.id)).length;
 
   const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setReadIds(notifications.map((notification) => notification.id));
   };
 
-  const markRead = (id: number) => {
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+  const markRead = (id: string) => {
+    setReadIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   const openWorkspaceSearch = (query = search) => {
@@ -49,6 +101,14 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
         {localizedSubtitle && <p className="text-sm text-muted-foreground">{localizedSubtitle}</p>}
       </div>
       <div className="flex items-center gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="lg:hidden"
+          onClick={() => window.dispatchEvent(new CustomEvent('workspace-sidebar-toggle'))}
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
         <div className="relative hidden md:block">
           <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isArabic ? 'right-3' : 'left-3'}`} />
           <Input
@@ -89,16 +149,22 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
                 {notifications.map((n) => (
                   <li
                     key={n.id}
-                    className={`px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors ${n.read ? 'opacity-60' : ''}`}
-                    onClick={() => markRead(n.id)}
+                    className={`px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors ${readIds.includes(n.id) ? 'opacity-60' : ''}`}
+                    onClick={() => {
+                      markRead(n.id);
+                      if (n.path) {
+                        navigate(n.path);
+                        setOpen(false);
+                      }
+                    }}
                   >
                     <div className="flex items-start gap-2">
-                      {!n.read && <span className="mt-1.5 h-2 w-2 rounded-full bg-primary flex-shrink-0" />}
-                      {n.read && <span className="mt-1.5 h-2 w-2 flex-shrink-0" />}
+                      {!readIds.includes(n.id) && <span className="mt-1.5 h-2 w-2 rounded-full bg-primary flex-shrink-0" />}
+                      {readIds.includes(n.id) && <span className="mt-1.5 h-2 w-2 flex-shrink-0" />}
                       <div>
                         <p className="text-sm font-medium">{n.title}</p>
                         <p className="text-xs text-muted-foreground">{n.message}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{n.time}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{formatRelativeTime(n.time)}</p>
                       </div>
                     </div>
                   </li>

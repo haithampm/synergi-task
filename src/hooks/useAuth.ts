@@ -63,5 +63,35 @@ export function useAuth() {
     if (error) throw error;
   };
 
-  return { user, session, loading, signIn, signUp, signInWithGoogle, signOut, updatePassword };
+  const sendPasswordResetEmail = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth`,
+    });
+    if (error) throw error;
+  };
+
+  const sendInvitationEmail = async (email: string, fullName?: string) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: `${window.location.origin}/auth`,
+        data: fullName ? { full_name: fullName, invitation_source: "workspace-admin" } : undefined,
+      },
+    });
+    if (error) throw error;
+  };
+
+  return {
+    user,
+    session,
+    loading,
+    signIn,
+    signUp,
+    signInWithGoogle,
+    signOut,
+    updatePassword,
+    sendPasswordResetEmail,
+    sendInvitationEmail,
+  };
 }
