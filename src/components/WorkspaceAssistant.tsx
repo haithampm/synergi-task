@@ -180,7 +180,7 @@ const WorkspaceAssistant = ({ isArabic = false }: WorkspaceAssistantProps) => {
           </SheetDescription>
         </SheetHeader>
 
-        <Tabs defaultValue="navigate" className="flex h-full flex-col">
+        <Tabs defaultValue="ask" className="flex h-full flex-col">
           <div className="border-b px-6 py-3">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="navigate" className="gap-2">

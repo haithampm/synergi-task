@@ -252,6 +252,8 @@ export async function streamAgentChat({
   }
 
   try {
+    let emittedContent = false;
+
     const resp = await fetch(CHAT_URL, {
       method: "POST",
       headers: {
@@ -294,12 +296,19 @@ export async function streamAgentChat({
         try {
           const parsed = JSON.parse(jsonStr);
           const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-          if (content) onDelta(content);
+          if (content) {
+            emittedContent = true;
+            onDelta(content);
+          }
         } catch {
           textBuffer = `${line}\n${textBuffer}`;
           break;
         }
       }
+    }
+
+    if (!emittedContent) {
+      onDelta(localResponse(messages));
     }
 
     onDone();

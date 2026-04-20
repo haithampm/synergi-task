@@ -37,6 +37,9 @@ const AppLayout = ({ children }: AppLayoutProps) => {
         }`}
       >
         {children}
+        <div className="px-6 pb-6 pt-2 text-center text-xs text-muted-foreground">
+          {`© ${new Date().getFullYear()} ${settings?.branding.appName ?? 'Synergi PM Workspace'} by Haitham Elmohamdy`}
+        </div>
       </main>
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>
         <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-xl backdrop-blur md:max-w-none">
