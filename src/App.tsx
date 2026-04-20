@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -6,27 +7,35 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
-import { CommandPalette } from "@/components/CommandPalette";
-import Dashboard from "./pages/Dashboard";
-import Projects from "./pages/Projects";
-import Tasks from "./pages/Tasks";
-import Team from "./pages/Team";
-import TeamChatPage from "./pages/TeamChat";
-import CalendarPage from "./pages/Calendar";
-import DocumentsPage from "./pages/Documents";
-import ResourcesPage from "./pages/Resources";
-import AiChat from "./pages/AiChat";
-import Reports from "./pages/Reports";
-import Tickets from "./pages/Tickets";
-import Settings from "./pages/Settings";
-import ImportExport from "./pages/ImportExport";
-import Schedule from "./pages/Schedule";
-import Profile from "./pages/Profile";
-import StickyNotesPage from "./pages/StickyNotes";
-import Auth from "./pages/Auth";
-import NotFound from "./pages/NotFound";
+
+const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Projects = lazy(() => import("./pages/Projects"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const Team = lazy(() => import("./pages/Team"));
+const TeamChatPage = lazy(() => import("./pages/TeamChat"));
+const CalendarPage = lazy(() => import("./pages/Calendar"));
+const DocumentsPage = lazy(() => import("./pages/Documents"));
+const ResourcesPage = lazy(() => import("./pages/Resources"));
+const AiChat = lazy(() => import("./pages/AiChat"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Tickets = lazy(() => import("./pages/Tickets"));
+const Settings = lazy(() => import("./pages/Settings"));
+const ImportExport = lazy(() => import("./pages/ImportExport"));
+const Schedule = lazy(() => import("./pages/Schedule"));
+const AppMonitor = lazy(() => import("./pages/AppMonitor"));
+const Profile = lazy(() => import("./pages/Profile"));
+const StickyNotesPage = lazy(() => import("./pages/StickyNotes"));
+const Auth = lazy(() => import("./pages/Auth"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
+
+const AppLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+  </div>
+);
 
 function ProtectedRoutes() {
   const { user, loading, signOut } = useAuth();
@@ -75,26 +84,31 @@ function ProtectedRoutes() {
 
   return (
     <>
-      <CommandPalette />
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/projects" element={<Projects />} />
-        <Route path="/tasks" element={<Tasks />} />
-        <Route path="/team" element={<Team />} />
-        <Route path="/team-chat" element={<TeamChatPage />} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/resources" element={<ResourcesPage />} />
-        <Route path="/ai-chat" element={<AiChat />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/tickets" element={<Tickets />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/sticky-notes" element={<StickyNotesPage />} />
-        <Route path="/import-export" element={<ImportExport />} />
-        <Route path="/schedule" element={<Schedule />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <Suspense fallback={null}>
+        <CommandPalette />
+      </Suspense>
+      <Suspense fallback={<AppLoader />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/team" element={<Team />} />
+          <Route path="/team-chat" element={<TeamChatPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/resources" element={<ResourcesPage />} />
+          <Route path="/ai-chat" element={<AiChat />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/tickets" element={<Tickets />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/sticky-notes" element={<StickyNotesPage />} />
+          <Route path="/import-export" element={<ImportExport />} />
+          <Route path="/schedule" element={<Schedule />} />
+          <Route path="/app-monitor" element={<AppMonitor />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </>
   );
 }
@@ -103,7 +117,11 @@ function AuthRoute() {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (user) return <Navigate to="/" replace />;
-  return <Auth />;
+  return (
+    <Suspense fallback={<AppLoader />}>
+      <Auth />
+    </Suspense>
+  );
 }
 
 const App = () => (

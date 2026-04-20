@@ -12,7 +12,8 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDashboardStats, useDashboards, useProjects, useTasks, useUpdateDashboard, useWorkspaceSettings } from '@/hooks/useProjects';
-import { getTaskLifecycleStage, lifecycleStageCatalog } from '@/lib/project-activities';
+import { getProjectLifecycleActivityTotal, getProjectLifecycleStageCounts, lifecycleStageCatalog } from '@/lib/project-activities';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const statusColor: Record<string, string> = {
@@ -31,6 +32,7 @@ const Dashboard = () => {
   const { data: dashboards = [] } = useDashboards();
   const updateDashboard = useUpdateDashboard();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isArabic = settings?.appearance.language === 'ar';
 
   const defaultDashboard = dashboards.find((dashboard) => dashboard.isDefault) ?? dashboards[0];
   const activeDashboardId = searchParams.get('dashboard');
@@ -92,20 +94,21 @@ const Dashboard = () => {
     () =>
       lifecycleStageCatalog.map((stage) => ({
         ...stage,
-        total: tasks.filter((task) => getTaskLifecycleStage(task) === stage.key).length,
+        total: projects.reduce((sum, project) => sum + getProjectLifecycleStageCounts(project, tasks)[stage.key], 0),
       })),
-    [tasks],
+    [projects, tasks],
+  );
+  const displayedLifecycleStages = useMemo(
+    () => (isArabic ? [...lifecycleStageCatalog].reverse() : lifecycleStageCatalog),
+    [isArabic],
   );
   const lifecycleMatrix = useMemo(
     () =>
       projects.slice(0, 18).map((project, index) => {
         const projectTasks = tasks.filter((task) => (task.project_id ?? task.projectId) === project.id);
-        const stageCounts = lifecycleStageCatalog.reduce<Record<string, number>>((acc, stage) => {
-          acc[stage.key] = projectTasks.filter((task) => getTaskLifecycleStage(task) === stage.key).length;
-          return acc;
-        }, {});
-        const totalActivities = projectTasks.length;
-        const completion = totalActivities ? Math.round((projectTasks.filter((task) => task.status === 'done').length / totalActivities) * 100) : 0;
+        const stageCounts = getProjectLifecycleStageCounts(project, tasks);
+        const totalActivities = getProjectLifecycleActivityTotal(project, tasks);
+        const completion = project.radarLifecycle?.completionPct ?? (totalActivities ? Math.round((projectTasks.filter((task) => task.status === 'done').length / totalActivities) * 100) : project.progress);
         const statusCounts = {
           backlog: projectTasks.filter((task) => task.status === 'backlog').length,
           todo: projectTasks.filter((task) => task.status === 'todo').length,
@@ -114,8 +117,11 @@ const Dashboard = () => {
           done: projectTasks.filter((task) => task.status === 'done').length,
         };
         const leadResource =
+          project.radarLifecycle?.ownerName ??
           (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes('project manager'))?.name ??
+          (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes('service delivery manager'))?.name ??
           (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes('project manager'))?.name ??
+          (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes('service delivery manager'))?.name ??
           project.team?.[0] ??
           'Unassigned';
 
@@ -131,6 +137,19 @@ const Dashboard = () => {
       }),
     [projects, tasks],
   );
+  const lifecycleSummary = useMemo(() => {
+    const totalActivities = lifecycleTotals.reduce((sum, stage) => sum + stage.total, 0);
+    const liveStages = lifecycleTotals.filter((stage) => stage.total > 0).length;
+    const dominantStage = [...lifecycleTotals].sort((a, b) => b.total - a.total)[0];
+    const highlyLoadedProjects = lifecycleMatrix.filter((row) => row.totalActivities >= 20).length;
+
+    return {
+      totalActivities,
+      liveStages,
+      dominantStage,
+      highlyLoadedProjects,
+    };
+  }, [lifecycleMatrix, lifecycleTotals]);
   const lifecycleStatusTotals = useMemo(
     () =>
       lifecycleMatrix.reduce(
@@ -168,10 +187,24 @@ const Dashboard = () => {
     }, { replace: true });
   };
   const openLifecycleActivities = (projectId: string, stageKey?: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    const projectTasks = tasks.filter((task) => (task.project_id ?? task.projectId) === projectId);
+    if (!projectTasks.length && project?.radarLifecycle) {
+      toast.info('This project currently has imported radar counts only. Open the project to add detailed tasks.');
+      navigate(`/projects?projectId=${projectId}`);
+      return;
+    }
     const next = stageKey ? `/tasks?projectId=${projectId}&stage=${stageKey}` : `/tasks?projectId=${projectId}`;
     navigate(next);
   };
   const openStatusActivities = (projectId: string, statusKey: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    const projectTasks = tasks.filter((task) => (task.project_id ?? task.projectId) === projectId);
+    if (!projectTasks.length && project?.radarLifecycle) {
+      toast.info('This project currently has imported radar counts only. Open the project to add detailed tasks.');
+      navigate(`/projects?projectId=${projectId}`);
+      return;
+    }
     navigate(`/tasks?projectId=${projectId}&status=${statusKey}`);
   };
 
@@ -315,100 +348,316 @@ const Dashboard = () => {
           </Card>
         </div>
         <Card className="glass overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Implementation Activities Matrix</CardTitle>
+          <CardHeader className="border-b bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 pb-4 text-slate-50">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-300">PMO Operations View</p>
+                <CardTitle className="text-lg font-semibold tracking-tight text-white">Implementation Activities Matrix</CardTitle>
+                <p className="max-w-3xl text-sm text-slate-300">
+                  Executive matrix for implementation life cycle workload, project ownership, and activity status. Each stage cell and status chip opens the related activities directly.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Total Activities</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{lifecycleSummary.totalActivities}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Active Stages</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{lifecycleSummary.liveStages}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Dominant Stage</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{lifecycleSummary.dominantStage?.label ?? 'N/A'}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Large Workstreams</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{lifecycleSummary.highlyLoadedProjects}</p>
+                </div>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-5 pt-5">
             <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Implementation Life Cycle</p>
-              <div className="grid gap-2 md:grid-cols-5 xl:grid-cols-10">
-                {lifecycleTotals.map((stage) => (
+              <div className={cn('mb-3 flex items-center justify-between gap-3', isArabic && 'flex-row-reverse')}>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Implementation Life Cycle</p>
+                <Badge variant="outline" className="bg-muted/40 text-[11px] font-semibold">
+                  Click any stage to open related activities
+                </Badge>
+              </div>
+              <div
+                dir={isArabic ? 'rtl' : 'ltr'}
+                className={cn('grid gap-3 md:grid-cols-5 xl:grid-cols-10', isArabic && 'text-right')}
+              >
+                {displayedLifecycleStages.map((stage) => (
                   <button
                     key={stage.key}
                     type="button"
                     onClick={() => navigate(`/tasks?stage=${stage.key}`)}
-                    className={`rounded-2xl border-2 bg-background px-3 py-3 text-sm font-semibold transition-colors hover:bg-muted/20 ${stage.border} ${stage.text}`}
+                    className={cn(
+                      'group rounded-[1.35rem] border bg-gradient-to-b from-background to-muted/20 px-3 py-3 text-sm font-semibold shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
+                      stage.border,
+                      stage.text,
+                      isArabic && 'text-right',
+                    )}
                   >
-                    <span>{stage.label}</span>
-                    <span className="mt-2 block text-xs text-muted-foreground">{stage.total} activities</span>
+                    <span className="block">{stage.label}</span>
+                    <span className="mt-2 block text-lg font-bold">{lifecycleTotals.find((item) => item.key === stage.key)?.total ?? 0}</span>
+                    <span className="mt-1 block text-[11px] text-muted-foreground">activities</span>
                   </button>
                 ))}
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-[1200px] w-full text-sm">
-                <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-3">% Done</th>
-                    {lifecycleStageCatalog.map((stage) => (
-                      <th key={stage.key} className="px-3 py-3">{stage.label}</th>
+            <div className="grid gap-4 xl:hidden">
+              {lifecycleMatrix.map((row) => (
+                <div key={`mobile-${row.project.id}`} className="rounded-[1.5rem] border bg-gradient-to-b from-background to-muted/20 p-4 shadow-sm">
+                  <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse text-right")}>
+                    <div className="space-y-1">
+                      <button
+                        type="button"
+                        className="text-base font-semibold text-primary hover:underline"
+                        onClick={() => openLifecycleActivities(row.project.id)}
+                      >
+                        {row.project.name}
+                      </button>
+                      <p className="text-xs text-muted-foreground">{row.leadResource}</p>
+                    </div>
+                    <Badge variant="outline" className="bg-muted/40 text-[11px] font-semibold">
+                      #{row.rank}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <div className={cn("flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground", isArabic && "flex-row-reverse")}>
+                      <span>{isArabic ? "نسبة الإنجاز" : "Completion"}</span>
+                      <span>{row.completion}%</span>
+                    </div>
+                    <Progress value={row.completion} className="h-2" />
+                  </div>
+
+                  <div className={cn("mt-4 flex flex-wrap gap-1.5", isArabic && "justify-end")}>
+                    {[
+                      { key: 'backlog', value: row.statusCounts.backlog, className: 'bg-slate-200 text-slate-700' },
+                      { key: 'todo', value: row.statusCounts.todo, className: 'bg-sky-100 text-sky-700' },
+                      { key: 'in-progress', value: row.statusCounts['in-progress'], className: 'bg-indigo-100 text-indigo-700' },
+                      { key: 'review', value: row.statusCounts.review, className: 'bg-amber-100 text-amber-700' },
+                      { key: 'done', value: row.statusCounts.done, className: 'bg-emerald-100 text-emerald-700' },
+                    ].map((status) => (
+                      <button
+                        key={`mobile-${row.project.id}-${status.key}`}
+                        type="button"
+                        onClick={() => openStatusActivities(row.project.id, status.key)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-85 ${status.className}`}
+                      >
+                        {status.key}: {status.value}
+                      </button>
                     ))}
-                    <th className="px-3 py-3">Activity Status</th>
-                    <th className="px-3 py-3">Lead</th>
-                    <th className="px-3 py-3">Project</th>
-                    <th className="px-3 py-3">#</th>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {displayedLifecycleStages.map((stage) => (
+                      <button
+                        key={`mobile-stage-${row.project.id}-${stage.key}`}
+                        type="button"
+                        onClick={() => openLifecycleActivities(row.project.id, stage.key)}
+                        className={cn(
+                          "rounded-2xl border px-3 py-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
+                          row.stageCounts[stage.key] > 0 ? `${stage.color} border-transparent text-white` : "border-border bg-background/70 text-foreground",
+                          isArabic && "text-right",
+                        )}
+                      >
+                        <span className="block text-[11px] font-semibold uppercase tracking-[0.15em] opacity-80">{stage.label}</span>
+                        <span className="mt-2 block text-xl font-bold">{row.stageCounts[stage.key]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div
+              dir={isArabic ? 'rtl' : 'ltr'}
+              className="hidden overflow-x-auto rounded-[1.5rem] border bg-gradient-to-b from-background to-muted/10 shadow-inner xl:block"
+            >
+              <table className={cn('min-w-[1320px] w-full text-sm', isArabic && 'text-right')}>
+                <thead className={cn('bg-slate-900 text-xs uppercase tracking-[0.16em] text-slate-200', isArabic && 'text-right')}>
+                  <tr>
+                    {isArabic ? (
+                      <>
+                        <th className="px-4 py-4">#</th>
+                        <th className="px-4 py-4">Project</th>
+                        <th className="px-4 py-4">Lead</th>
+                        <th className="px-4 py-4">Activity Status</th>
+                        {displayedLifecycleStages.map((stage) => (
+                          <th key={stage.key} className="px-3 py-4">{stage.label}</th>
+                        ))}
+                        <th className="px-4 py-4">% Done</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-4">% Done</th>
+                        {displayedLifecycleStages.map((stage) => (
+                          <th key={stage.key} className="px-3 py-4">{stage.label}</th>
+                        ))}
+                        <th className="px-4 py-4">Activity Status</th>
+                        <th className="px-4 py-4">Lead</th>
+                        <th className="px-4 py-4">Project</th>
+                        <th className="px-4 py-4">#</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {lifecycleMatrix.map((row) => (
-                    <tr key={row.project.id} className="border-t">
-                      <td className="px-3 py-3 font-semibold text-muted-foreground">{row.completion}%</td>
-                      {lifecycleStageCatalog.map((stage) => (
-                        <td key={`${row.project.id}-${stage.key}`} className="px-2 py-2">
-                          <button
-                            type="button"
-                            onClick={() => openLifecycleActivities(row.project.id, stage.key)}
-                            className={`min-w-[48px] rounded-lg px-3 py-1.5 text-center font-semibold transition-colors hover:opacity-85 ${row.stageCounts[stage.key] > 0 ? `${stage.color} text-white` : 'bg-muted/30 text-muted-foreground'}`}
-                          >
-                            {row.stageCounts[stage.key]}
-                          </button>
-                        </td>
-                      ))}
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {[
-                            { key: 'backlog', value: row.statusCounts.backlog, className: 'bg-slate-200 text-slate-700' },
-                            { key: 'todo', value: row.statusCounts.todo, className: 'bg-sky-100 text-sky-700' },
-                            { key: 'in-progress', value: row.statusCounts['in-progress'], className: 'bg-indigo-100 text-indigo-700' },
-                            { key: 'review', value: row.statusCounts.review, className: 'bg-amber-100 text-amber-700' },
-                            { key: 'done', value: row.statusCounts.done, className: 'bg-emerald-100 text-emerald-700' },
-                          ].map((status) => (
+                  {lifecycleMatrix.map((row, rowIndex) => (
+                    <tr key={row.project.id} className={cn('border-t transition-colors hover:bg-muted/20', rowIndex % 2 === 0 && 'bg-background/70')}>
+                      {isArabic ? (
+                        <>
+                          <td className="px-4 py-4 font-semibold text-muted-foreground">{row.rank}</td>
+                          <td className="px-4 py-4">
                             <button
-                              key={`${row.project.id}-${status.key}`}
                               type="button"
-                              onClick={() => openStatusActivities(row.project.id, status.key)}
-                              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-85 ${status.className}`}
+                              className="font-medium text-primary hover:underline"
+                              onClick={() => openLifecycleActivities(row.project.id)}
                             >
-                              {status.key}: {status.value}
+                              {row.project.name}
                             </button>
+                          </td>
+                          <td className="px-4 py-4 font-medium">{row.leadResource}</td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              {[
+                                { key: 'backlog', value: row.statusCounts.backlog, className: 'bg-slate-200 text-slate-700' },
+                                { key: 'todo', value: row.statusCounts.todo, className: 'bg-sky-100 text-sky-700' },
+                                { key: 'in-progress', value: row.statusCounts['in-progress'], className: 'bg-indigo-100 text-indigo-700' },
+                                { key: 'review', value: row.statusCounts.review, className: 'bg-amber-100 text-amber-700' },
+                                { key: 'done', value: row.statusCounts.done, className: 'bg-emerald-100 text-emerald-700' },
+                              ].map((status) => (
+                                <button
+                                  key={`${row.project.id}-${status.key}`}
+                                  type="button"
+                                  onClick={() => openStatusActivities(row.project.id, status.key)}
+                                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-85 ${status.className}`}
+                                >
+                                  {status.key}: {status.value}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          {displayedLifecycleStages.map((stage) => (
+                            <td key={`${row.project.id}-${stage.key}`} className="px-2 py-3">
+                              <button
+                                type="button"
+                                onClick={() => openLifecycleActivities(row.project.id, stage.key)}
+                                className={`min-w-[52px] rounded-xl px-3 py-2 text-center font-semibold shadow-sm transition-colors hover:opacity-85 ${row.stageCounts[stage.key] > 0 ? `${stage.color} text-white` : 'bg-muted/30 text-muted-foreground'}`}
+                              >
+                                {row.stageCounts[stage.key]}
+                              </button>
+                            </td>
                           ))}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 font-medium">{row.leadResource}</td>
-                      <td className="px-3 py-3">
-                        <button type="button" className="font-medium text-primary hover:underline" onClick={() => openLifecycleActivities(row.project.id)}>
-                          {row.project.name}
-                        </button>
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-muted-foreground">{row.rank}</td>
+                          <td className="px-4 py-4">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-end gap-2 text-xs font-semibold text-muted-foreground">
+                                <span>{row.completion}%</span>
+                                <span>Done</span>
+                              </div>
+                              <Progress value={row.completion} className="h-2" />
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-4">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+                                <span>Done</span>
+                                <span>{row.completion}%</span>
+                              </div>
+                              <Progress value={row.completion} className="h-2" />
+                            </div>
+                          </td>
+                          {displayedLifecycleStages.map((stage) => (
+                            <td key={`${row.project.id}-${stage.key}`} className="px-2 py-3">
+                              <button
+                                type="button"
+                                onClick={() => openLifecycleActivities(row.project.id, stage.key)}
+                                className={`min-w-[52px] rounded-xl px-3 py-2 text-center font-semibold shadow-sm transition-colors hover:opacity-85 ${row.stageCounts[stage.key] > 0 ? `${stage.color} text-white` : 'bg-muted/30 text-muted-foreground'}`}
+                              >
+                                {row.stageCounts[stage.key]}
+                              </button>
+                            </td>
+                          ))}
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { key: 'backlog', value: row.statusCounts.backlog, className: 'bg-slate-200 text-slate-700' },
+                                { key: 'todo', value: row.statusCounts.todo, className: 'bg-sky-100 text-sky-700' },
+                                { key: 'in-progress', value: row.statusCounts['in-progress'], className: 'bg-indigo-100 text-indigo-700' },
+                                { key: 'review', value: row.statusCounts.review, className: 'bg-amber-100 text-amber-700' },
+                                { key: 'done', value: row.statusCounts.done, className: 'bg-emerald-100 text-emerald-700' },
+                              ].map((status) => (
+                                <button
+                                  key={`${row.project.id}-${status.key}`}
+                                  type="button"
+                                  onClick={() => openStatusActivities(row.project.id, status.key)}
+                                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-85 ${status.className}`}
+                                >
+                                  {status.key}: {status.value}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 font-medium">{row.leadResource}</td>
+                          <td className="px-4 py-4">
+                            <button
+                              type="button"
+                              className="font-medium text-primary hover:underline"
+                              onClick={() => openLifecycleActivities(row.project.id)}
+                            >
+                              {row.project.name}
+                            </button>
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-muted-foreground">{row.rank}</td>
+                        </>
+                      )}
                     </tr>
                   ))}
-                  <tr className="border-t bg-muted/20 font-semibold">
-                    <td className="px-3 py-3">Total</td>
-                    {lifecycleTotals.map((stage) => (
-                      <td key={`total-${stage.key}`} className="px-3 py-3">{stage.total}</td>
-                    ))}
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700">backlog: {lifecycleStatusTotals.backlog}</span>
-                        <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">todo: {lifecycleStatusTotals.todo}</span>
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">in-progress: {lifecycleStatusTotals['in-progress']}</span>
-                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">review: {lifecycleStatusTotals.review}</span>
-                        <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">done: {lifecycleStatusTotals.done}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3" colSpan={2}>Portfolio Rollup</td>
-                    <td className="px-3 py-3">{lifecycleMatrix.length}</td>
+                  <tr className="border-t bg-slate-950/95 font-semibold text-slate-50">
+                    {isArabic ? (
+                      <>
+                        <td className="px-4 py-4">{lifecycleMatrix.length}</td>
+                        <td className="px-4 py-4" colSpan={2}>Portfolio Rollup</td>
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700">backlog: {lifecycleStatusTotals.backlog}</span>
+                            <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">todo: {lifecycleStatusTotals.todo}</span>
+                            <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">in-progress: {lifecycleStatusTotals['in-progress']}</span>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">review: {lifecycleStatusTotals.review}</span>
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">done: {lifecycleStatusTotals.done}</span>
+                          </div>
+                        </td>
+                        {displayedLifecycleStages.map((stage) => (
+                          <td key={`total-${stage.key}`} className="px-3 py-4">{lifecycleTotals.find((item) => item.key === stage.key)?.total ?? 0}</td>
+                        ))}
+                        <td className="px-4 py-4">100%</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-4 py-4">100%</td>
+                        {displayedLifecycleStages.map((stage) => (
+                          <td key={`total-${stage.key}`} className="px-3 py-4">{lifecycleTotals.find((item) => item.key === stage.key)?.total ?? 0}</td>
+                        ))}
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700">backlog: {lifecycleStatusTotals.backlog}</span>
+                            <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">todo: {lifecycleStatusTotals.todo}</span>
+                            <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">in-progress: {lifecycleStatusTotals['in-progress']}</span>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">review: {lifecycleStatusTotals.review}</span>
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">done: {lifecycleStatusTotals.done}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4" colSpan={2}>Portfolio Rollup</td>
+                        <td className="px-4 py-4">{lifecycleMatrix.length}</td>
+                      </>
+                    )}
                   </tr>
                 </tbody>
               </table>

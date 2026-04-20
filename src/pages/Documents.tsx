@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { useProjects, useUpdateProject, useWorkspaceSettings } from "@/hooks/useProjects";
+import { useProjects, useTasks, useTickets, useUpdateProject, useWorkspaceSettings } from "@/hooks/useProjects";
 import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/project-documents";
 import { makeId, type WorkspaceProjectDocument } from "@/lib/workspace-store";
 import { toast } from "sonner";
@@ -40,6 +40,8 @@ const DocumentsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: settings } = useWorkspaceSettings();
   const { data: projects = [] } = useProjects();
+  const { data: tasks = [] } = useTasks();
+  const { data: tickets = [] } = useTickets();
   const updateProject = useUpdateProject();
   const [projectId, setProjectId] = useState(searchParams.get("projectId") ?? "");
   const [phaseFilter, setPhaseFilter] = useState("all");
@@ -202,14 +204,26 @@ const DocumentsPage = () => {
 
   const generatePackage = async () => {
     if (!currentProject) return;
-    const generated = generateProjectTemplateDocuments(currentProject, templateStandard).map((document) => ({
+    const linkedTasks = tasks.filter((task) => (task.project_id ?? task.projectId) === currentProject.id);
+    const linkedTickets = tickets.filter((ticket) => ticket.projectId === currentProject.id);
+    const generated = generateProjectTemplateDocuments(currentProject, templateStandard, {
+      tasks: linkedTasks,
+      tickets: linkedTickets,
+      currentUserName: settings?.currentUser.displayName,
+      organizationName: settings?.namespace.organization,
+      portfolioOffice: settings?.namespace.portfolioOffice,
+    }).map((document) => ({
       ...document,
       access: "project" as const,
       createdBy: settings?.currentUser.displayName ?? "AI Assistant",
       lastModifiedAt: new Date().toISOString(),
       lastModifiedBy: settings?.currentUser.displayName ?? "AI Assistant",
       provider: "workspace" as const,
-      metadata: { extension: document.outputFormat ?? "doc", size: "Generated" },
+      metadata: {
+        ...(document.metadata ?? {}),
+        extension: document.outputFormat ?? "doc",
+        size: "Generated",
+      },
       versions: [
         {
           id: makeId("version"),

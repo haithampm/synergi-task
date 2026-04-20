@@ -17,6 +17,17 @@ const tokenize = (query: string) =>
     .filter(Boolean);
 
 const createHaystack = (values: Array<string | undefined>) => values.filter(Boolean).join(" ").toLowerCase();
+const createProjectPath = (projectId?: string) => (projectId ? `/projects?projectId=${projectId}` : "/projects");
+const createTaskPath = (projectId?: string, stage?: string, status?: string) => {
+  const params = new URLSearchParams();
+  if (projectId) params.set("projectId", projectId);
+  if (stage) params.set("stage", stage);
+  if (status) params.set("status", status);
+  return params.size ? `/tasks?${params.toString()}` : "/tasks";
+};
+const createTicketPath = (projectId?: string) => (projectId ? `/tickets?projectId=${projectId}` : "/tickets");
+const createDocumentPath = (projectId?: string) => (projectId ? `/documents?projectId=${projectId}` : "/documents");
+const createChannelPath = (channelId?: string) => (channelId ? `/team-chat?channelId=${channelId}` : "/team-chat");
 
 export const getWorkspaceSearchResults = (query: string) => {
   const terms = tokenize(query);
@@ -37,6 +48,7 @@ export const getWorkspaceSearchResults = (query: string) => {
     auditLogs,
     settings,
   } = readWorkspaceData();
+  const taskProjectMap = new Map(tasks.map((task) => [task.id, task.project_id ?? task.projectId]));
 
   const results: WorkspaceSearchResult[] = [
     { id: "nav-dashboard", title: "Go to Dashboard", subtitle: "Open portfolio dashboard", section: "Navigation", path: "/", keywords: ["dashboard", "home"] },
@@ -48,6 +60,7 @@ export const getWorkspaceSearchResults = (query: string) => {
     { id: "nav-team", title: "Go to Team", subtitle: "Open team and resource center", section: "Navigation", path: "/team", keywords: ["team", "resources"] },
     { id: "nav-ai", title: "Go to AI Agent", subtitle: "Open AI workspace search", section: "Navigation", path: "/ai-chat", keywords: ["ai", "search", "assistant"] },
     { id: "nav-reports", title: "Go to Reports", subtitle: "Open dynamic reporting", section: "Navigation", path: "/reports", keywords: ["reports", "templates"] },
+    { id: "nav-monitor", title: "Go to App Monitor", subtitle: "Open audit history and workspace monitoring", section: "Navigation", path: "/app-monitor", keywords: ["monitor", "audit", "history", "logs", "uat"] },
     { id: "nav-tickets", title: "Go to Tickets", subtitle: "Open support tickets", section: "Navigation", path: "/tickets", keywords: ["tickets", "issues"] },
     { id: "nav-schedule", title: "Go to Schedule", subtitle: "Open scheduling workspace", section: "Navigation", path: "/schedule", keywords: ["schedule", "gantt", "ms project"] },
     { id: "nav-import", title: "Go to Import / Export", subtitle: "Open import and export tools", section: "Navigation", path: "/import-export", keywords: ["import", "export", "xml"] },
@@ -59,7 +72,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: project.name,
       subtitle: `Project • ${project.status} • ${project.department || "No department"}`,
       section: "Project Search",
-      path: "/projects",
+      path: createProjectPath(project.id),
       preview: project.description,
       keywords: [
         project.name,
@@ -81,7 +94,7 @@ export const getWorkspaceSearchResults = (query: string) => {
         title: document.name,
         subtitle: `Document • ${project.name} • ${document.category}`,
         section: "Document Search",
-        path: `/documents?projectId=${project.id}`,
+        path: createDocumentPath(project.id),
         preview: document.content,
         keywords: [document.name, document.type, document.content, project.name, document.folder, document.provider, document.phase, document.deliverableType, document.outputFormat, document.reviewStatus, document.linkedChannelName, document.standardTemplate].filter(Boolean) as string[],
       })),
@@ -91,7 +104,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: task.title,
       subtitle: `Task • ${task.status} • ${task.projectName || "Unassigned project"}`,
       section: "Task Search",
-      path: "/tasks",
+      path: createTaskPath(task.project_id ?? task.projectId, undefined, task.status),
       preview: task.description,
       keywords: [task.title, task.description, task.assignee, task.projectName, ...(task.tags ?? []), ...Object.values(task.customFieldValues ?? {}).map((value) => String(value))].filter(Boolean) as string[],
     })),
@@ -100,7 +113,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: `${ticket.id} • ${ticket.title}`,
       subtitle: `Ticket • ${ticket.status} • ${ticket.assignee}`,
       section: "Ticket Search",
-      path: "/tickets",
+      path: createTicketPath(ticket.projectId ?? taskProjectMap.get(ticket.taskId ?? "")),
       preview: ticket.description,
       keywords: [ticket.id, ticket.title, ticket.description, ticket.assignee, ...Object.values(ticket.customFieldValues ?? {}).map((value) => String(value))].filter(Boolean) as string[],
     })),
@@ -118,7 +131,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: account.fullName,
       subtitle: `User • ${account.status} • ${account.email}`,
       section: "User Search",
-      path: "/settings",
+      path: "/app-monitor",
       preview: `${account.roleId} • ${account.authProvider} • ${account.department || "No department"}`,
       keywords: [account.fullName, account.email, account.roleId, account.status, account.authProvider, account.title, account.department, account.notes].filter(Boolean) as string[],
     })),
@@ -127,7 +140,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: note.title,
       subtitle: `Sticky Note - ${note.ownerName}`,
       section: "Personal Search",
-      path: "/",
+      path: "/sticky-notes",
       preview: note.content,
       keywords: [note.title, note.content, note.ownerName, note.color, note.done ? "done" : "open", "sticky", "note", "todo"].filter(Boolean) as string[],
     })),
@@ -136,7 +149,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: meeting.title,
       subtitle: `Meeting • ${meeting.type} • ${meeting.provider}`,
       section: "Calendar Search",
-      path: "/calendar",
+      path: meeting.projectId ? `/calendar?projectId=${meeting.projectId}` : "/calendar",
       preview: `${meeting.startsAt} to ${meeting.endsAt}`,
       keywords: [meeting.title, meeting.type, meeting.provider, meeting.notes, meeting.joinUrl].filter(Boolean) as string[],
     })),
@@ -154,7 +167,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: channel.name,
       subtitle: `Chat • ${channel.messages.length} messages`,
       section: "Community Search",
-      path: channel.projectId ? `/projects` : "/team",
+      path: createChannelPath(channel.id),
       preview: channel.topic,
       keywords: [channel.name, channel.topic, channel.whatsappGroupUrl, ...channel.messages.flatMap((message) => [message.authorName, message.message])].filter(Boolean) as string[],
     })),
@@ -172,7 +185,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: dashboard.name,
       subtitle: `Dashboard • ${dashboard.widgets.length} widgets`,
       section: "Dashboard Search",
-      path: "/reports",
+      path: dashboard.isDefault ? "/" : `/?dashboard=${dashboard.id}`,
       preview: dashboard.widgets.map((widget) => widget.title).join(", "),
       keywords: [dashboard.name, ...dashboard.widgets.map((widget) => widget.title)].filter(Boolean) as string[],
     })),
@@ -199,7 +212,7 @@ export const getWorkspaceSearchResults = (query: string) => {
       title: log.action,
       subtitle: `Audit • ${log.entityType} • ${log.actorName}`,
       section: "Audit Search",
-      path: "/settings",
+      path: "/app-monitor",
       preview: log.detail,
       keywords: [log.action, log.entityType, log.actorName, log.detail].filter(Boolean) as string[],
     })),
@@ -233,4 +246,16 @@ export const getWorkspaceSearchResults = (query: string) => {
     .sort((left, right) => right.score - left.score || left.result.title.localeCompare(right.result.title))
     .map(({ result }) => result)
     .slice(0, 40);
+};
+
+export const getAssistantLinkSuggestions = (query: string, limit = 6) => {
+  const uniqueResults = new Map<string, WorkspaceSearchResult>();
+
+  getWorkspaceSearchResults(query).forEach((result) => {
+    if (!uniqueResults.has(result.id)) {
+      uniqueResults.set(result.id, result);
+    }
+  });
+
+  return Array.from(uniqueResults.values()).slice(0, limit);
 };

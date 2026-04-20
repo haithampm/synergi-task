@@ -6,6 +6,7 @@ import {
   type WorkspaceChatChannel,
   type WorkspaceDashboard,
   type WorkspaceData,
+  type WorkspaceAuditLog,
   type WorkspaceMeeting,
   type WorkspacePersonalEvent,
   type WorkspaceProject,
@@ -20,6 +21,29 @@ import {
   type WorkspaceWorkflow,
 } from "@/lib/workspace-store";
 import { buildDashboardWidgets } from "@/lib/dashboard-widgets";
+import { applyRadarRowsToWorkspace, type RadarImportRow } from "@/lib/radar-import";
+import {
+  deleteRemoteStickyNote,
+  deleteRemoteProject,
+  deleteRemoteTask,
+  fetchMergedMeetings,
+  fetchMergedPersonalEvents,
+  fetchMergedProjects,
+  fetchMergedStickyNotes,
+  fetchMergedTasks,
+  fetchMergedTeamMembers,
+  generatePersistentEntityId,
+  isSupabaseReady,
+  mergeSettingsWithRemoteContext,
+  syncProfileFromSettings,
+  upsertRemoteMeeting,
+  upsertRemotePersonalEvent,
+  upsertRemoteProject,
+  upsertRemoteProjectDocuments,
+  upsertRemoteStickyNote,
+  upsertRemoteTask,
+  upsertRemoteTeamMember,
+} from "@/integrations/supabase/workspace-data";
 
 const workspaceKeys = {
   projects: ["projects"] as const,
@@ -98,10 +122,79 @@ const recalcProjects = (projects: WorkspaceProject[], tasks: WorkspaceTask[]) =>
     };
   });
 
+const getAuditActorName = (current: WorkspaceData) =>
+  current.settings.currentUser.displayName?.trim() || current.settings.profile.email || "Workspace User";
+
+const appendAuditLog = (
+  current: WorkspaceData,
+  entry: Omit<WorkspaceAuditLog, "id" | "createdAt" | "actorName"> & { actorName?: string },
+): WorkspaceData => ({
+  ...current,
+  auditLogs: [
+    {
+      id: makeId("audit"),
+      action: entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      actorName: entry.actorName ?? getAuditActorName(current),
+      detail: entry.detail,
+      createdAt: new Date().toISOString(),
+    },
+    ...current.auditLogs,
+  ].slice(0, 300),
+});
+
+const summarizeUpdatedFields = (updates: Record<string, unknown>) => {
+  const ignoredKeys = new Set(["id"]);
+  const labels: Record<string, string> = {
+    name: "name",
+    title: "title",
+    description: "description",
+    status: "status",
+    progress: "progress",
+    priority: "priority",
+    assignee: "assignee",
+    due_date: "due date",
+    dueDate: "due date",
+    start_date: "start date",
+    end_date: "end date",
+    department: "department",
+    budget: "budget",
+    projectNature: "project nature",
+    team: "team",
+    resources: "resources",
+    teamStructure: "team structure",
+    stakeholders: "stakeholders",
+    risks: "risks",
+    documents: "documents",
+    comments: "comments",
+    timesheetEntries: "timesheets",
+    metadata: "metadata",
+    customFields: "custom fields",
+    privilegeRoles: "privilege roles",
+    integrations: "integrations",
+    profile: "profile",
+    currentUser: "current user",
+    appearance: "appearance",
+    notifications: "notifications",
+    ai: "AI settings",
+    msProject: "MS Project settings",
+  };
+
+  const fields = Object.keys(updates)
+    .filter((key) => !ignoredKeys.has(key) && updates[key] !== undefined)
+    .map((key) => labels[key] ?? key)
+    .slice(0, 6);
+
+  if (!fields.length) return "record details";
+  if (fields.length === 1) return fields[0];
+  return `${fields.slice(0, -1).join(", ")} and ${fields.at(-1)}`;
+};
+
 export function useProjects() {
   return useQuery({
     queryKey: workspaceKeys.projects,
-    queryFn: async () => readWorkspaceData().projects,
+    queryFn: async () => fetchMergedProjects(),
   });
 }
 
@@ -109,8 +202,9 @@ export function useTasks(projectId?: string) {
   return useQuery({
     queryKey: workspaceKeys.tasks(projectId),
     queryFn: async () => {
-      const { tasks, projects } = readWorkspaceData();
-      const normalized = tasks.map((task) => normalizeTask(task, projects));
+      const merged = await fetchMergedTasks(projectId);
+      const projects = await fetchMergedProjects();
+      const normalized = merged.map((task) => normalizeTask(task, projects));
       return projectId ? normalized.filter((task) => task.project_id === projectId) : normalized;
     },
   });
@@ -126,14 +220,14 @@ export function useTickets() {
 export function useTeamMembers() {
   return useQuery({
     queryKey: workspaceKeys.team,
-    queryFn: async () => readWorkspaceData().teamMembers,
+    queryFn: async () => fetchMergedTeamMembers(),
   });
 }
 
 export function useWorkspaceSettings() {
   return useQuery({
     queryKey: workspaceKeys.settings,
-    queryFn: async () => readWorkspaceData().settings,
+    queryFn: async () => mergeSettingsWithRemoteContext(readWorkspaceData().settings),
   });
 }
 
@@ -147,17 +241,14 @@ export function useUserAccounts() {
 export function useStickyNotes() {
   return useQuery({
     queryKey: workspaceKeys.stickyNotes,
-    queryFn: async () => readWorkspaceData().stickyNotes,
+    queryFn: async () => fetchMergedStickyNotes(),
   });
 }
 
 export function useMeetings(projectId?: string) {
   return useQuery({
     queryKey: [...workspaceKeys.meetings, projectId ?? "all"] as const,
-    queryFn: async () => {
-      const meetings = readWorkspaceData().meetings;
-      return projectId ? meetings.filter((meeting) => meeting.projectId === projectId) : meetings;
-    },
+    queryFn: async () => fetchMergedMeetings(projectId),
   });
 }
 
@@ -165,7 +256,7 @@ export function usePersonalEvents(memberId?: string) {
   return useQuery({
     queryKey: [...workspaceKeys.personalEvents, memberId ?? "all"] as const,
     queryFn: async () => {
-      const events = readWorkspaceData().personalEvents;
+      const events = await fetchMergedPersonalEvents();
       return memberId ? events.filter((event) => event.memberId === memberId) : events;
     },
   });
@@ -217,7 +308,13 @@ export function useDashboardStats() {
   return useQuery({
     queryKey: workspaceKeys.dashboard,
     queryFn: async () => {
-      const { projects, tasks, tickets, teamMembers, meetings, chatChannels, workflows, dashboards, settings } = readWorkspaceData();
+      const local = readWorkspaceData();
+      const projects = await fetchMergedProjects();
+      const tasks = await fetchMergedTasks();
+      const teamMembers = await fetchMergedTeamMembers();
+      const meetings = await fetchMergedMeetings();
+      const { tickets, chatChannels, workflows, dashboards } = local;
+      const settings = await mergeSettingsWithRemoteContext(local.settings);
       const normalizedTasks = tasks.map((task) => normalizeTask(task, projects));
       const overdueTasks = normalizedTasks.filter(
         (task) => task.due_date && new Date(task.due_date) < new Date() && task.status !== "done",
@@ -265,10 +362,11 @@ export function useCreateProject() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (project: Partial<WorkspaceProject> & { name: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (project: Partial<WorkspaceProject> & { name: string }) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("project") : makeId("project");
+      const created = updateWorkspaceData((current) => {
         const record: WorkspaceProject = {
-          id: makeId("project"),
+          id: nextId,
           name: project.name,
           description: project.description ?? "",
           status: (project.status as WorkspaceProject["status"]) ?? "active",
@@ -298,8 +396,26 @@ export function useCreateProject() {
           workflowId: project.workflowId ?? current.workflows.find((workflow) => workflow.entity === "task")?.id,
         };
 
-        return { ...current, projects: [record, ...current.projects] };
-      }).projects[0],
+        return appendAuditLog(
+          { ...current, projects: [record, ...current.projects] },
+          {
+            action: "Project created",
+            entityType: "project",
+            entityId: record.id,
+            detail: `${record.name} was created in ${record.namespace}.`,
+          },
+        );
+      }).projects[0];
+
+      try {
+        await upsertRemoteProject(created);
+        await upsertRemoteProjectDocuments(created.id, created.documents ?? []);
+      } catch (error) {
+        console.warn("Supabase project sync skipped", error);
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -308,10 +424,12 @@ export function useUpdateProject() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceProject> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        projects: current.projects.map((project) => {
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceProject> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.projects.find((project) => project.id === id);
+        if (!existing) return current;
+
+        const nextProjects = current.projects.map((project) => {
           if (project.id !== id) return project;
           const next = { ...project, ...updates };
           return {
@@ -321,8 +439,30 @@ export function useUpdateProject() {
             start_date: next.start_date ?? next.startDate ?? project.start_date,
             end_date: next.end_date ?? next.endDate ?? project.end_date,
           };
-        }),
-      })).projects.find((project) => project.id === id),
+        });
+
+        return appendAuditLog(
+          { ...current, projects: nextProjects },
+          {
+            action: "Project updated",
+            entityType: "project",
+            entityId: id,
+            detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).projects.find((project) => project.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemoteProject(updated);
+          await upsertRemoteProjectDocuments(updated.id, updated.documents ?? []);
+        } catch (error) {
+          console.warn("Supabase project update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -331,13 +471,34 @@ export function useDeleteProject() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        projects: current.projects.filter((project) => project.id !== id),
-        tasks: current.tasks.filter((task) => (task.project_id ?? task.projectId) !== id),
-        tickets: current.tickets.filter((ticket) => ticket.projectId !== id),
-      })),
+    mutationFn: async (id: string) => {
+      const deleted = updateWorkspaceData((current) => {
+        const existing = current.projects.find((project) => project.id === id);
+        const next = {
+          ...current,
+          projects: current.projects.filter((project) => project.id !== id),
+          tasks: current.tasks.filter((task) => (task.project_id ?? task.projectId) !== id),
+          tickets: current.tickets.filter((ticket) => ticket.projectId !== id),
+        };
+
+        return existing
+          ? appendAuditLog(next, {
+              action: "Project deleted",
+              entityType: "project",
+              entityId: id,
+              detail: `${existing.name} and its linked tasks and tickets were removed.`,
+            })
+          : next;
+      });
+
+      try {
+        await deleteRemoteProject(id);
+      } catch (error) {
+        console.warn("Supabase project delete skipped", error);
+      }
+
+      return deleted;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -346,12 +507,13 @@ export function useCreateTask() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (task: Partial<WorkspaceTask> & { title: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (task: Partial<WorkspaceTask> & { title: string }) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("task") : makeId("task");
+      const created = updateWorkspaceData((current) => {
         const project = current.projects.find((item) => item.id === (task.project_id ?? task.projectId));
         const dueDate = task.due_date ?? task.dueDate ?? "";
         const record: WorkspaceTask = {
-          id: makeId("task"),
+          id: nextId,
           title: task.title,
           description: task.description ?? "",
           status: (task.status as WorkspaceTask["status"]) ?? "todo",
@@ -381,8 +543,25 @@ export function useCreateTask() {
         };
 
         const nextTasks = [record, ...current.tasks];
-        return { ...current, tasks: nextTasks, projects: recalcProjects(current.projects, nextTasks) };
-      }).tasks[0],
+        return appendAuditLog(
+          { ...current, tasks: nextTasks, projects: recalcProjects(current.projects, nextTasks) },
+          {
+            action: "Task created",
+            entityType: "task",
+            entityId: record.id,
+            detail: `${record.title} was created for ${record.projectName || "the workspace"} in ${record.phase}.`,
+          },
+        );
+      }).tasks[0];
+
+      try {
+        await upsertRemoteTask(created);
+      } catch (error) {
+        console.warn("Supabase task sync skipped", error);
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -391,8 +570,11 @@ export function useUpdateTask() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTask> & { id: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTask> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.tasks.find((task) => task.id === id);
+        if (!existing) return current;
+
         const nextTasks = current.tasks.map((task) => {
           if (task.id !== id) return task;
           const projectId = updates.project_id ?? updates.projectId ?? task.project_id ?? task.projectId;
@@ -412,12 +594,31 @@ export function useUpdateTask() {
           };
         });
 
-        return {
-          ...current,
-          tasks: nextTasks,
-          projects: recalcProjects(current.projects, nextTasks),
-        };
-      }).tasks.find((task) => task.id === id),
+        return appendAuditLog(
+          {
+            ...current,
+            tasks: nextTasks,
+            projects: recalcProjects(current.projects, nextTasks),
+          },
+          {
+            action: "Task updated",
+            entityType: "task",
+            entityId: id,
+            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).tasks.find((task) => task.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemoteTask(updated);
+        } catch (error) {
+          console.warn("Supabase task update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -426,16 +627,35 @@ export function useDeleteTask() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (id: string) => {
+      const deleted = updateWorkspaceData((current) => {
+        const existing = current.tasks.find((task) => task.id === id);
         const nextTasks = current.tasks.filter((task) => task.id !== id);
-        return {
+        const next = {
           ...current,
           tasks: nextTasks,
           tickets: current.tickets.filter((ticket) => ticket.taskId !== id),
           projects: recalcProjects(current.projects, nextTasks),
         };
-      }),
+
+        return existing
+          ? appendAuditLog(next, {
+              action: "Task deleted",
+              entityType: "task",
+              entityId: id,
+              detail: `${existing.title} and linked ticket references were removed.`,
+            })
+          : next;
+      });
+
+      try {
+        await deleteRemoteTask(id);
+      } catch (error) {
+        console.warn("Supabase task delete skipped", error);
+      }
+
+      return deleted;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -444,8 +664,9 @@ export function useCreateTeamMember() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (member: Partial<WorkspaceTeamMember> & { name: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (member: Partial<WorkspaceTeamMember> & { name: string }) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("member") : makeId("member");
+      const created = updateWorkspaceData((current) => {
         const initials = member.name
           .split(" ")
           .map((part) => part[0]?.toUpperCase() ?? "")
@@ -453,7 +674,7 @@ export function useCreateTeamMember() {
           .slice(0, 2);
 
         const record: WorkspaceTeamMember = {
-          id: makeId("member"),
+          id: nextId,
           name: member.name,
           role: member.role ?? "",
           avatar: member.avatar ?? initials,
@@ -471,8 +692,27 @@ export function useCreateTeamMember() {
           customFieldValues: member.customFieldValues ?? {},
         };
 
-        return { ...current, teamMembers: [...current.teamMembers, record] };
-      }).teamMembers.at(-1),
+        return appendAuditLog(
+          { ...current, teamMembers: [...current.teamMembers, record] },
+          {
+            action: "Team member created",
+            entityType: "team",
+            entityId: record.id,
+            detail: `${record.name} was added as ${record.role || "a team member"}.`,
+          },
+        );
+      }).teamMembers.at(-1);
+
+      if (created) {
+        try {
+          await upsertRemoteTeamMember(created);
+        } catch (error) {
+          console.warn("Supabase team member sync skipped", error);
+        }
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -481,13 +721,37 @@ export function useUpdateTeamMember() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTeamMember> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        teamMembers: current.teamMembers.map((member) =>
-          member.id === id ? { ...member, ...updates } : member,
-        ),
-      })).teamMembers.find((member) => member.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTeamMember> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.teamMembers.find((member) => member.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            teamMembers: current.teamMembers.map((member) =>
+              member.id === id ? { ...member, ...updates } : member,
+            ),
+          },
+          {
+            action: "Team member updated",
+            entityType: "team",
+            entityId: id,
+            detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).teamMembers.find((member) => member.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemoteTeamMember(updated);
+        } catch (error) {
+          console.warn("Supabase team member update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -517,19 +781,27 @@ export function useCreateUserAccount() {
           notes: account.notes ?? "",
         };
 
-        return {
-          ...current,
-          userAccounts: [record, ...current.userAccounts],
-          teamMembers: current.teamMembers.map((member) =>
-            member.id === record.teamMemberId
-              ? {
-                  ...member,
-                  email: record.email,
-                  privilegeRole: record.roleId,
-                }
-              : member,
-          ),
-        };
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: [record, ...current.userAccounts],
+            teamMembers: current.teamMembers.map((member) =>
+              member.id === record.teamMemberId
+                ? {
+                    ...member,
+                    email: record.email,
+                    privilegeRole: record.roleId,
+                  }
+                : member,
+            ),
+          },
+          {
+            action: "User access created",
+            entityType: "user",
+            entityId: record.id,
+            detail: `${record.fullName} was added with ${record.roleId} access.`,
+          },
+        );
       }).userAccounts[0],
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -542,28 +814,37 @@ export function useUpdateUserAccount() {
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceUserAccount> & { id: string }) =>
       updateWorkspaceData((current) => {
         const existing = current.userAccounts.find((account) => account.id === id);
+        if (!existing) return current;
         const teamMemberId = updates.teamMemberId ?? existing?.teamMemberId ?? "";
-        return {
-          ...current,
-          userAccounts: current.userAccounts.map((account) =>
-            account.id === id
-              ? {
-                  ...account,
-                  ...updates,
-                  teamMemberId,
-                }
-              : account,
-          ),
-          teamMembers: current.teamMembers.map((member) =>
-            member.id === teamMemberId
-              ? {
-                  ...member,
-                  email: updates.email ?? existing?.email ?? member.email,
-                  privilegeRole: updates.roleId ?? existing?.roleId ?? member.privilegeRole,
-                }
-              : member,
-          ),
-        };
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === id
+                ? {
+                    ...account,
+                    ...updates,
+                    teamMemberId,
+                  }
+                : account,
+            ),
+            teamMembers: current.teamMembers.map((member) =>
+              member.id === teamMemberId
+                ? {
+                    ...member,
+                    email: updates.email ?? existing?.email ?? member.email,
+                    privilegeRole: updates.roleId ?? existing?.roleId ?? member.privilegeRole,
+                  }
+                : member,
+            ),
+          },
+          {
+            action: "User access updated",
+            entityType: "user",
+            entityId: id,
+            detail: `${updates.fullName ?? existing.fullName} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
       }).userAccounts.find((account) => account.id === id),
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -590,7 +871,15 @@ export function useCreateTicket() {
           comments: ticket.comments ?? [],
           customFieldValues: ticket.customFieldValues ?? {},
         };
-        return { ...current, tickets: [record, ...current.tickets] };
+        return appendAuditLog(
+          { ...current, tickets: [record, ...current.tickets] },
+          {
+            action: "Ticket created",
+            entityType: "ticket",
+            entityId: record.id,
+            detail: `${record.id} - ${record.title} was opened for ${record.assignee}.`,
+          },
+        );
       }).tickets[0],
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -601,10 +890,23 @@ export function useUpdateTicket() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceTicket> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        tickets: current.tickets.map((ticket) => (ticket.id === id ? { ...ticket, ...updates } : ticket)),
-      })).tickets.find((ticket) => ticket.id === id),
+      updateWorkspaceData((current) => {
+        const existing = current.tickets.find((ticket) => ticket.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            tickets: current.tickets.map((ticket) => (ticket.id === id ? { ...ticket, ...updates } : ticket)),
+          },
+          {
+            action: "Ticket updated",
+            entityType: "ticket",
+            entityId: id,
+            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).tickets.find((ticket) => ticket.id === id),
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -624,20 +926,31 @@ export function useCreateChatMessage() {
       authorId?: string;
       message: string;
     }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        chatChannels: current.chatChannels.map((channel) =>
-          channel.id === channelId
-            ? {
-                ...channel,
-                messages: [
-                  ...channel.messages,
-                  { id: makeId("chat"), authorName, authorId, message, createdAt: new Date().toISOString() },
-                ],
-              }
-            : channel,
-        ),
-      })).chatChannels.find((channel) => channel.id === channelId),
+      updateWorkspaceData((current) => {
+        const channel = current.chatChannels.find((item) => item.id === channelId);
+        const next = {
+          ...current,
+          chatChannels: current.chatChannels.map((item) =>
+            item.id === channelId
+              ? {
+                  ...item,
+                  messages: [
+                    ...item.messages,
+                    { id: makeId("chat"), authorName, authorId, message, createdAt: new Date().toISOString() },
+                  ],
+                }
+              : item,
+          ),
+        };
+
+        return appendAuditLog(next, {
+          action: "Chat message posted",
+          entityType: "chat",
+          entityId: channelId,
+          actorName: authorName,
+          detail: `A new message was posted in ${channel?.name ?? "team chat"}.`,
+        });
+      }).chatChannels.find((channel) => channel.id === channelId),
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -647,24 +960,30 @@ export function useCreateChatChannel() {
 
   return useMutation({
     mutationFn: async (channel: Partial<WorkspaceChatChannel> & { name: string; topic: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        chatChannels: [
-          ...current.chatChannels,
+      updateWorkspaceData((current) => {
+        const record = {
+          id: makeId("channel"),
+          name: channel.name,
+          topic: channel.topic,
+          memberIds: channel.memberIds ?? [],
+          messages: channel.messages ?? [],
+          projectId: channel.projectId,
+          kind: channel.kind ?? "general",
+          readOnly: channel.readOnly ?? false,
+          whatsappGroupUrl: channel.whatsappGroupUrl ?? "",
+          quickLinks: channel.quickLinks ?? [],
+        };
+
+        return appendAuditLog(
+          { ...current, chatChannels: [...current.chatChannels, record] },
           {
-            id: makeId("channel"),
-            name: channel.name,
-            topic: channel.topic,
-            memberIds: channel.memberIds ?? [],
-            messages: channel.messages ?? [],
-            projectId: channel.projectId,
-            kind: channel.kind ?? "general",
-            readOnly: channel.readOnly ?? false,
-            whatsappGroupUrl: channel.whatsappGroupUrl ?? "",
-            quickLinks: channel.quickLinks ?? [],
+            action: "Chat channel created",
+            entityType: "chat",
+            entityId: record.id,
+            detail: `${record.name} was created for collaboration.`,
           },
-        ],
-      })).chatChannels.at(-1),
+        );
+      }).chatChannels.at(-1),
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -766,29 +1085,45 @@ export function useCreateMeeting() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (meeting: Partial<WorkspaceMeeting> & { title: string; startsAt: string; endsAt: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        meetings: [
+    mutationFn: async (meeting: Partial<WorkspaceMeeting> & { title: string; startsAt: string; endsAt: string }) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("meeting") : makeId("meeting");
+      const created = updateWorkspaceData((current) => {
+        const record = {
+          id: nextId,
+          title: meeting.title,
+          type: meeting.type ?? "Planning",
+          projectId: meeting.projectId,
+          taskId: meeting.taskId,
+          channelId: meeting.channelId,
+          organizerId: meeting.organizerId,
+          attendeeIds: meeting.attendeeIds ?? [],
+          startsAt: meeting.startsAt,
+          endsAt: meeting.endsAt,
+          provider: meeting.provider ?? "workspace",
+          joinUrl: meeting.joinUrl,
+          notes: meeting.notes,
+          status: meeting.status ?? "scheduled",
+        };
+
+        return appendAuditLog(
+          { ...current, meetings: [record, ...current.meetings] },
           {
-            id: makeId("meeting"),
-            title: meeting.title,
-            type: meeting.type ?? "Planning",
-            projectId: meeting.projectId,
-            taskId: meeting.taskId,
-            channelId: meeting.channelId,
-            organizerId: meeting.organizerId,
-            attendeeIds: meeting.attendeeIds ?? [],
-            startsAt: meeting.startsAt,
-            endsAt: meeting.endsAt,
-            provider: meeting.provider ?? "workspace",
-            joinUrl: meeting.joinUrl,
-            notes: meeting.notes,
-            status: meeting.status ?? "scheduled",
+            action: "Meeting scheduled",
+            entityType: "meeting",
+            entityId: record.id,
+            detail: `${record.title} was scheduled for ${new Date(record.startsAt).toLocaleString()}.`,
           },
-          ...current.meetings,
-        ],
-      })).meetings[0],
+        );
+      }).meetings[0];
+
+      try {
+        await upsertRemoteMeeting(created);
+      } catch (error) {
+        console.warn("Supabase meeting sync skipped", error);
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -797,11 +1132,35 @@ export function useUpdateMeeting() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceMeeting> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, ...updates } : meeting)),
-      })).meetings.find((meeting) => meeting.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceMeeting> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.meetings.find((meeting) => meeting.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, ...updates } : meeting)),
+          },
+          {
+            action: "Meeting updated",
+            entityType: "meeting",
+            entityId: id,
+            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).meetings.find((meeting) => meeting.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemoteMeeting(updated);
+        } catch (error) {
+          console.warn("Supabase meeting update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -810,22 +1169,38 @@ export function useCreatePersonalEvent() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (event: Partial<WorkspacePersonalEvent> & { title: string; memberId: string; startsAt: string; endsAt: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        personalEvents: [
+    mutationFn: async (event: Partial<WorkspacePersonalEvent> & { title: string; memberId: string; startsAt: string; endsAt: string }) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("event") : makeId("event");
+      const created = updateWorkspaceData((current) => {
+        const record = {
+          id: nextId,
+          title: event.title,
+          memberId: event.memberId,
+          type: event.type ?? "personal",
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          notes: event.notes,
+        };
+
+        return appendAuditLog(
+          { ...current, personalEvents: [record, ...current.personalEvents] },
           {
-            id: makeId("event"),
-            title: event.title,
-            memberId: event.memberId,
-            type: event.type ?? "personal",
-            startsAt: event.startsAt,
-            endsAt: event.endsAt,
-            notes: event.notes,
+            action: "Personal event created",
+            entityType: "event",
+            entityId: record.id,
+            detail: `${record.title} was added to the personal calendar.`,
           },
-          ...current.personalEvents,
-        ],
-      })).personalEvents[0],
+        );
+      }).personalEvents[0];
+
+      try {
+        await upsertRemotePersonalEvent(created);
+      } catch (error) {
+        console.warn("Supabase personal event sync skipped", error);
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -834,11 +1209,35 @@ export function useUpdatePersonalEvent() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspacePersonalEvent> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        personalEvents: current.personalEvents.map((event) => (event.id === id ? { ...event, ...updates } : event)),
-      })).personalEvents.find((event) => event.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspacePersonalEvent> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.personalEvents.find((event) => event.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            personalEvents: current.personalEvents.map((event) => (event.id === id ? { ...event, ...updates } : event)),
+          },
+          {
+            action: "Personal event updated",
+            entityType: "event",
+            entityId: id,
+            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).personalEvents.find((event) => event.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemotePersonalEvent(updated);
+        } catch (error) {
+          console.warn("Supabase personal event update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -847,11 +1246,30 @@ export function useUpdateWorkspaceSettings() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (settings: WorkspaceSettings) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        settings,
-      })).settings,
+    mutationFn: async (settings: WorkspaceSettings) => {
+      const nextSettings = updateWorkspaceData((current) =>
+        appendAuditLog(
+          {
+            ...current,
+            settings,
+          },
+          {
+            action: "Settings updated",
+            entityType: "settings",
+            entityId: current.settings.namespace.slug,
+            detail: `Workspace settings were updated: ${summarizeUpdatedFields(settings as unknown as Record<string, unknown>)}.`,
+          },
+        ),
+      ).settings;
+
+      try {
+        await syncProfileFromSettings(nextSettings);
+      } catch (error) {
+        console.warn("Supabase profile sync skipped", error);
+      }
+
+      return nextSettings;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -860,18 +1278,35 @@ export function useCreateStickyNote() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (note: Omit<WorkspaceStickyNote, "id" | "createdAt">) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        stickyNotes: [
+    mutationFn: async (note: Omit<WorkspaceStickyNote, "id" | "createdAt">) => {
+      const nextId = isSupabaseReady() ? generatePersistentEntityId("note") : makeId("note");
+      const created = updateWorkspaceData((current) => {
+        const record = {
+          id: nextId,
+          createdAt: new Date().toISOString(),
+          ...note,
+        };
+
+        return appendAuditLog(
+          { ...current, stickyNotes: [record, ...current.stickyNotes] },
           {
-            id: makeId("note"),
-            createdAt: new Date().toISOString(),
-            ...note,
+            action: "Sticky note created",
+            entityType: "sticky-note",
+            entityId: record.id,
+            actorName: note.ownerName,
+            detail: `${record.title} was added to the personal workspace.`,
           },
-          ...current.stickyNotes,
-        ],
-      })).stickyNotes[0],
+        );
+      }).stickyNotes[0];
+
+      try {
+        await upsertRemoteStickyNote(created);
+      } catch (error) {
+        console.warn("Supabase sticky note sync skipped", error);
+      }
+
+      return created;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -880,11 +1315,36 @@ export function useUpdateStickyNote() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceStickyNote> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        stickyNotes: current.stickyNotes.map((note) => (note.id === id ? { ...note, ...updates } : note)),
-      })).stickyNotes.find((note) => note.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceStickyNote> & { id: string }) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.stickyNotes.find((note) => note.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            stickyNotes: current.stickyNotes.map((note) => (note.id === id ? { ...note, ...updates } : note)),
+          },
+          {
+            action: "Sticky note updated",
+            entityType: "sticky-note",
+            entityId: id,
+            actorName: updates.ownerName ?? existing.ownerName,
+            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).stickyNotes.find((note) => note.id === id);
+
+      if (updated) {
+        try {
+          await upsertRemoteStickyNote(updated);
+        } catch (error) {
+          console.warn("Supabase sticky note update skipped", error);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -893,11 +1353,33 @@ export function useDeleteStickyNote() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        stickyNotes: current.stickyNotes.filter((note) => note.id !== id),
-      })),
+    mutationFn: async (id: string) => {
+      const updated = updateWorkspaceData((current) => {
+        const existing = current.stickyNotes.find((note) => note.id === id);
+        const next = {
+          ...current,
+          stickyNotes: current.stickyNotes.filter((note) => note.id !== id),
+        };
+
+        return existing
+          ? appendAuditLog(next, {
+              action: "Sticky note deleted",
+              entityType: "sticky-note",
+              entityId: id,
+              actorName: existing.ownerName,
+              detail: `${existing.title} was removed from the personal workspace.`,
+            })
+          : next;
+      });
+
+      try {
+        await deleteRemoteStickyNote(id);
+      } catch (error) {
+        console.warn("Supabase sticky note delete skipped", error);
+      }
+
+      return updated;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -999,6 +1481,22 @@ export function useImportWorkspaceData() {
               : mergeByIdentity(currentRecords, incomingRecords, identityMap[key] as Array<string>),
         };
       }),
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
+export function useImportRadarMatrix() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      rows,
+      sourceFileName,
+    }: {
+      rows: RadarImportRow[];
+      sourceFileName?: string;
+    }) =>
+      updateWorkspaceData((current) => applyRadarRowsToWorkspace(current, rows, sourceFileName)),
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }

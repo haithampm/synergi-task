@@ -62,6 +62,41 @@ const parseDependencyInput = (value: string) =>
     .filter(Boolean)
     .filter((item, index, all) => all.indexOf(item) === index);
 
+const buildScheduleWbsMap = (tasks: Array<{ id: string; parentTaskId?: string; phase?: string }>) => {
+  const byParent = tasks.reduce<Record<string, Array<{ id: string; parentTaskId?: string; phase?: string }>>>((acc, task) => {
+    const key = task.parentTaskId ?? '__root__';
+    acc[key] = acc[key] ?? [];
+    acc[key].push(task);
+    return acc;
+  }, {});
+
+  const rootTaskIds = new Set(tasks.map((task) => task.id));
+  const result = new Map<string, string>();
+
+  const assignChildren = (parentId: string, parentWbs: string) => {
+    (byParent[parentId] ?? []).forEach((child, index) => {
+      const childWbs = `${parentWbs}.${index + 1}`;
+      result.set(child.id, childWbs);
+      assignChildren(child.id, childWbs);
+    });
+  };
+
+  phases.forEach((phase, phaseIndex) => {
+    const roots = tasks.filter((task) => {
+      if (task.phase !== phase) return false;
+      return !task.parentTaskId || !rootTaskIds.has(task.parentTaskId);
+    });
+
+    roots.forEach((task, index) => {
+      const rootWbs = `${Math.max(1, phaseIndex + 1)}.${index + 1}`;
+      result.set(task.id, rootWbs);
+      assignChildren(task.id, rootWbs);
+    });
+  });
+
+  return result;
+};
+
 const DatePickerField = ({ value, onChange }: { value?: Date; onChange: (date?: Date) => void }) => (
   <Popover>
     <PopoverTrigger asChild>
@@ -103,12 +138,9 @@ const Schedule = () => {
   useEffect(() => {
     if (!currentProject) return;
     const baseDate = parseDate(currentProject.start_date ?? currentProject.startDate, new Date());
-    const phaseCounter = new Map<string, number>();
+    const wbsMap = buildScheduleWbsMap(tasks);
     const normalized = tasks.map((task, index) => {
       const phase = task.phase ?? phases[index % phases.length];
-      const phaseIndex = phases.indexOf(phase) + 1;
-      const phasePosition = (phaseCounter.get(phase) ?? 0) + 1;
-      phaseCounter.set(phase, phasePosition);
       const startDate = parseDate(task.start_date ?? task.due_date, addDays(baseDate, index * 3));
       const durationDays = Number.parseInt(String(task.duration ?? '3d').replace('d', ''), 10) || 3;
       const endDate = task.end_date ? parseDate(task.end_date, addDays(startDate, durationDays - 1)) : addDays(startDate, durationDays - 1);
@@ -117,7 +149,7 @@ const Schedule = () => {
         persisted: true,
         title: task.title,
         description: task.description ?? '',
-        wbs: `${Math.max(1, phaseIndex)}.${phasePosition}`,
+        wbs: wbsMap.get(task.id) ?? `${Math.max(1, phases.indexOf(phase) + 1)}.${index + 1}`,
         parentTaskId: task.parentTaskId,
         phase,
         startDate,
@@ -255,6 +287,11 @@ const Schedule = () => {
     return `${phaseIndex}.${topLevelCount + 1}`;
   };
 
+  const getNextChildWbs = (parentTask: ScheduleTask) => {
+    const childCount = localTasks.filter((task) => task.parentTaskId === parentTask.id).length;
+    return `${parentTask.wbs}.${childCount + 1}`;
+  };
+
   const generateNatureSchedule = () => {
     if (!currentProject) return;
     const generatedTasks = generateScheduleFromProjectNature({
@@ -324,7 +361,7 @@ const Schedule = () => {
       persisted: false,
       title: `${parentTask.title} - subtask`,
       description: '',
-      wbs: parentTask.wbs,
+      wbs: getNextChildWbs(parentTask),
       parentTaskId: parentTask.id,
       phase: parentTask.phase,
       startDate: parentTask.startDate,
@@ -355,7 +392,13 @@ const Schedule = () => {
 
   const syncSchedule = async () => {
     if (!currentProject) return;
+    const syncedTaskMap = new Map<string, ScheduleTask>();
+    const persistedIdMap = new Map<string, string>();
     for (const task of dependencyAdjustedTasks) {
+      const primaryAssignee = teamMembers.find((member) => task.assigneeIds.includes(member.id));
+      const resolvedParentTaskId = task.parentTaskId
+        ? persistedIdMap.get(task.parentTaskId) ?? task.parentTaskId
+        : undefined;
       const payload = {
         title: task.title,
         description: task.description,
@@ -368,14 +411,35 @@ const Schedule = () => {
         priority: task.priority,
         progress: task.progress,
         predecessors: task.predecessors,
-        parentTaskId: task.parentTaskId,
+        parentTaskId: resolvedParentTaskId,
         assignees: task.assigneeIds,
+        assignee: primaryAssignee?.name ?? "",
         workloadHours: task.workloadHours,
         isMilestone: task.isMilestone,
         project_id: currentProject.id,
+        projectId: currentProject.id,
       };
-      if (task.persisted) await updateTask.mutateAsync({ id: task.id, ...payload });
-      else await createTask.mutateAsync(payload);
+      if (task.persisted) {
+        const updatedTask = await updateTask.mutateAsync({ id: task.id, ...payload });
+        const nextId = updatedTask?.id ?? task.id;
+        persistedIdMap.set(task.id, nextId);
+        syncedTaskMap.set(task.id, {
+          ...task,
+          persisted: true,
+          id: nextId,
+          parentTaskId: resolvedParentTaskId,
+        });
+      } else {
+        const createdTask = await createTask.mutateAsync(payload);
+        const nextId = createdTask?.id ?? task.id;
+        persistedIdMap.set(task.id, nextId);
+        syncedTaskMap.set(task.id, {
+          ...task,
+          persisted: true,
+          id: nextId,
+          parentTaskId: resolvedParentTaskId,
+        });
+      }
     }
     if (settings?.msProject.autoSyncProjectDates && projectStart && projectEnd) {
       await updateProject.mutateAsync({
@@ -386,6 +450,12 @@ const Schedule = () => {
         endDate: projectEnd.toISOString().slice(0, 10),
       });
     }
+    setLocalTasks((prev) =>
+      prev.map((task) => {
+        const syncedTask = syncedTaskMap.get(task.id);
+        return syncedTask ?? task;
+      }),
+    );
     toast.success('Schedule synced to workspace');
   };
 

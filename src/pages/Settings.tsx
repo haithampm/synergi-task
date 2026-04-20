@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, Palette, Shield, User, Workflow, LayoutDashboard, KeyRound, Building2, MailPlus, Pencil, ShieldCheck, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
 import PageSection from '@/components/layout/PageSection';
@@ -144,9 +145,9 @@ const Settings = () => {
     [userAccounts],
   );
 
-  const selectedMetadata = draft.metadata.find((field) => field.key === selectedMetadataKey) ?? draft.metadata[0];
-
   if (!draft) return null;
+
+  const selectedMetadata = draft.metadata.find((field) => field.key === selectedMetadataKey) ?? draft.metadata[0];
 
   const isAdminUser = (linkedUserAccount?.roleId ?? draft.currentUser.roleId) === 'admin';
 
@@ -957,7 +958,12 @@ const Settings = () => {
                 </div>
               </div>
               <div className="rounded-xl border p-4 bg-card/40">
-                <p className="font-medium">Audit Trail</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium">Audit Trail</p>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to="/app-monitor">Open Monitor</Link>
+                  </Button>
+                </div>
                 <div className="mt-3 space-y-2">
                   {auditLogs.slice(0, 4).map((log) => (
                     <div key={log.id} className="rounded-lg border p-3 bg-background/60">

@@ -1,4 +1,4 @@
-import type { WorkspaceTask } from "@/lib/workspace-store";
+import type { WorkspaceProject, WorkspaceProjectRadarStageCounts, WorkspaceTask } from "@/lib/workspace-store";
 
 export const lifecycleStageCatalog = [
   { key: "planning", label: "1-Planning", color: "bg-orange-500", border: "border-orange-400", text: "text-orange-700" },
@@ -14,6 +14,19 @@ export const lifecycleStageCatalog = [
 ] as const;
 
 export type LifecycleStageKey = (typeof lifecycleStageCatalog)[number]["key"];
+
+export const createEmptyLifecycleStageCounts = (): WorkspaceProjectRadarStageCounts => ({
+  planning: 0,
+  analysis: 0,
+  infra: 0,
+  design: 0,
+  development: 0,
+  uat: 0,
+  deployment: 0,
+  training: 0,
+  "go-live": 0,
+  support: 0,
+});
 
 const stageLookup = lifecycleStageCatalog.reduce<Record<string, LifecycleStageKey>>((acc, stage) => {
   acc[stage.key] = stage.key;
@@ -43,4 +56,36 @@ export const getTaskLifecycleStage = (task: Pick<WorkspaceTask, "phase" | "title
   if (includesAny(content, ["infra", "infrastructure", "platform", "environment", "server"])) return stageLookup["infra"];
   if (includesAny(content, ["analysis", "discovery", "assessment", "requirement"])) return stageLookup["analysis"];
   return stageLookup["planning"];
+};
+
+export const getProjectLifecycleStageCounts = (
+  project: WorkspaceProject,
+  tasks: WorkspaceTask[],
+): WorkspaceProjectRadarStageCounts => {
+  if (project.radarLifecycle?.stageCounts) {
+    return {
+      ...createEmptyLifecycleStageCounts(),
+      ...project.radarLifecycle.stageCounts,
+    };
+  }
+
+  const counts = createEmptyLifecycleStageCounts();
+  tasks
+    .filter((task) => (task.project_id ?? task.projectId) === project.id)
+    .forEach((task) => {
+      const stage = getTaskLifecycleStage(task);
+      counts[stage] += 1;
+    });
+  return counts;
+};
+
+export const getProjectLifecycleActivityTotal = (
+  project: WorkspaceProject,
+  tasks: WorkspaceTask[],
+) => {
+  if (project.radarLifecycle?.totalActivities !== undefined) {
+    return project.radarLifecycle.totalActivities;
+  }
+
+  return Object.values(getProjectLifecycleStageCounts(project, tasks)).reduce((sum, value) => sum + value, 0);
 };

@@ -36,6 +36,8 @@ const getItemTone = (item: CalendarItem) => {
   return "bg-primary/10 border-primary/30 text-primary";
 };
 
+const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+
 const CalendarPage = () => {
   const navigate = useNavigate();
   const { data: settings } = useWorkspaceSettings();
@@ -66,18 +68,23 @@ const CalendarPage = () => {
   const canReschedule = (settings?.currentUser.roleId ?? "viewer") !== "viewer";
 
   const items = useMemo<CalendarItem[]>(() => {
-    const taskItems = tasks.map((task) => ({
-      id: `task-${task.id}`,
-      title: task.title,
-      type: "task" as const,
-      start: parseISO(task.start_date ?? task.due_date ?? new Date().toISOString()),
-      end: parseISO(task.end_date ?? task.due_date ?? new Date().toISOString()),
-      projectId: task.project_id ?? task.projectId,
-      taskId: task.id,
-      memberId: task.assignee_id ?? task.assignees?.[0],
-      status: task.status,
-      notes: task.description,
-    }));
+    const taskItems = tasks.map((task) => {
+      const matchedMember =
+        members.find((member) => member.id === (task.assignee_id ?? task.assignees?.[0])) ??
+        members.find((member) => normalizeText(member.name) === normalizeText(task.assignee));
+      return {
+        id: `task-${task.id}`,
+        title: task.title,
+        type: "task" as const,
+        start: parseISO(task.start_date ?? task.due_date ?? new Date().toISOString()),
+        end: parseISO(task.end_date ?? task.due_date ?? new Date().toISOString()),
+        projectId: task.project_id ?? task.projectId,
+        taskId: task.id,
+        memberId: matchedMember?.id,
+        status: task.status,
+        notes: task.description,
+      };
+    });
 
     const projectItems = projects.map((project) => ({
       id: `project-${project.id}`,
@@ -116,7 +123,7 @@ const CalendarPage = () => {
     }));
 
     return [...taskItems, ...projectItems, ...meetingItems, ...personalItemList];
-  }, [meetings, personalEvents, projects, tasks]);
+  }, [meetings, members, personalEvents, projects, tasks]);
 
   const filteredItems = useMemo(() => {
     const today = new Date();
@@ -126,7 +133,17 @@ const CalendarPage = () => {
       if (!showMeetings && item.type === "meeting") return false;
       if (!showPersonal && item.type === "personal") return false;
       if (projectFilter !== "all" && item.projectId !== projectFilter) return false;
-      if (memberFilter !== "all" && item.memberId && item.memberId !== memberFilter) return false;
+      if (memberFilter !== "all") {
+        if (item.type === "project") {
+          const project = projects.find((projectEntry) => projectEntry.id === item.projectId);
+          const memberLinkedToProject =
+            (project?.resources ?? []).some((resource) => resource.memberId === memberFilter) ||
+            (project?.teamStructure ?? []).some((node) => node.memberId === memberFilter);
+          if (!memberLinkedToProject) return false;
+        } else if (item.memberId !== memberFilter) {
+          return false;
+        }
+      }
       if (taskStatusFilter !== "all" && item.type === "task" && item.status !== taskStatusFilter) return false;
       if (completedOnly && item.status !== "done" && item.status !== "completed") return false;
       if (overdueOnly && !(item.end < today && item.status !== "done" && item.status !== "completed")) return false;
@@ -137,7 +154,7 @@ const CalendarPage = () => {
       }
       return true;
     });
-  }, [completedOnly, items, memberFilter, overdueOnly, projectFilter, search, showMeetings, showPersonal, showProjects, showTasks, taskStatusFilter]);
+  }, [completedOnly, items, memberFilter, overdueOnly, projectFilter, projects, search, showMeetings, showPersonal, showProjects, showTasks, taskStatusFilter]);
 
   const rangeDays = useMemo(() => {
     if (view === "day") return [anchorDate];

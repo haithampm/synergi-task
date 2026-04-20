@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Ticket, Settings, ChevronLeft, ChevronRight, Sparkles,
-  Sun, Moon, LogOut, Search, FileUp, GanttChart, CalendarDays, Files, BriefcaseBusiness, StickyNote, User
+  Sun, Moon, LogOut, Search, FileUp, GanttChart, CalendarDays, Files, BriefcaseBusiness, StickyNote, User, Activity
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspaceSettings } from '@/hooks/useProjects';
@@ -49,6 +49,7 @@ const navSections = [
   {
     title: 'Administration',
     items: [
+      { icon: Activity, label: 'App Monitor', path: '/app-monitor' },
       { icon: Settings, label: 'Settings', path: '/settings' },
     ],
   },

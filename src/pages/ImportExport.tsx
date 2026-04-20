@@ -11,7 +11,8 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { parseCsvTasks, parseMsProjectXml, exportToCsv, exportToMsProjectXml, type MppProject, type MppTask } from '@/lib/ms-project';
 import type { WorkspaceData, WorkspaceProject, WorkspaceTeamMember, WorkspaceTicket } from '@/lib/workspace-store';
-import { useAuditLogs, useChatChannels, useCreateProject, useCreateTask, useCreateTeamMember, useDashboards, useImportWorkspaceData, useMeetings, usePersonalEvents, useProjectTemplates, useProjects, useReportTemplates, useStickyNotes, useTasks, useTeamMembers, useTickets, useUserAccounts, useWorkflows, useWorkspaceSettings } from '@/hooks/useProjects';
+import { useAuditLogs, useChatChannels, useCreateProject, useCreateTask, useCreateTeamMember, useDashboards, useImportRadarMatrix, useImportWorkspaceData, useMeetings, usePersonalEvents, useProjectTemplates, useProjects, useReportTemplates, useStickyNotes, useTasks, useTeamMembers, useTickets, useUserAccounts, useWorkflows, useWorkspaceSettings } from '@/hooks/useProjects';
+import { buildRadarTemplateCsv, parseRadarCsv, radarRowsToCleanRecords, radarRowsToCsv, type RadarImportRow } from '@/lib/radar-import';
 import { toast } from 'sonner';
 
 type ProjectBundle = {
@@ -74,6 +75,7 @@ const datasetFieldCatalog: Record<Exclude<WorkspaceDatasetKey, 'workspace'>, Dat
     { key: 'documents', label: 'Documents' },
     { key: 'namespace', label: 'Namespace' },
     { key: 'workflowId', label: 'Workflow' },
+    { key: 'radarLifecycle', label: 'Radar Lifecycle Metrics' },
     { key: 'customFieldValues', label: 'Custom Fields' },
   ],
   tasks: [
@@ -407,14 +409,18 @@ const ImportExport = () => {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
+  const [showRadarPreview, setShowRadarPreview] = useState(false);
   const [exportProject, setExportProject] = useState<string>('');
   const [datasetExportType, setDatasetExportType] = useState<WorkspaceDatasetKey>('projects');
   const [datasetImportType, setDatasetImportType] = useState<WorkspaceDatasetKey>('projects');
   const [datasetImportMode, setDatasetImportMode] = useState<'merge' | 'replace'>('merge');
   const [datasetExportFields, setDatasetExportFields] = useState<Record<Exclude<WorkspaceDatasetKey, 'workspace'>, string[]>>(buildInitialFieldSelection);
   const [datasetImportFields, setDatasetImportFields] = useState<Record<Exclude<WorkspaceDatasetKey, 'workspace'>, string[]>>(buildInitialFieldSelection);
+  const [radarRows, setRadarRows] = useState<RadarImportRow[]>([]);
+  const [radarFileName, setRadarFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dataFileInputRef = useRef<HTMLInputElement>(null);
+  const radarFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: projects = [] } = useProjects();
   const { data: tasks = [] } = useTasks();
@@ -435,6 +441,7 @@ const ImportExport = () => {
   const createTask = useCreateTask();
   const createTeamMember = useCreateTeamMember();
   const importWorkspaceData = useImportWorkspaceData();
+  const importRadarMatrix = useImportRadarMatrix();
 
   const workspaceSnapshot: WorkspaceData = {
     projects,
@@ -844,6 +851,65 @@ const ImportExport = () => {
     }
   };
 
+  const handleRadarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsedRows = parseRadarCsv(text);
+      if (!parsedRows.length) {
+        toast.error('The radar CSV did not contain a valid implementation matrix table.');
+        return;
+      }
+
+      setRadarRows(parsedRows);
+      setRadarFileName(file.name);
+      setShowRadarPreview(true);
+      toast.success(`Loaded ${parsedRows.length} project radar row(s).`);
+    } catch (error) {
+      console.error(error);
+      toast.error('Radar CSV parsing failed. Please check the file format.');
+    } finally {
+      if (radarFileInputRef.current) radarFileInputRef.current.value = '';
+    }
+  };
+
+  const handleImportRadar = async () => {
+    if (!radarRows.length) {
+      toast.error('Load a radar CSV first.');
+      return;
+    }
+
+    await importRadarMatrix.mutateAsync({
+      rows: radarRows,
+      sourceFileName: radarFileName,
+    });
+    toast.success(`Imported radar metrics for ${radarRows.length} project(s).`);
+    setShowRadarPreview(false);
+    setRadarRows([]);
+    setRadarFileName('');
+  };
+
+  const handleDownloadRadarCleanCsv = () => {
+    if (!radarRows.length) {
+      toast.error('Load a radar CSV first to export the cleaned version.');
+      return;
+    }
+
+    downloadBlob(
+      radarRowsToCsv(radarRows),
+      `${(radarFileName || 'implementation-radar').replace(/\.csv$/i, '')}-clean.csv`,
+      'text/csv',
+    );
+    toast.success('Downloaded normalized radar CSV.');
+  };
+
+  const handleDownloadRadarTemplate = () => {
+    downloadBlob(buildRadarTemplateCsv(), 'implementation-radar-template.csv', 'text/csv');
+    toast.success('Downloaded radar import template.');
+  };
+
   return (
     <AppLayout>
       <AppHeader title="Import / Export" subtitle="Import schedules or project packages, and export project details, team data, and MS Project files." />
@@ -901,6 +967,52 @@ const ImportExport = () => {
               </div>
             )}
             <input ref={dataFileInputRef} type="file" accept=".json,.csv" onChange={handleDatasetFileSelect} className="hidden" />
+          </CardContent>
+        </Card>
+
+        <Card className="glass">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              Import Implementation Radar Matrix
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Load the implementation radar CSV, convert it into a clean normalized structure, and map each row into project portfolio metrics, project ownership, and lifecycle activity counts.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => radarFileInputRef.current?.click()} className="gradient-primary text-primary-foreground shadow-glow">
+                <Upload className="mr-2 h-4 w-4" />
+                Select Radar CSV
+              </Button>
+              <Button variant="outline" onClick={handleDownloadRadarTemplate}>
+                <Download className="mr-2 h-4 w-4" />
+                Download Template
+              </Button>
+              <Button variant="outline" onClick={handleDownloadRadarCleanCsv} disabled={!radarRows.length}>
+                <FileText className="mr-2 h-4 w-4" />
+                Download Clean CSV
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-border/70 bg-muted/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Projects Parsed</p>
+                <p className="mt-2 text-2xl font-semibold">{radarRows.length}</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-muted/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Mapped Owners</p>
+                <p className="mt-2 text-2xl font-semibold">{new Set(radarRows.map((row) => row.ownerName).filter(Boolean)).size}</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-muted/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total Activities</p>
+                <p className="mt-2 text-2xl font-semibold">{radarRows.reduce((sum, row) => sum + row.totalActivities, 0)}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-4 text-sm text-muted-foreground">
+              The importer matches projects by name, creates missing projects if needed, links the SDM as a project resource/team owner, and stores the lifecycle matrix on the project for dashboard and portfolio reporting.
+            </div>
+            <input ref={radarFileInputRef} type="file" accept=".csv" onChange={handleRadarFileSelect} className="hidden" />
           </CardContent>
         </Card>
 
@@ -1047,6 +1159,78 @@ const ImportExport = () => {
             </Button>
           </CardContent>
         </Card>
+
+        <Dialog open={showRadarPreview} onOpenChange={setShowRadarPreview}>
+          <DialogContent className="max-h-[85vh] max-w-5xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Radar Import Preview{radarFileName ? `: ${radarFileName}` : ''}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Projects</p>
+                  <p className="mt-2 text-2xl font-semibold">{radarRows.length}</p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Owners</p>
+                  <p className="mt-2 text-2xl font-semibold">{new Set(radarRows.map((row) => row.ownerName).filter(Boolean)).size}</p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Activities</p>
+                  <p className="mt-2 text-2xl font-semibold">{radarRows.reduce((sum, row) => sum + row.totalActivities, 0)}</p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Clean Rows</p>
+                  <p className="mt-2 text-2xl font-semibold">{radarRowsToCleanRecords(radarRows).length}</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border">
+                <table className="min-w-[1100px] w-full text-sm">
+                  <thead className="bg-muted/30">
+                    <tr>
+                      <th className="px-3 py-2 text-left">#</th>
+                      <th className="px-3 py-2 text-left">Project</th>
+                      <th className="px-3 py-2 text-left">Owner</th>
+                      <th className="px-3 py-2 text-left">Total</th>
+                      {['Planning', 'Analysis', 'Infra', 'Design', 'Development', 'UAT', 'Deployment', 'Training', 'Go-Live', 'Support'].map((label) => (
+                        <th key={label} className="px-3 py-2 text-left">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {radarRows.slice(0, 20).map((row) => (
+                      <tr key={`${row.rank}-${row.projectName}`} className="border-t">
+                        <td className="px-3 py-2">{row.rank}</td>
+                        <td className="px-3 py-2 font-medium">{row.projectName}</td>
+                        <td className="px-3 py-2">{row.ownerName || 'Unassigned'}</td>
+                        <td className="px-3 py-2 font-semibold">{row.totalActivities}</td>
+                        <td className="px-3 py-2">{row.stageCounts.planning}</td>
+                        <td className="px-3 py-2">{row.stageCounts.analysis}</td>
+                        <td className="px-3 py-2">{row.stageCounts.infra}</td>
+                        <td className="px-3 py-2">{row.stageCounts.design}</td>
+                        <td className="px-3 py-2">{row.stageCounts.development}</td>
+                        <td className="px-3 py-2">{row.stageCounts.uat}</td>
+                        <td className="px-3 py-2">{row.stageCounts.deployment}</td>
+                        <td className="px-3 py-2">{row.stageCounts.training}</td>
+                        <td className="px-3 py-2">{row.stageCounts['go-live']}</td>
+                        <td className="px-3 py-2">{row.stageCounts.support}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={handleDownloadRadarCleanCsv}>Download Clean CSV</Button>
+                <Button variant="outline" onClick={() => setShowRadarPreview(false)}>Close</Button>
+                <Button onClick={handleImportRadar} disabled={importRadarMatrix.isPending} className="gradient-primary text-primary-foreground">
+                  {importRadarMatrix.isPending ? 'Importing...' : 'Import Radar Into Workspace'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showPreview} onOpenChange={setShowPreview}>
           <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">

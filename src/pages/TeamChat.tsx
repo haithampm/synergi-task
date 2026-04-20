@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MessageSquare, Plus, Send } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/layout/AppLayout";
 import AppHeader from "@/components/layout/AppHeader";
 import PageSection from "@/components/layout/PageSection";
@@ -23,6 +24,7 @@ import { toast } from "sonner";
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 
 const TeamChatPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedChannelId, setSelectedChannelId] = useState("chat-pmo");
   const [groupChatOpen, setGroupChatOpen] = useState(false);
   const [groupChatProjectId, setGroupChatProjectId] = useState("");
@@ -44,6 +46,19 @@ const TeamChatPage = () => {
   );
 
   const activeChannel = channels.find((channel) => channel.id === selectedChannelId) ?? channels[0];
+  const channelIdFromUrl = searchParams.get("channelId") ?? "";
+
+  useEffect(() => {
+    if (!channels.length) return;
+    if (!channels.some((channel) => channel.id === selectedChannelId)) {
+      setSelectedChannelId(channels[0].id);
+    }
+  }, [channels, selectedChannelId]);
+
+  useEffect(() => {
+    if (!channelIdFromUrl || !channels.some((channel) => channel.id === channelIdFromUrl)) return;
+    setSelectedChannelId(channelIdFromUrl);
+  }, [channelIdFromUrl, channels]);
 
   const postMessage = async () => {
     if (!activeChannel || !chatDraft.trim()) return;
@@ -72,7 +87,12 @@ const TeamChatPage = () => {
       return;
     }
 
-    const assignedMembers = members.filter((member) => (member.assignedProjectIds ?? []).includes(project.id));
+    const assignedMembers = members.filter(
+      (member) =>
+        (member.assignedProjectIds ?? []).includes(project.id) ||
+        (project.resources ?? []).some((resource) => resource.memberId === member.id) ||
+        (project.teamStructure ?? []).some((node) => node.memberId === member.id),
+    );
     const newChannel = await createChatChannel.mutateAsync({
       name: `${project.name} Team Group`,
       topic: groupChatTopic.trim() || `Project group chat for ${project.name}`,
@@ -121,7 +141,17 @@ const TeamChatPage = () => {
             <CardTitle className="flex items-center gap-2 text-base"><MessageSquare className="h-4 w-4" /> Channel Workspace</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Select value={selectedChannelId} onValueChange={setSelectedChannelId}>
+              <Select
+                value={selectedChannelId}
+                onValueChange={(value) => {
+                  setSelectedChannelId(value);
+                  setSearchParams((current) => {
+                    const next = new URLSearchParams(current);
+                    next.set("channelId", value);
+                    return next;
+                  }, { replace: true });
+                }}
+              >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

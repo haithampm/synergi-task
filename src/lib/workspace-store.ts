@@ -25,6 +25,30 @@ export interface WorkspaceProject extends Project {
   namespace?: string;
   workflowId?: string;
   customFieldValues?: Record<string, string | number | boolean>;
+  radarLifecycle?: WorkspaceProjectRadarMetrics;
+}
+
+export interface WorkspaceProjectRadarStageCounts {
+  planning: number;
+  analysis: number;
+  infra: number;
+  design: number;
+  development: number;
+  uat: number;
+  deployment: number;
+  training: number;
+  "go-live": number;
+  support: number;
+}
+
+export interface WorkspaceProjectRadarMetrics {
+  source: "csv-radar" | "manual";
+  ownerName: string;
+  totalActivities: number;
+  completionPct?: number;
+  importedAt: string;
+  sourceFileName?: string;
+  stageCounts: WorkspaceProjectRadarStageCounts;
 }
 
 export interface WorkspaceProjectResource {
@@ -93,6 +117,9 @@ export interface WorkspaceProjectDocument {
   metadata?: {
     size?: string;
     extension?: string;
+    templateTheme?: string;
+    templatePalette?: string;
+    templateLayout?: string;
   };
   versions?: WorkspaceDocumentVersion[];
 }
@@ -243,7 +270,7 @@ export interface WorkspaceProjectTemplate {
 export interface WorkspaceAuditLog {
   id: string;
   action: string;
-  entityType: "project" | "task" | "meeting" | "document" | "user" | "settings";
+  entityType: "project" | "task" | "meeting" | "document" | "user" | "settings" | "ticket" | "chat" | "team" | "event" | "sticky-note";
   entityId: string;
   actorName: string;
   detail: string;
@@ -1925,6 +1952,28 @@ export const readWorkspaceData = (): WorkspaceData => {
         stakeholders: project.stakeholders ?? [],
         risks: project.risks ?? [],
         customFieldValues: project.customFieldValues ?? {},
+        radarLifecycle: project.radarLifecycle
+          ? {
+              source: project.radarLifecycle.source ?? "csv-radar",
+              ownerName: project.radarLifecycle.ownerName ?? "",
+              totalActivities: project.radarLifecycle.totalActivities ?? 0,
+              completionPct: project.radarLifecycle.completionPct,
+              importedAt: project.radarLifecycle.importedAt ?? "",
+              sourceFileName: project.radarLifecycle.sourceFileName,
+              stageCounts: {
+                planning: project.radarLifecycle.stageCounts?.planning ?? 0,
+                analysis: project.radarLifecycle.stageCounts?.analysis ?? 0,
+                infra: project.radarLifecycle.stageCounts?.infra ?? 0,
+                design: project.radarLifecycle.stageCounts?.design ?? 0,
+                development: project.radarLifecycle.stageCounts?.development ?? 0,
+                uat: project.radarLifecycle.stageCounts?.uat ?? 0,
+                deployment: project.radarLifecycle.stageCounts?.deployment ?? 0,
+                training: project.radarLifecycle.stageCounts?.training ?? 0,
+                "go-live": project.radarLifecycle.stageCounts?.["go-live"] ?? 0,
+                support: project.radarLifecycle.stageCounts?.support ?? 0,
+              },
+            }
+          : undefined,
         documents: (project.documents ?? []).map((document, docIndex) => ({
           ...(baseline.projects[index % baseline.projects.length]?.documents?.[docIndex % Math.max(1, baseline.projects[index % baseline.projects.length]?.documents?.length ?? 1)] ?? {}),
           ...document,

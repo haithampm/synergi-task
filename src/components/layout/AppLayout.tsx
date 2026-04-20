@@ -2,6 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { CheckSquare, MessageSquare, StickyNote } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
+import WorkspaceAssistant from '@/components/WorkspaceAssistant';
 import { useWorkspaceSettings } from '@/hooks/useProjects';
 import { Button } from '@/components/ui/button';
 
@@ -27,7 +28,8 @@ const AppLayout = ({ children }: AppLayoutProps) => {
         {children}
       </main>
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>
-        <div className="flex items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-xl backdrop-blur">
+        <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-xl backdrop-blur md:max-w-none">
+          <WorkspaceAssistant isArabic={isArabic} />
           <Button
             size="sm"
             variant={location.pathname === '/sticky-notes' ? 'default' : 'outline'}

@@ -14,7 +14,6 @@ import AppHeader from '@/components/layout/AppHeader';
 import DynamicCustomFields from '@/components/forms/DynamicCustomFields';
 import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useProjects, useTeamMembers, useWorkspaceSettings } from '@/hooks/useProjects';
 import { getActiveCustomFields, normalizeCustomFieldValues } from '@/lib/custom-fields';
-import { tasks as mockTasks } from '@/lib/mock-data';
 import { getTaskLifecycleStage } from '@/lib/project-activities';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -71,9 +70,7 @@ const Tasks = () => {
   const statusFilter = searchParams.get('status') ?? '';
   const filteredProject = projects?.find((project: any) => project.id === projectFilterId);
 
-  const allTasks = useMemo(() => {
-    return dbTasks?.length ? dbTasks : mockTasks;
-  }, [dbTasks]);
+  const allTasks = useMemo(() => dbTasks ?? [], [dbTasks]);
 
   const visibleTasks = useMemo(
     () =>

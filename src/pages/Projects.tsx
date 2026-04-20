@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useChatChannels, useCreateChatChannel, useCreateChatMessage, useCreateProject, useCreateTask, useDeleteProject, useProjects, useTasks, useTeamMembers, useTickets, useUpdateChatChannel, useUpdateProject, useWorkspaceSettings, useWorkflows } from "@/hooks/useProjects";
 import { streamAgentChat } from "@/lib/ai-agent";
 import { getActiveCustomFields, normalizeCustomFieldValues } from "@/lib/custom-fields";
+import { getProjectLifecycleActivityTotal, getProjectLifecycleStageCounts, lifecycleStageCatalog } from "@/lib/project-activities";
 import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/project-documents";
 import { generateScheduleFromProjectNature } from "@/lib/project-schedule";
 import {
@@ -74,6 +75,11 @@ const statusChartColor: Record<WorkspaceProject["status"], string> = {
 };
 
 const parseTags = (value: string) => value.split(",").map((tag) => tag.trim()).filter(Boolean);
+const toRiskLevel = (status: WorkspaceProject["status"], priority: WorkspaceProject["priority"]): NonNullable<WorkspaceProject["risk_level"]> => {
+  if (status === "at-risk" || priority === "urgent") return "high";
+  if (priority === "high" || priority === "medium") return "medium";
+  return "low";
+};
 const createDraft = (namespace: string, workflowId: string): Draft => ({
   name: "",
   description: "",
@@ -91,7 +97,10 @@ const createDraft = (namespace: string, workflowId: string): Draft => ({
   customFieldValues: {},
   milestones: [{ title: "Kickoff", date: today }],
   resources: [{ id: makeId("resource"), name: "", role: "", allocation: "100", plannedHours: "40", memberId: "" }],
-  teamStructure: [{ id: makeId("team"), name: "", title: "Project Manager", reportsTo: "", responsibilities: "", memberId: "" }],
+  teamStructure: [
+    { id: makeId("team"), name: "", title: "PMO Director", reportsTo: "", responsibilities: "Executive governance, funding decisions, and PMO oversight", memberId: "" },
+    { id: makeId("team"), name: "", title: "Project Manager", reportsTo: "PMO Director", responsibilities: "Day-to-day delivery leadership, planning, and reporting", memberId: "" },
+  ],
   stakeholders: [{ id: makeId("stakeholder"), name: "", role: "", influence: "medium", interest: "high", engagement: "keep informed", notes: "" }],
   risks: [{ id: makeId("risk"), title: "", description: "", category: "Schedule", probability: "medium", impact: "medium", owner: "", mitigation: "", status: "open" }],
   documents: [],
@@ -186,6 +195,26 @@ const Projects = () => {
     }
   }, [projectCustomFields, searchParams, setSearchParams, settings?.namespace.slug, workflows]);
 
+  useEffect(() => {
+    const requestedProjectId = searchParams.get("projectId");
+    if (!requestedProjectId) return;
+
+    const project = projects.find((item) => item.id === requestedProjectId);
+    if (!project) return;
+
+    setEditingProjectId(project.id);
+    setDraft({
+      ...mapProjectToDraft(project),
+      customFieldValues: normalizeCustomFieldValues(projectCustomFields, project.customFieldValues),
+    });
+    setDialogOpen(true);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("projectId");
+      return next;
+    }, { replace: true });
+  }, [projectCustomFields, projects, searchParams, setSearchParams]);
+
   const activeProject = useMemo(() => projects.find((project) => project.id === editingProjectId) ?? null, [editingProjectId, projects]);
   const projectChannels = useMemo(
     () => chatChannels.filter((channel) => channel.projectId === editingProjectId),
@@ -239,8 +268,47 @@ const Projects = () => {
       })),
     [projects],
   );
+  const lifecycleTotals = useMemo(
+    () =>
+      lifecycleStageCatalog.map((stage) => ({
+        ...stage,
+        total: projects.reduce((sum, project) => sum + getProjectLifecycleStageCounts(project, tasks)[stage.key], 0),
+      })),
+    [projects, tasks],
+  );
+  const portfolioLifecycleRows = useMemo(
+    () =>
+      projects.slice(0, 18).map((project, index) => {
+        const totalActivities = getProjectLifecycleActivityTotal(project, tasks);
+        return {
+          rank: index + 1,
+          project,
+          lead:
+            project.radarLifecycle?.ownerName ??
+            (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes("project manager"))?.name ??
+            (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes("service delivery manager"))?.name ??
+            (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes("project manager"))?.name ??
+            (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes("service delivery manager"))?.name ??
+            "Unassigned",
+          totalActivities,
+          stageCounts: getProjectLifecycleStageCounts(project, tasks),
+        };
+      }),
+    [projects, tasks],
+  );
   const openProjectTasks = (projectId: string) => navigate(`/tasks?projectId=${projectId}`);
   const openProjectTickets = (projectId: string) => navigate(`/tickets?projectId=${projectId}`);
+  const openProjectLifecycle = (projectId: string, stageKey?: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    const projectTasks = tasks.filter((task) => (task.project_id ?? task.projectId) === projectId);
+    if (!projectTasks.length && project?.radarLifecycle) {
+      toast.info("This project currently has imported radar counts only. Open the project record to add detailed tasks.");
+      openProject(project);
+      return;
+    }
+
+    navigate(stageKey ? `/tasks?projectId=${projectId}&stage=${stageKey}` : `/tasks?projectId=${projectId}`);
+  };
 
   const openCreate = () => {
     setEditingProjectId(null);
@@ -320,6 +388,18 @@ const Projects = () => {
       mitigation: risk.mitigation.trim() || "To be defined",
     }));
     const documents = draft.documents;
+    const assignedProjectMemberIds = Array.from(
+      new Set(
+        [
+          ...resources.map((resource) => resource.memberId).filter((memberId): memberId is string => Boolean(memberId)),
+          ...teamStructure.map((node) => node.memberId).filter((memberId): memberId is string => Boolean(memberId)),
+        ],
+      ),
+    );
+    const channelMemberIds =
+      assignedProjectMemberIds.length > 0
+        ? assignedProjectMemberIds
+        : teamMembers.slice(0, 5).map((member) => member.id);
     const payload: Partial<WorkspaceProject> = {
       name: draft.name.trim(),
       description: draft.description.trim(),
@@ -344,8 +424,8 @@ const Projects = () => {
       risks,
       documents,
       files: documents.map((document) => ({ name: document.name, size: document.generated ? "Generated" : "Uploaded", uploadedAt: document.uploadedAt })),
-      team: resources.map((resource) => resource.name),
-      risk_level: draft.status === "at-risk" ? "high" : draft.priority,
+      team: Array.from(new Set([...resources.map((resource) => resource.name), ...teamStructure.map((node) => node.name)].filter(Boolean))),
+      risk_level: toRiskLevel(draft.status, draft.priority),
     };
     if (!payload.name) return toast.error("Project name is required.");
     const savedProject = editingProjectId
@@ -423,6 +503,7 @@ const Projects = () => {
             readOnly: channelDefinition.readOnly,
             whatsappGroupUrl: channelDefinition.kind === "general" ? whatsAppLink : existingChannel.whatsappGroupUrl,
             quickLinks,
+            memberIds: channelMemberIds,
             messages: nextMessages,
           });
         } else {
@@ -431,7 +512,7 @@ const Projects = () => {
             topic: channelDefinition.topic,
             kind: channelDefinition.kind,
             readOnly: channelDefinition.readOnly,
-            memberIds: teamMembers.slice(0, 5).map((member) => member.id),
+            memberIds: channelMemberIds,
             projectId,
             whatsappGroupUrl: channelDefinition.kind === "general" ? whatsAppLink : undefined,
             quickLinks,
@@ -484,7 +565,13 @@ const Projects = () => {
           teamStructure: current.teamStructure.filter((node) => node.name.trim() || node.title.trim()),
           stakeholders: current.stakeholders.filter((stakeholder) => stakeholder.name.trim()),
           risks: current.risks.filter((risk) => risk.title.trim()),
-        }, documentTemplateStandard),
+        }, documentTemplateStandard, {
+          tasks: linkedTasks,
+          tickets: linkedTickets,
+          currentUserName: settings?.currentUser.displayName,
+          organizationName: settings?.namespace.organization,
+          portfolioOffice: settings?.namespace.portfolioOffice,
+        }),
       ),
     }));
     toast.success(`${documentTemplateStandard} project document package generated from project, stakeholder, and risk data.`);
@@ -613,6 +700,75 @@ const Projects = () => {
             </CardContent>
           </Card>
         </div>
+        <Card className="rounded-3xl overflow-hidden">
+          <CardHeader>
+            <CardTitle>Implementation Lifecycle Matrix</CardTitle>
+            <CardDescription>Portfolio radar view for imported lifecycle counts and task-derived stage totals.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-2 md:grid-cols-5 xl:grid-cols-10">
+              {lifecycleTotals.map((stage) => (
+                <button
+                  key={stage.key}
+                  type="button"
+                  onClick={() => navigate(`/tasks?stage=${stage.key}`)}
+                  className={`rounded-2xl border-2 bg-background px-3 py-3 text-sm font-semibold transition-colors hover:bg-muted/20 ${stage.border} ${stage.text}`}
+                >
+                  <span>{stage.label}</span>
+                  <span className="mt-2 block text-xs text-muted-foreground">{stage.total} activities</span>
+                </button>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-[1200px] w-full text-sm">
+                <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    {lifecycleStageCatalog.map((stage) => (
+                      <th key={stage.key} className="px-3 py-3">{stage.label}</th>
+                    ))}
+                    <th className="px-3 py-3">Total</th>
+                    <th className="px-3 py-3">Lead</th>
+                    <th className="px-3 py-3">Project</th>
+                    <th className="px-3 py-3">#</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolioLifecycleRows.map((row) => (
+                    <tr key={row.project.id} className="border-t">
+                      {lifecycleStageCatalog.map((stage) => (
+                        <td key={`${row.project.id}-${stage.key}`} className="px-2 py-2">
+                          <button
+                            type="button"
+                            onClick={() => openProjectLifecycle(row.project.id, stage.key)}
+                            className={`min-w-[48px] rounded-lg px-3 py-1.5 text-center font-semibold transition-colors hover:opacity-85 ${row.stageCounts[stage.key] > 0 ? `${stage.color} text-white` : 'bg-muted/30 text-muted-foreground'}`}
+                          >
+                            {row.stageCounts[stage.key]}
+                          </button>
+                        </td>
+                      ))}
+                      <td className="px-3 py-3 font-semibold">{row.totalActivities}</td>
+                      <td className="px-3 py-3">{row.lead}</td>
+                      <td className="px-3 py-3">
+                        <button type="button" className="font-medium text-primary hover:underline" onClick={() => openProject(row.project)}>
+                          {row.project.name}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 text-muted-foreground">{row.rank}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-muted/20 font-semibold">
+                    {lifecycleTotals.map((stage) => (
+                      <td key={`portfolio-total-${stage.key}`} className="px-3 py-3">{stage.total}</td>
+                    ))}
+                    <td className="px-3 py-3">{portfolioLifecycleRows.reduce((sum, row) => sum + row.totalActivities, 0)}</td>
+                    <td className="px-3 py-3" colSpan={2}>Portfolio Rollup</td>
+                    <td className="px-3 py-3">{portfolioLifecycleRows.length}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
           </TabsContent>
 
           <TabsContent value="registry" className="space-y-6">

@@ -113,7 +113,7 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
         <Button
           size="sm"
           className="gradient-primary text-primary-foreground shadow-glow gap-1.5"
-          onClick={() => navigate('/projects?action=create')}
+          onClick={() => navigate(`/projects?action=create&source=header&ts=${Date.now()}`)}
         >
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">{translateText(language, 'New Project')}</span>
