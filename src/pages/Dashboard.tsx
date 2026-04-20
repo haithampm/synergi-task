@@ -207,6 +207,9 @@ const Dashboard = () => {
     }
     navigate(`/tasks?projectId=${projectId}&status=${statusKey}`);
   };
+  const openProjectWorkspace = (projectId: string) => {
+    navigate(`/projects?projectId=${projectId}`);
+  };
 
   return (
     <AppLayout>
@@ -416,7 +419,7 @@ const Dashboard = () => {
                       <button
                         type="button"
                         className="text-base font-semibold text-primary hover:underline"
-                        onClick={() => openLifecycleActivities(row.project.id)}
+                        onClick={() => openProjectWorkspace(row.project.id)}
                       >
                         {row.project.name}
                       </button>
@@ -516,7 +519,7 @@ const Dashboard = () => {
                             <button
                               type="button"
                               className="font-medium text-primary hover:underline"
-                              onClick={() => openLifecycleActivities(row.project.id)}
+                              onClick={() => openProjectWorkspace(row.project.id)}
                             >
                               {row.project.name}
                             </button>
@@ -610,7 +613,7 @@ const Dashboard = () => {
                             <button
                               type="button"
                               className="font-medium text-primary hover:underline"
-                              onClick={() => openLifecycleActivities(row.project.id)}
+                              onClick={() => openProjectWorkspace(row.project.id)}
                             >
                               {row.project.name}
                             </button>
