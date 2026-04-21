@@ -849,7 +849,7 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
   .select()
     .single()
     if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Profile save returned no row — RLS may have blocked the write');
+    if (!data) throw new Error('Profile save returned no row -- RLS may have blocked the write');
     return data;
 };
 
@@ -885,7 +885,7 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
   .select()
     .single()
     if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Project save returned no row — RLS may have blocked the write');
+    if (!data) throw new Error('Project save returned no row -- RLS may have blocked the write');
     return data;
 };
 
@@ -1007,7 +1007,7 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
   .select()
     .single()
     if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Task save returned no row — RLS may have blocked the write');
+    if (!data) throw new Error('Task save returned no row -- RLS may have blocked the write');
     return data;
 
 };
