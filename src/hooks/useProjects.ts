@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   makeId,
@@ -411,7 +412,7 @@ export function useCreateProject() {
         await upsertRemoteProject(created);
         await upsertRemoteProjectDocuments(created.id, created.documents ?? []);
       } catch (error) {
-        console.warn("Supabase project sync skipped", error);
+        toast.error("Supabase project sync skipped", error);
       }
 
       return created;
@@ -457,7 +458,7 @@ export function useUpdateProject() {
           await upsertRemoteProject(updated);
           await upsertRemoteProjectDocuments(updated.id, updated.documents ?? []);
         } catch (error) {
-          console.warn("Supabase project update skipped", error);
+          toast.error("Supabase project update skipped", error);
         }
       }
 
@@ -494,7 +495,7 @@ export function useDeleteProject() {
       try {
         await deleteRemoteProject(id);
       } catch (error) {
-        console.warn("Supabase project delete skipped", error);
+        toast.error("Supabase project delete skipped", error);
       }
 
       return deleted;
@@ -557,7 +558,7 @@ export function useCreateTask() {
       try {
         await upsertRemoteTask(created);
       } catch (error) {
-        console.warn("Supabase task sync skipped", error);
+        toast.error("Supabase task sync skipped", error);
       }
 
       return created;
@@ -613,7 +614,7 @@ export function useUpdateTask() {
         try {
           await upsertRemoteTask(updated);
         } catch (error) {
-          console.warn("Supabase task update skipped", error);
+          toast.error("Supabase task update skipped", error);
         }
       }
 
@@ -651,7 +652,7 @@ export function useDeleteTask() {
       try {
         await deleteRemoteTask(id);
       } catch (error) {
-        console.warn("Supabase task delete skipped", error);
+        toast.error("Supabase task delete skipped", error);
       }
 
       return deleted;
@@ -707,7 +708,7 @@ export function useCreateTeamMember() {
         try {
           await upsertRemoteTeamMember(created);
         } catch (error) {
-          console.warn("Supabase team member sync skipped", error);
+          toast.error("Supabase team member sync skipped", error);
         }
       }
 
@@ -746,7 +747,7 @@ export function useUpdateTeamMember() {
         try {
           await upsertRemoteTeamMember(updated);
         } catch (error) {
-          console.warn("Supabase team member update skipped", error);
+          toast.error("Supabase team member update skipped", error);
         }
       }
 
@@ -1296,7 +1297,7 @@ export function useCreateMeeting() {
       try {
         await upsertRemoteMeeting(created);
       } catch (error) {
-        console.warn("Supabase meeting sync skipped", error);
+        toast.error("Supabase meeting sync skipped", error);
       }
 
       return created;
@@ -1332,7 +1333,7 @@ export function useUpdateMeeting() {
         try {
           await upsertRemoteMeeting(updated);
         } catch (error) {
-          console.warn("Supabase meeting update skipped", error);
+          toast.error("Supabase meeting update skipped", error);
         }
       }
 
@@ -1373,7 +1374,7 @@ export function useCreatePersonalEvent() {
       try {
         await upsertRemotePersonalEvent(created);
       } catch (error) {
-        console.warn("Supabase personal event sync skipped", error);
+        toast.error("Supabase personal event sync skipped", error);
       }
 
       return created;
@@ -1409,7 +1410,7 @@ export function useUpdatePersonalEvent() {
         try {
           await upsertRemotePersonalEvent(updated);
         } catch (error) {
-          console.warn("Supabase personal event update skipped", error);
+          toast.error("Supabase personal event update skipped", error);
         }
       }
 
@@ -1442,7 +1443,7 @@ export function useUpdateWorkspaceSettings() {
       try {
         await syncProfileFromSettings(nextSettings);
       } catch (error) {
-        console.warn("Supabase profile sync skipped", error);
+        toast.error("Supabase profile sync skipped", error);
       }
 
       return nextSettings;
@@ -1479,7 +1480,7 @@ export function useCreateStickyNote() {
       try {
         await upsertRemoteStickyNote(created);
       } catch (error) {
-        console.warn("Supabase sticky note sync skipped", error);
+        toast.error("Supabase sticky note sync skipped", error);
       }
 
       return created;
@@ -1516,7 +1517,7 @@ export function useUpdateStickyNote() {
         try {
           await upsertRemoteStickyNote(updated);
         } catch (error) {
-          console.warn("Supabase sticky note update skipped", error);
+          toast.error("Supabase sticky note update skipped", error);
         }
       }
 
@@ -1552,7 +1553,7 @@ export function useDeleteStickyNote() {
       try {
         await deleteRemoteStickyNote(id);
       } catch (error) {
-        console.warn("Supabase sticky note delete skipped", error);
+        toast.error("Supabase sticky note delete skipped", error);
       }
 
       return updated;
