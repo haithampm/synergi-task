@@ -555,13 +555,20 @@ export function useCreateTask() {
         );
       }).tasks[0];
 
-      try {
-        await upsertRemoteTask(created);
-      } catch (error) {
-        toast.error("Supabase task sync skipped", error);
-      }
-
-      return created;
+try {
+          const confirmed = await upsertRemoteTask(created);
+          if (confirmed) {
+            updateWorkspaceData((current) => ({
+              ...current,
+              tasks: current.tasks.map((t) =>
+                t.id === confirmed.id ? { ...t, ...confirmed } : t
+              ),
+            }));
+          }
+  } catch (error) {
+          toast.error(`Task save failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      return confirmed ?? created;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -612,13 +619,21 @@ export function useUpdateTask() {
 
       if (updated) {
         try {
-          await upsertRemoteTask(updated);
+          const confirmed = await upsertRemoteTask(updated);
+          if (confirmed) {
+            updateWorkspaceData((current) => ({
+              ...current,
+              tasks: current.tasks.map((t) =>
+                t.id === confirmed.id ? { ...t, ...confirmed } : t
+              ),
+            }));
+          }
         } catch (error) {
-          toast.error("Supabase task update skipped", error);
+          toast.error(`Task update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
 
-      return updated;
+      return confirmed ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
