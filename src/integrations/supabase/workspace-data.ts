@@ -838,7 +838,7 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
   if (!userId) return;
 
   const displayName = `${settings.profile.firstName} ${settings.profile.lastName}`.trim();
-  await supabase.from("profiles").upsert(
+  const { error: _e } = await supabase.from("profiles").upsert(
     {
       user_id: userId,
       display_name: displayName || settings.currentUser.displayName,
@@ -847,6 +847,7 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
     },
     { onConflict: "user_id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const upsertRemoteProject = async (project: WorkspaceProject) => {
@@ -854,7 +855,7 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!userId) return;
 
-  await supabase.from("projects").upsert(
+  const { error: _e } = await supabase.from("projects").upsert(
     {
       id: project.id,
       name: project.name,
@@ -879,6 +880,7 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
     },
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const upsertRemoteProjectDocuments = async (
@@ -902,12 +904,12 @@ export const upsertRemoteProjectDocuments = async (
       .filter((id) => !remoteIds.includes(id)) ?? [];
 
   if (idsToDelete.length) {
-    await supabase.from("project_documents").delete().in("id", idsToDelete);
+    const { error: _e } = await supabase.from("project_documents").delete().in("id", idsToDelete);
   }
 
   if (documents.length === 0) return;
 
-  await supabase.from("project_documents").upsert(
+  const { error: _e } = await supabase.from("project_documents").upsert(
     documents.map((document) => {
       const remoteId = getRemoteDocumentId(projectId, document);
       const versions = (document.versions ?? []).map((version, index) => ({
@@ -951,12 +953,13 @@ export const upsertRemoteProjectDocuments = async (
     }),
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const deleteRemoteProject = async (projectId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  await supabase.from("projects").delete().eq("id", projectId);
+  const { error: _e } = await supabase.from("projects").delete().eq("id", projectId);
 };
 
 export const upsertRemoteTask = async (task: WorkspaceTask) => {
@@ -967,7 +970,7 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
   const durationDays =
     Number.parseFloat(String(task.duration ?? "").replace(/[^\d.]/g, "")) || null;
 
-  await supabase.from("tasks").upsert(
+  const { error: _e } = await supabase.from("tasks").upsert(
     {
       id: task.id,
       title: task.title,
@@ -996,20 +999,21 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
     },
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 
 };
 
 export const deleteRemoteTask = async (taskId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  await supabase.from("tasks").delete().eq("id", taskId);
+  const { error: _e } = await supabase.from("tasks").delete().eq("id", taskId);
 };
 
 export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!workspaceId) return;
 
-  await supabase.from("team_members" as never).upsert(
+  const { error: _e } = await supabase.from("team_members" as never).upsert(
     {
       id: member.id,
       workspace_id: workspaceId,
@@ -1030,6 +1034,7 @@ export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
     } as never,
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
@@ -1037,7 +1042,7 @@ export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  await supabase.from("meetings" as never).upsert(
+  const { error: _e } = await supabase.from("meetings" as never).upsert(
     {
       id: meeting.id,
       workspace_id: workspaceId,
@@ -1054,6 +1059,7 @@ export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
     } as never,
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) => {
@@ -1061,7 +1067,7 @@ export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) =
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  await supabase.from("personal_events" as never).upsert(
+  const { error: _e } = await supabase.from("personal_events" as never).upsert(
     {
       id: event.id,
       workspace_id: workspaceId,
@@ -1074,6 +1080,7 @@ export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) =
     } as never,
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
@@ -1081,7 +1088,7 @@ export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  await supabase.from("sticky_notes" as never).upsert(
+  const { error: _e } = await supabase.from("sticky_notes" as never).upsert(
     {
       id: note.id,
       workspace_id: workspaceId,
@@ -1093,10 +1100,11 @@ export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
     } as never,
     { onConflict: "id" },
   );
+    if (_e) throw new Error(_e.message);
 };
 
 export const deleteRemoteStickyNote = async (noteId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  await supabase.from("sticky_notes" as never).delete().eq("id", noteId);
+  const { error: _e } = await supabase.from("sticky_notes" as never).delete().eq("id", noteId);
 };
