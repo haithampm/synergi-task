@@ -788,7 +788,8 @@ export function useCreateUserAccount() {
             userAccounts: [record, ...current.userAccounts],
             teamMembers: current.teamMembers.map((member) =>
               member.id === record.teamMemberId
-                ? {
+                ? 
+              
                     ...member,
                     email: record.email,
                     privilegeRole: record.roleId,
