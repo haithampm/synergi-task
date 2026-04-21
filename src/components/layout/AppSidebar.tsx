@@ -76,24 +76,24 @@ const AppSidebar = () => {
 
   return (
     <div className={`flex flex-col h-full bg-sidebar border-r transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
-      <div className=\"flex items-center justify-between p-4 border-b\">
-        {!collapsed && <span className=\"font-bold text-lg truncate\">{settings?.branding.appName || 'IMS'}</span>}
-        <Button variant=\"ghost\" size=\"icon\" onClick={toggleSidebar}>
-          {collapsed ? <ChevronRight className=\"h-4 w-4\" /> : <ChevronLeft className=\"h-4 w-4\" />}
+      <div className="flex items-center justify-between p-4 border-b">
+        {!collapsed && <span className="font-bold text-lg truncate">{settings?.branding.appName || 'IMS'}</span>}
+        <Button variant="ghost" size="icon" onClick={toggleSidebar}>
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </Button>
       </div>
-      <div className=\"flex-1 overflow-y-auto py-4\">
+      <div className="flex-1 overflow-y-auto py-4">
         {navSections.map((section) => (
-          <div key={section.title} className=\"mb-6\">
-            {!collapsed && <h3 className=\"px-4 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground\">{section.title}</h3>}
-            <div className=\"space-y-1\">
+          <div key={section.title} className="mb-6">
+            {!collapsed && <h3 className="px-4 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{section.title}</h3>}
+            <div className="space-y-1">
               {section.items.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
                   className={`flex items-center gap-3 px-4 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${location.pathname === item.path ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground'} ${item.highlight ? 'text-primary' : ''}`}
                 >
-                  <item.icon className=\"h-4 w-4 shrink-0\" />
+                  <item.icon className="h-4 w-4 shrink-0" />
                   {!collapsed && <span>{item.label}</span>}
                 </Link>
               ))}
@@ -101,16 +101,16 @@ const AppSidebar = () => {
           </div>
         ))}
       </div>
-      <div className=\"p-4 border-t\">
+      <div className="p-4 border-t">
         <Link
-          to=\"/profile\"
+          to="/profile"
           className={`flex items-center gap-3 px-2 py-2 text-sm rounded-md transition-colors hover:bg-accent ${location.pathname === '/profile' ? 'bg-accent' : ''}`}
         >
-          <User className=\"h-4 w-4\" />
+          <User className="h-4 w-4" />
           {!collapsed && <span>Profile</span>}
         </Link>
-        <Button variant=\"ghost\" className=\"w-full justify-start gap-3 mt-1\" onClick={() => void signOut()}>
-          <LogOut className=\"h-4 w-4\" />
+        <Button variant="ghost" className="w-full justify-start gap-3 mt-1" onClick={() => void signOut()}>
+          <LogOut className="h-4 w-4" />
           {!collapsed && <span>Sign Out</span>}
         </Button>
       </div>
