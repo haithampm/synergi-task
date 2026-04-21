@@ -838,7 +838,7 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
   if (!userId) return;
 
   const displayName = `${settings.profile.firstName} ${settings.profile.lastName}`.trim();
-  const { error: _e } = await supabase.from("profiles").upsert(
+  const { data, error: _e } = await supabase.from("profiles").upsert(
     {
       user_id: userId,
       display_name: displayName || settings.currentUser.displayName,
@@ -846,8 +846,11 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
       department: settings.namespace.portfolioOffice ?? null,
     },
     { onConflict: "user_id" },
-  );
+  .select()
+    .single()
     if (_e) throw new Error(_e.message);
+    if (!data) throw new Error('Profile save returned no row — RLS may have blocked the write');
+    return data;
 };
 
 export const upsertRemoteProject = async (project: WorkspaceProject) => {
@@ -855,7 +858,7 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!userId) return;
 
-  const { error: _e } = await supabase.from("projects").upsert(
+  const { data, error: _e } = await supabase.from("projects").upsert(
     {
       id: project.id,
       name: project.name,
@@ -879,8 +882,11 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
       radar_lifecycle: project.radarLifecycle ?? {},
     },
     { onConflict: "id" },
-  );
+  .select()
+    .single()
     if (_e) throw new Error(_e.message);
+    if (!data) throw new Error('Project save returned no row — RLS may have blocked the write');
+    return data;
 };
 
 export const upsertRemoteProjectDocuments = async (
@@ -970,7 +976,7 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
   const durationDays =
     Number.parseFloat(String(task.duration ?? "").replace(/[^\d.]/g, "")) || null;
 
-  const { error: _e } = await supabase.from("tasks").upsert(
+  const { data, error: _e } = await supabase.from("tasks").upsert(
     {
       id: task.id,
       title: task.title,
@@ -998,8 +1004,11 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
       created_by: userId,
     },
     { onConflict: "id" },
-  );
+  .select()
+    .single()
     if (_e) throw new Error(_e.message);
+    if (!data) throw new Error('Task save returned no row — RLS may have blocked the write');
+    return data;
 
 };
 
