@@ -14,6 +14,8 @@ const ensureSupabaseAuthReady = () => {
   );
 };
 
+const buildAuthRedirectUrl = (path = "/auth") => `${window.location.origin}${path}`;
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -53,7 +55,7 @@ export function useAuth() {
       password,
       options: {
         data: { full_name: fullName },
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: buildAuthRedirectUrl(),
       },
     });
     if (error) throw error;
@@ -64,7 +66,7 @@ export function useAuth() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: buildAuthRedirectUrl(),
         queryParams: {
           access_type: "offline",
           prompt: "select_account",
@@ -88,7 +90,7 @@ export function useAuth() {
   const sendPasswordResetEmail = async (email: string) => {
     ensureSupabaseAuthReady();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth?mode=recovery`,
+      redirectTo: buildAuthRedirectUrl("/auth?mode=recovery"),
     });
     if (error) throw error;
   };
@@ -99,7 +101,7 @@ export function useAuth() {
       email,
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: `${window.location.origin}/auth`,
+        emailRedirectTo: buildAuthRedirectUrl(),
         data: fullName ? { full_name: fullName, invitation_source: "workspace-admin" } : undefined,
       },
     });

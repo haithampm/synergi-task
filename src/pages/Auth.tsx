@@ -38,6 +38,22 @@ const Auth = () => {
     }
   }, [recoveryMode]);
 
+  useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const errorDescription = hashParams.get("error_description");
+    const errorCode = hashParams.get("error_code");
+    if (!errorDescription) return;
+
+    toast.error(decodeURIComponent(errorDescription.replace(/\+/g, " ")));
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.hash = "";
+    if (errorCode && !nextUrl.searchParams.get("auth_error")) {
+      nextUrl.searchParams.set("auth_error", errorCode);
+    }
+    window.history.replaceState({}, document.title, `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
