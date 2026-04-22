@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
 import { useWorkspaceRealtimeSync } from "@/hooks/useWorkspaceRealtimeSync";
+import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -118,8 +119,9 @@ function ProtectedRoutes() {
 
 function AuthRoute() {
   const { user, loading } = useAuth();
+  const allowRecoveryScreen = isPasswordRecoveryMode(window.location.search, window.location.hash);
   if (loading) return null;
-  if (user) return <Navigate to="/" replace />;
+  if (user && !allowRecoveryScreen) return <Navigate to="/" replace />;
   return (
     <Suspense fallback={<AppLoader />}>
       <Auth />
