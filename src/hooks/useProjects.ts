@@ -24,6 +24,7 @@ import {
 import { buildDashboardWidgets } from "@/lib/dashboard-widgets";
 import { applyRadarRowsToWorkspace, type RadarImportRow } from "@/lib/radar-import";
 import {
+  checkSupabaseConnection,
   deleteRemoteStickyNote,
   deleteRemoteProject,
   deleteRemoteTask,
@@ -46,7 +47,8 @@ import {
   upsertRemoteTeamMember,
 } from "@/integrations/supabase/workspace-data";
 
-const workspaceKeys = {
+export const workspaceKeys = {
+  connection: ["supabase-connection"] as const,
   projects: ["projects"] as const,
   tasks: (projectId?: string) => ["tasks", projectId ?? "all"] as const,
   tickets: ["tickets"] as const,
@@ -65,7 +67,16 @@ const workspaceKeys = {
   dashboard: ["dashboard-stats"] as const,
 };
 
-const invalidateWorkspace = (qc: ReturnType<typeof useQueryClient>) =>
+const liveSyncOptions = isSupabaseReady()
+  ? ({
+      refetchOnWindowFocus: true,
+      refetchInterval: 30_000,
+    } as const)
+  : ({
+      refetchOnWindowFocus: false,
+    } as const);
+
+export const invalidateWorkspace = (qc: ReturnType<typeof useQueryClient>) =>
   Promise.all([
     qc.invalidateQueries({ queryKey: workspaceKeys.projects }),
     qc.invalidateQueries({ queryKey: ["tasks"] }),
@@ -196,6 +207,7 @@ export function useProjects() {
   return useQuery({
     queryKey: workspaceKeys.projects,
     queryFn: async () => fetchMergedProjects(),
+    ...liveSyncOptions,
   });
 }
 
@@ -208,6 +220,7 @@ export function useTasks(projectId?: string) {
       const normalized = merged.map((task) => normalizeTask(task, projects));
       return projectId ? normalized.filter((task) => task.project_id === projectId) : normalized;
     },
+    ...liveSyncOptions,
   });
 }
 
@@ -222,6 +235,7 @@ export function useTeamMembers() {
   return useQuery({
     queryKey: workspaceKeys.team,
     queryFn: async () => fetchMergedTeamMembers(),
+    ...liveSyncOptions,
   });
 }
 
@@ -229,6 +243,7 @@ export function useWorkspaceSettings() {
   return useQuery({
     queryKey: workspaceKeys.settings,
     queryFn: async () => mergeSettingsWithRemoteContext(readWorkspaceData().settings),
+    ...liveSyncOptions,
   });
 }
 
@@ -243,6 +258,7 @@ export function useStickyNotes() {
   return useQuery({
     queryKey: workspaceKeys.stickyNotes,
     queryFn: async () => fetchMergedStickyNotes(),
+    ...liveSyncOptions,
   });
 }
 
@@ -250,6 +266,7 @@ export function useMeetings(projectId?: string) {
   return useQuery({
     queryKey: [...workspaceKeys.meetings, projectId ?? "all"] as const,
     queryFn: async () => fetchMergedMeetings(projectId),
+    ...liveSyncOptions,
   });
 }
 
@@ -260,6 +277,16 @@ export function usePersonalEvents(memberId?: string) {
       const events = await fetchMergedPersonalEvents();
       return memberId ? events.filter((event) => event.memberId === memberId) : events;
     },
+    ...liveSyncOptions,
+  });
+}
+
+export function useDatabaseConnection() {
+  return useQuery({
+    queryKey: workspaceKeys.connection,
+    queryFn: checkSupabaseConnection,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
   });
 }
 
@@ -555,20 +582,13 @@ export function useCreateTask() {
         );
       }).tasks[0];
 
-try {
-          const confirmed = await upsertRemoteTask(created);
-          if (confirmed) {
-            updateWorkspaceData((current) => ({
-              ...current,
-              tasks: current.tasks.map((t) =>
-                t.id === confirmed.id ? { ...t, ...confirmed } : t
-              ),
-            }));
-          }
-  } catch (error) {
-          toast.error(`Task save failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      return confirmed ?? created;
+      try {
+        await upsertRemoteTask(created);
+      } catch (error) {
+        toast.error(`Task save failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
+
+      return created;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -619,21 +639,13 @@ export function useUpdateTask() {
 
       if (updated) {
         try {
-          const confirmed = await upsertRemoteTask(updated);
-          if (confirmed) {
-            updateWorkspaceData((current) => ({
-              ...current,
-              tasks: current.tasks.map((t) =>
-                t.id === confirmed.id ? { ...t, ...confirmed } : t
-              ),
-            }));
-          }
+          await upsertRemoteTask(updated);
         } catch (error) {
-          toast.error(`Task update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          toast.error(`Task update failed: ${error instanceof Error ? error.message : "Unknown error"}`);
         }
       }
 
-      return confirmed ?? updated;
+      return updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -860,6 +872,40 @@ export function useUpdateUserAccount() {
             entityType: "user",
             entityId: id,
             detail: `${updates.fullName ?? existing.fullName} was updated: ${summarizeUpdatedFields(updates)}.`,
+          },
+        );
+      }).userAccounts.find((account) => account.id === id),
+    onSuccess: async () => invalidateWorkspace(qc),
+  });
+}
+
+export function useDeleteUserAccount() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) =>
+      updateWorkspaceData((current) => {
+        const existing = current.userAccounts.find((account) => account.id === id);
+        if (!existing) return current;
+
+        return appendAuditLog(
+          {
+            ...current,
+            userAccounts: current.userAccounts.filter((account) => account.id !== id),
+            teamMembers: current.teamMembers.map((member) =>
+              member.id === existing.teamMemberId
+                ? {
+                    ...member,
+                    email: null,
+                  }
+                : member,
+            ),
+          },
+          {
+            action: "User access removed",
+            entityType: "user",
+            entityId: id,
+            detail: `${existing.fullName} was removed from workspace access.`,
           },
         );
       }).userAccounts.find((account) => account.id === id),

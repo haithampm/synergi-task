@@ -1,6 +1,21 @@
+import fs from "node:fs";
+import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
-import path from "path";
+
+const readLinkedSupabaseProjectRef = () => {
+  const configPath = path.resolve(__dirname, "supabase/config.toml");
+
+  try {
+    const content = fs.readFileSync(configPath, "utf8");
+    const match = content.match(/^\s*project_id\s*=\s*"([^"]+)"/m);
+    return match?.[1] ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const linkedSupabaseProjectRef = readLinkedSupabaseProjectRef();
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -12,6 +27,9 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [react()],
+  define: {
+    __SUPABASE_LINKED_PROJECT_REF__: JSON.stringify(linkedSupabaseProjectRef),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

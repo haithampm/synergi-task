@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, AlertTriangle, ArrowRight, Clock3, FileText, Link2Off, MessagesSquare, ShieldCheck, Ticket, Unplug, Users } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, Clock3, Database, FileText, Link2Off, MessagesSquare, ShieldCheck, Ticket, Unplug, Users } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/layout/AppLayout";
 import AppHeader from "@/components/layout/AppHeader";
@@ -21,6 +21,7 @@ import {
   useTickets,
   useUserAccounts,
   useWorkspaceSettings,
+  useDatabaseConnection,
 } from "@/hooks/useProjects";
 
 const severityTone: Record<"healthy" | "warning" | "critical", string> = {
@@ -40,6 +41,7 @@ const AppMonitor = () => {
   const { data: tickets = [] } = useTickets();
   const { data: teamMembers = [] } = useTeamMembers();
   const { data: userAccounts = [] } = useUserAccounts();
+  const { data: dbConnection } = useDatabaseConnection();
   const { data: meetings = [] } = useMeetings();
   const { data: chatChannels = [] } = useChatChannels();
   const { data: auditLogs = [] } = useAuditLogs();
@@ -131,6 +133,27 @@ const AppMonitor = () => {
   );
 
   const healthCards = [
+    {
+      title: "Database Connection",
+      value: !dbConnection?.configured
+        ? "Offline"
+        : dbConnection.operational
+          ? (dbConnection.connected ? "Live" : "Offline")
+          : "Mismatch",
+      hint: dbConnection
+        ? `${dbConnection.message}${dbConnection.latencyMs !== null ? ` (${dbConnection.latencyMs} ms)` : ""}`
+        : "Checking Supabase connectivity and authentication...",
+      meta:
+        dbConnection?.linkedProjectRef || dbConnection?.activeProjectRef
+          ? [
+              `Linked project: ${dbConnection?.linkedProjectRef ?? "not set"}`,
+              `App project: ${dbConnection?.activeProjectRef ?? "not set"}`,
+            ]
+          : [],
+      icon: Database,
+      actionLabel: "Open Settings",
+      action: () => navigate("/settings"),
+    },
     {
       title: "Audit Events",
       value: auditLastWeek,
@@ -281,6 +304,13 @@ const AppMonitor = () => {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">{card.hint}</p>
+                {"meta" in card && Array.isArray(card.meta)
+                  ? card.meta.map((line) => (
+                      <p key={line} className="text-[11px] text-muted-foreground">
+                        {line}
+                      </p>
+                    ))
+                  : null}
                 <Button variant="ghost" size="sm" className="px-0" onClick={card.action}>
                   {card.actionLabel} <ArrowRight className="h-3.5 w-3.5" />
                 </Button>

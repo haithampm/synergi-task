@@ -1,12 +1,14 @@
 import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
+import { useWorkspaceRealtimeSync } from "@/hooks/useWorkspaceRealtimeSync";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -43,6 +45,7 @@ function ProtectedRoutes() {
   const { data: settings } = useWorkspaceSettings();
   const { data: userAccounts = [] } = useUserAccounts();
   useWorkspaceProfileLink(user);
+  useWorkspaceRealtimeSync();
 
   if (loading) {
     return <AppLoader />;

@@ -4,16 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
+import { getSupabaseConfigStatus } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 const Auth = () => {
+  const supabaseConfig = getSupabaseConfigStatus();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { signIn, signUp, signInWithGoogle } = useAuth();
+  const [resetLoading, setResetLoading] = useState(false);
+  const { signIn, signUp, signInWithGoogle, sendPasswordResetEmail } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +46,23 @@ const Auth = () => {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      toast.error('Enter your email address first.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await sendPasswordResetEmail(email.trim());
+      toast.success('Password reset email sent. Check your inbox.');
+    } catch (err: any) {
+      toast.error(err.message || 'Could not send password reset email');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 gradient-hero">
       <Card className="w-full max-w-md border-border/50 bg-card/95 backdrop-blur-xl">
@@ -58,6 +78,19 @@ const Auth = () => {
           </p>
         </CardHeader>
         <CardContent>
+          {!supabaseConfig.isOperational && (
+            <div className="mb-5 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-left">
+              <p className="text-sm font-medium text-destructive">Database configuration needs attention</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {supabaseConfig.issues[0] ?? "Supabase is not ready yet."}
+              </p>
+              {(supabaseConfig.linkedProjectRef || supabaseConfig.activeProjectRef) && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Linked project: {supabaseConfig.linkedProjectRef ?? "not set"} | App project: {supabaseConfig.activeProjectRef ?? "not set"}
+                </p>
+              )}
+            </div>
+          )}
           {!isSignUp && (
             <div className="space-y-3 mb-5">
               <Button type="button" variant="outline" className="w-full" disabled={googleLoading} onClick={handleGoogleSignIn}>
@@ -93,6 +126,18 @@ const Auth = () => {
               <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="pl-10" required minLength={6} />
             </div>
+            {!isSignUp && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={resetLoading}
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {resetLoading ? 'Sending reset link...' : 'Forgot password?'}
+                </button>
+              </div>
+            )}
             <Button type="submit" className="w-full gradient-primary text-primary-foreground shadow-glow" disabled={loading}>
               {loading ? 'Loading...' : isSignUp ? 'Create Account' : 'Sign In'}
             </Button>

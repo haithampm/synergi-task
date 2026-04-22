@@ -1,4 +1,8 @@
-import { supabase } from "@/integrations/supabase/client";
+import {
+  getSupabaseConfigStatus,
+  isSupabaseOperational,
+  supabase,
+} from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import {
   readWorkspaceData,
@@ -79,9 +83,20 @@ export type RemoteWorkspaceContext = {
   membership: RemoteWorkspaceMembership | null;
 };
 
-const supabaseConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-);
+export type SupabaseConnectionHealth = {
+  activeProjectRef: string | null;
+  configured: boolean;
+  connected: boolean;
+  authenticated: boolean;
+  issues: string[];
+  latencyMs: number | null;
+  linkedProjectRef: string | null;
+  operational: boolean;
+  workspaceId: string | null;
+  message: string;
+};
+
+const supabaseConfigured = isSupabaseOperational();
 
 const normalizeText = (value?: string | null) =>
   value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
@@ -245,6 +260,12 @@ const parseBudget = (value?: string | null) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
+const assertNoSupabaseError = (error: { message: string } | null, context: string) => {
+  if (error) {
+    throw new Error(`${context}: ${error.message}`);
+  }
+};
+
 const toDisplayBudget = (value: number | null, fallback?: string) =>
   value === null || value === undefined ? fallback ?? "" : String(value);
 
@@ -287,6 +308,110 @@ export const generatePersistentEntityId = (fallbackPrefix: string) =>
   globalThis.crypto?.randomUUID?.() ?? `${fallbackPrefix}-${Math.random().toString(36).slice(2, 10)}`;
 
 export const isSupabaseReady = () => supabaseConfigured;
+
+export const checkSupabaseConnection = async (): Promise<SupabaseConnectionHealth> => {
+  const config = getSupabaseConfigStatus();
+
+  if (!config.hasEnv) {
+    return {
+      activeProjectRef: config.activeProjectRef,
+      configured: false,
+      connected: false,
+      authenticated: false,
+      issues: config.issues,
+      latencyMs: null,
+      linkedProjectRef: config.linkedProjectRef,
+      operational: false,
+      workspaceId: null,
+      message: config.issues[0] ?? "Supabase environment variables are missing.",
+    };
+  }
+
+  if (!config.isOperational) {
+    return {
+      activeProjectRef: config.activeProjectRef,
+      configured: true,
+      connected: false,
+      authenticated: false,
+      issues: config.issues,
+      latencyMs: null,
+      linkedProjectRef: config.linkedProjectRef,
+      operational: false,
+      workspaceId: null,
+      message: config.issues[0] ?? "Supabase configuration is not aligned with the linked project.",
+    };
+  }
+
+  const startedAt = Date.now();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    return {
+      activeProjectRef: config.activeProjectRef,
+      configured: true,
+      connected: false,
+      authenticated: false,
+      issues: config.issues,
+      latencyMs: Date.now() - startedAt,
+      linkedProjectRef: config.linkedProjectRef,
+      operational: true,
+      workspaceId: null,
+      message: `Supabase session check failed: ${sessionError.message}`,
+    };
+  }
+
+  const { error: probeError, status } = await supabase
+    .from("workspaces")
+    .select("id", { head: true, count: "exact" })
+    .limit(1);
+
+  const latencyMs = Date.now() - startedAt;
+  const authenticated = Boolean(sessionData.session?.user?.id);
+  if (!probeError) {
+    const workspaceId = authenticated ? await getRemoteWorkspaceId() : null;
+    return {
+      activeProjectRef: config.activeProjectRef,
+      configured: true,
+      connected: true,
+      authenticated,
+      issues: config.issues,
+      latencyMs,
+      linkedProjectRef: config.linkedProjectRef,
+      operational: true,
+      workspaceId,
+      message: authenticated
+        ? "Connected to Supabase with an authenticated session."
+        : "Connected to Supabase without an authenticated session.",
+    };
+  }
+
+  if (status === 401 || status === 403) {
+    return {
+      activeProjectRef: config.activeProjectRef,
+      configured: true,
+      connected: true,
+      authenticated: false,
+      issues: config.issues,
+      latencyMs,
+      linkedProjectRef: config.linkedProjectRef,
+      operational: true,
+      workspaceId: null,
+      message: "Supabase is reachable, but a signed-in user session is required.",
+    };
+  }
+
+  return {
+    activeProjectRef: config.activeProjectRef,
+    configured: true,
+    connected: false,
+    authenticated,
+    issues: config.issues,
+    latencyMs,
+    linkedProjectRef: config.linkedProjectRef,
+    operational: true,
+    workspaceId: null,
+    message: `Supabase connection probe failed: ${probeError.message}`,
+  };
+};
 
 const getAuthenticatedUserId = async () => {
   if (!supabaseConfigured) return null;
@@ -838,19 +963,22 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
   if (!userId) return;
 
   const displayName = `${settings.profile.firstName} ${settings.profile.lastName}`.trim();
-  const { data, error: _e } = await supabase.from("profiles").upsert(
-    {
-      user_id: userId,
-      display_name: displayName || settings.currentUser.displayName,
-      avatar_url: settings.profile.avatarUrl ?? null,
-      department: settings.namespace.portfolioOffice ?? null,
-    },
-    { onConflict: "user_id" },
-  .select()
-    .single()
-    if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Profile save returned no row -- RLS may have blocked the write');
-    return data;
+  const { data, error } = await supabase
+    .from("profiles")
+    .upsert(
+      {
+        user_id: userId,
+        display_name: displayName || settings.currentUser.displayName,
+        avatar_url: settings.profile.avatarUrl ?? null,
+        department: settings.namespace.portfolioOffice ?? null,
+      },
+      { onConflict: "user_id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to sync profile settings");
+  if (!data) throw new Error("Profile save returned no row -- RLS may have blocked the write");
+  return data;
 };
 
 export const upsertRemoteProject = async (project: WorkspaceProject) => {
@@ -858,35 +986,38 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!userId) return;
 
-  const { data, error: _e } = await supabase.from("projects").upsert(
-    {
-      id: project.id,
-      name: project.name,
-      description: project.description ?? null,
-      status: project.status,
-      progress: project.progress ?? 0,
-      priority: project.priority,
-      owner_id: userId,
-      start_date: project.start_date ?? project.startDate ?? null,
-      end_date: project.end_date ?? project.endDate ?? null,
-      budget: parseBudget(project.budget),
-      risk_level: project.risk_level ?? null,
-      ai_summary: project.description ?? null,
-      workspace_id: workspaceId,
-      namespace: project.namespace ?? null,
-      department: project.department ?? null,
-      project_nature: project.projectNature ?? null,
-      tags: project.tags ?? [],
-      workflow_id: project.workflowId ?? null,
-      custom_field_values: project.customFieldValues ?? {},
-      radar_lifecycle: project.radarLifecycle ?? {},
-    },
-    { onConflict: "id" },
-  .select()
-    .single()
-    if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Project save returned no row -- RLS may have blocked the write');
-    return data;
+  const { data, error } = await supabase
+    .from("projects")
+    .upsert(
+      {
+        id: project.id,
+        name: project.name,
+        description: project.description ?? null,
+        status: project.status,
+        progress: project.progress ?? 0,
+        priority: project.priority,
+        owner_id: userId,
+        start_date: project.start_date ?? project.startDate ?? null,
+        end_date: project.end_date ?? project.endDate ?? null,
+        budget: parseBudget(project.budget),
+        risk_level: project.risk_level ?? null,
+        ai_summary: project.description ?? null,
+        workspace_id: workspaceId,
+        namespace: project.namespace ?? null,
+        department: project.department ?? null,
+        project_nature: project.projectNature ?? null,
+        tags: project.tags ?? [],
+        workflow_id: project.workflowId ?? null,
+        custom_field_values: project.customFieldValues ?? {},
+        radar_lifecycle: project.radarLifecycle ?? {},
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert project");
+  if (!data) throw new Error("Project save returned no row -- RLS may have blocked the write");
+  return data;
 };
 
 export const upsertRemoteProjectDocuments = async (
@@ -910,12 +1041,13 @@ export const upsertRemoteProjectDocuments = async (
       .filter((id) => !remoteIds.includes(id)) ?? [];
 
   if (idsToDelete.length) {
-    const { error: _e } = await supabase.from("project_documents").delete().in("id", idsToDelete);
+    const { error } = await supabase.from("project_documents").delete().in("id", idsToDelete);
+    assertNoSupabaseError(error, "Failed to delete stale project documents");
   }
 
   if (documents.length === 0) return;
 
-  const { error: _e } = await supabase.from("project_documents").upsert(
+  const { error } = await supabase.from("project_documents").upsert(
     documents.map((document) => {
       const remoteId = getRemoteDocumentId(projectId, document);
       const versions = (document.versions ?? []).map((version, index) => ({
@@ -959,13 +1091,14 @@ export const upsertRemoteProjectDocuments = async (
     }),
     { onConflict: "id" },
   );
-    if (_e) throw new Error(_e.message);
+  assertNoSupabaseError(error, "Failed to upsert project documents");
 };
 
 export const deleteRemoteProject = async (projectId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  const { error: _e } = await supabase.from("projects").delete().eq("id", projectId);
+  const { error } = await supabase.from("projects").delete().eq("id", projectId);
+  assertNoSupabaseError(error, "Failed to delete project");
 };
 
 export const upsertRemoteTask = async (task: WorkspaceTask) => {
@@ -976,53 +1109,57 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
   const durationDays =
     Number.parseFloat(String(task.duration ?? "").replace(/[^\d.]/g, "")) || null;
 
-  const { data, error: _e } = await supabase.from("tasks").upsert(
-    {
-      id: task.id,
-      title: task.title,
-      description: task.description ?? null,
-      status: task.status,
-      priority: task.priority,
-      assignee_id: null,
-      workspace_id: workspaceId,
-      project_id: task.project_id ?? task.projectId ?? null,
-      due_date: task.due_date ?? task.dueDate ?? null,
-      start_date: task.start_date ?? null,
-      end_date: task.end_date ?? null,
-      parent_task_id: task.parentTaskId ?? null,
-      phase: task.phase ?? null,
-      progress: task.progress ?? 0,
-      is_milestone: task.isMilestone ?? false,
-      tags: task.tags ?? [],
-      depends_on: task.predecessors ?? [],
-      estimated_hours: task.workloadHours ?? null,
-      actual_hours: null,
-      workload_hours: task.workloadHours ?? null,
-      duration_days: durationDays,
-      custom_field_values: task.customFieldValues ?? {},
-      ai_generated: false,
-      created_by: userId,
-    },
-    { onConflict: "id" },
-  .select()
-    .single()
-    if (_e) throw new Error(_e.message);
-    if (!data) throw new Error('Task save returned no row -- RLS may have blocked the write');
-    return data;
+  const { data, error } = await supabase
+    .from("tasks")
+    .upsert(
+      {
+        id: task.id,
+        title: task.title,
+        description: task.description ?? null,
+        status: task.status,
+        priority: task.priority,
+        assignee_id: null,
+        workspace_id: workspaceId,
+        project_id: task.project_id ?? task.projectId ?? null,
+        due_date: task.due_date ?? task.dueDate ?? null,
+        start_date: task.start_date ?? null,
+        end_date: task.end_date ?? null,
+        parent_task_id: task.parentTaskId ?? null,
+        phase: task.phase ?? null,
+        progress: task.progress ?? 0,
+        is_milestone: task.isMilestone ?? false,
+        tags: task.tags ?? [],
+        depends_on: task.predecessors ?? [],
+        estimated_hours: task.workloadHours ?? null,
+        actual_hours: null,
+        workload_hours: task.workloadHours ?? null,
+        duration_days: durationDays,
+        custom_field_values: task.customFieldValues ?? {},
+        ai_generated: false,
+        created_by: userId,
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert task");
+  if (!data) throw new Error("Task save returned no row -- RLS may have blocked the write");
+  return data;
 
 };
 
 export const deleteRemoteTask = async (taskId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  const { error: _e } = await supabase.from("tasks").delete().eq("id", taskId);
+  const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+  assertNoSupabaseError(error, "Failed to delete task");
 };
 
 export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!workspaceId) return;
 
-  const { error: _e } = await supabase.from("team_members" as never).upsert(
+  const { error } = await supabase.from("team_members" as never).upsert(
     {
       id: member.id,
       workspace_id: workspaceId,
@@ -1043,7 +1180,7 @@ export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
     } as never,
     { onConflict: "id" },
   );
-    if (_e) throw new Error(_e.message);
+  assertNoSupabaseError(error, "Failed to upsert team member");
 };
 
 export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
@@ -1051,7 +1188,7 @@ export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  const { error: _e } = await supabase.from("meetings" as never).upsert(
+  const { error } = await supabase.from("meetings" as never).upsert(
     {
       id: meeting.id,
       workspace_id: workspaceId,
@@ -1068,7 +1205,7 @@ export const upsertRemoteMeeting = async (meeting: WorkspaceMeeting) => {
     } as never,
     { onConflict: "id" },
   );
-    if (_e) throw new Error(_e.message);
+  assertNoSupabaseError(error, "Failed to upsert meeting");
 };
 
 export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) => {
@@ -1076,7 +1213,7 @@ export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) =
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  const { error: _e } = await supabase.from("personal_events" as never).upsert(
+  const { error } = await supabase.from("personal_events" as never).upsert(
     {
       id: event.id,
       workspace_id: workspaceId,
@@ -1089,7 +1226,7 @@ export const upsertRemotePersonalEvent = async (event: WorkspacePersonalEvent) =
     } as never,
     { onConflict: "id" },
   );
-    if (_e) throw new Error(_e.message);
+  assertNoSupabaseError(error, "Failed to upsert personal event");
 };
 
 export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
@@ -1097,7 +1234,7 @@ export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return;
 
-  const { error: _e } = await supabase.from("sticky_notes" as never).upsert(
+  const { error } = await supabase.from("sticky_notes" as never).upsert(
     {
       id: note.id,
       workspace_id: workspaceId,
@@ -1109,11 +1246,12 @@ export const upsertRemoteStickyNote = async (note: WorkspaceStickyNote) => {
     } as never,
     { onConflict: "id" },
   );
-    if (_e) throw new Error(_e.message);
+  assertNoSupabaseError(error, "Failed to upsert sticky note");
 };
 
 export const deleteRemoteStickyNote = async (noteId: string) => {
   const userId = await getAuthenticatedUserId();
   if (!userId) return;
-  const { error: _e } = await supabase.from("sticky_notes" as never).delete().eq("id", noteId);
+  const { error } = await supabase.from("sticky_notes" as never).delete().eq("id", noteId);
+  assertNoSupabaseError(error, "Failed to delete sticky note");
 };

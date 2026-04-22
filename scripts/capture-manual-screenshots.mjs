@@ -48,7 +48,7 @@ const context = await browser.newContext({
 });
 
 await context.addInitScript((payload) => {
-  localStorage.setItem("sb-cfmryfivleirdmlcapbc-auth-token", JSON.stringify(payload));
+  localStorage.setItem("sb-jmumywuugtrxqmpidaab-auth-token", JSON.stringify(payload));
 }, session);
 
 const page = await context.newPage();

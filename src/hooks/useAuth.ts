@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  getPrimarySupabaseConfigIssue,
+  isSupabaseOperational,
+  supabase,
+} from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
+
+const ensureSupabaseAuthReady = () => {
+  if (isSupabaseOperational()) return;
+  throw new Error(
+    getPrimarySupabaseConfigIssue() ??
+      "Supabase authentication is unavailable until the project configuration is fixed.",
+  );
+};
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -8,6 +20,11 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseOperational()) {
+      setLoading(false);
+      return () => undefined;
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -24,11 +41,13 @@ export function useAuth() {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
   const signUp = async (email: string, password: string, fullName?: string) => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -41,6 +60,7 @@ export function useAuth() {
   };
 
   const signInWithGoogle = async () => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -55,15 +75,18 @@ export function useAuth() {
   };
 
   const signOut = async () => {
+    if (!isSupabaseOperational()) return;
     await supabase.auth.signOut();
   };
 
   const updatePassword = async (password: string) => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
   };
 
   const sendPasswordResetEmail = async (email: string) => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth`,
     });
@@ -71,6 +94,7 @@ export function useAuth() {
   };
 
   const sendInvitationEmail = async (email: string, fullName?: string) => {
+    ensureSupabaseAuthReady();
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
