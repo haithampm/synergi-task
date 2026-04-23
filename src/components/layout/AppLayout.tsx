@@ -24,6 +24,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
 
   return (
     <div className="min-h-screen bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_42%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.45))]" />
       <AppSidebar />
       <main
         className={`pb-24 transition-all duration-300 ${
@@ -42,7 +43,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
         </div>
       </main>
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>
-        <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-xl backdrop-blur md:max-w-none">
+        <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl md:max-w-none">
           <WorkspaceAssistant isArabic={isArabic} />
           <Button
             size="sm"

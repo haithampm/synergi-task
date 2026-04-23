@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
@@ -140,18 +141,20 @@ function AuthRoute() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/auth" element={<AuthRoute />} />
-            <Route path="*" element={<ProtectedRoutes />} />
-          </Routes>
-          <Sonner position="top-right" expand={true} richColors />
-          <Toaster />
-        </BrowserRouter>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/auth" element={<AuthRoute />} />
+              <Route path="*" element={<ProtectedRoutes />} />
+            </Routes>
+            <Sonner position="top-right" expand={true} richColors />
+            <Toaster />
+          </BrowserRouter>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   );
 }
 

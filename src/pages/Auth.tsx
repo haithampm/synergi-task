@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Lock, Mail, User as UserIcon, Zap } from "lucide-react";
+import { ArrowRight, Copy, Lock, Mail, User as UserIcon, Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,6 +125,15 @@ const Auth = () => {
     }
   };
 
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Sign-in link copied.");
+    } catch {
+      toast.error("Could not copy the link from this browser.");
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 gradient-hero">
       <Card className="w-full max-w-md border-border/50 bg-card/95 backdrop-blur-xl">
@@ -164,6 +173,12 @@ const Auth = () => {
               <p className="mt-2 text-xs text-muted-foreground">
                 Google sign-in can be blocked inside in-app browsers. If Google does not continue, open this page in Chrome or Safari and try again.
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" className="gap-2" onClick={handleCopyLink}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy sign-in link
+                </Button>
+              </div>
             </div>
           )}
 
