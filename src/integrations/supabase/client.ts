@@ -103,20 +103,33 @@ const createMemoryStorage = (): AuthStorageAdapter => {
   };
 };
 
+const canUseStorage = (storage: Storage) => {
+  try {
+    const testKey = "__supabase_storage_check__";
+    storage.setItem(testKey, "1");
+    storage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const createAuthStorage = (): AuthStorageAdapter => {
   if (typeof window === "undefined") {
     return createMemoryStorage();
   }
 
-  try {
-    const testKey = "__supabase_storage_check__";
-    window.localStorage.setItem(testKey, "1");
-    window.localStorage.removeItem(testKey);
+  if (canUseStorage(window.localStorage)) {
     return window.localStorage;
-  } catch (error) {
-    console.warn("[supabase] localStorage unavailable, using in-memory auth storage.", error);
-    return createMemoryStorage();
   }
+
+  if (canUseStorage(window.sessionStorage)) {
+    console.warn("[supabase] localStorage unavailable, using sessionStorage for auth.");
+    return window.sessionStorage;
+  }
+
+  console.warn("[supabase] localStorage and sessionStorage unavailable, using in-memory auth storage.");
+  return createMemoryStorage();
 };
 
 const authStorage = createAuthStorage();
