@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAuthErrorMessage, isInAppBrowser } from "@/lib/auth-ui";
+import { getAuthErrorMessage, getSafeRedirectPath, isInAppBrowser } from "@/lib/auth-ui";
 
 describe("auth ui helpers", () => {
   it("detects common in-app browser user agents", () => {
@@ -20,5 +20,11 @@ describe("auth ui helpers", () => {
     expect(getAuthErrorMessage(new Error("email rate limit exceeded"))).toBe(
       "Too many reset emails were requested recently. Wait a minute, then try again or use Google sign-in.",
     );
+  });
+
+  it("keeps only safe internal redirect paths", () => {
+    expect(getSafeRedirectPath("?redirect=%2Fdashboard", "")).toBe("/dashboard");
+    expect(getSafeRedirectPath("?redirect=https://evil.example", "/")).toBe("/");
+    expect(getSafeRedirectPath("?redirect=%2Fauth", "/")).toBe("/");
   });
 });

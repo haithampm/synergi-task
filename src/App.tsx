@@ -10,6 +10,8 @@ import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
 import { useWorkspaceRealtimeSync } from "@/hooks/useWorkspaceRealtimeSync";
 import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
+import { getSafeRedirectPath } from "@/lib/auth-ui";
+import type { User } from "@supabase/supabase-js";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -41,20 +43,11 @@ const AppLoader = () => (
   </div>
 );
 
-function ProtectedRoutes() {
-  const { user, loading, signOut } = useAuth();
+function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => Promise<void> }) {
   const { data: settings } = useWorkspaceSettings();
   const { data: userAccounts = [] } = useUserAccounts();
   useWorkspaceProfileLink(user);
   useWorkspaceRealtimeSync();
-
-  if (loading) {
-    return <AppLoader />;
-  }
-
-  if (!user) {
-    return <Navigate to="/auth" replace />;
-  }
 
   const matchedAccount = userAccounts.find(
     (acc) => acc.email.trim().toLowerCase() === user.email?.trim().toLowerCase()
@@ -117,11 +110,27 @@ function ProtectedRoutes() {
   );
 }
 
+function ProtectedRoutes() {
+  const { user, loading, signOut } = useAuth();
+
+  if (loading) {
+    return <AppLoader />;
+  }
+
+  if (!user) {
+    const requestedPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    return <Navigate to={`/auth?redirect=${encodeURIComponent(requestedPath)}`} replace />;
+  }
+
+  return <AuthenticatedWorkspace user={user} signOut={signOut} />;
+}
+
 function AuthRoute() {
   const { user, loading } = useAuth();
   const allowRecoveryScreen = isPasswordRecoveryMode(window.location.search, window.location.hash);
+  const redirectPath = getSafeRedirectPath(window.location.search, "/");
   if (loading) return <AppLoader />;
-  if (user && !allowRecoveryScreen) return <Navigate to="/" replace />;
+  if (user && !allowRecoveryScreen) return <Navigate to={redirectPath} replace />;
   return (
     <Suspense fallback={<AppLoader />}>
       <Auth />

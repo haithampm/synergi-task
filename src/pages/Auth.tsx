@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { getSupabaseConfigStatus } from "@/integrations/supabase/client";
 import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
-import { getAuthErrorMessage, isInAppBrowser } from "@/lib/auth-ui";
+import { getAuthErrorMessage, getSafeRedirectPath, isInAppBrowser } from "@/lib/auth-ui";
 import { toast } from "sonner";
 
 const Auth = () => {
@@ -18,6 +18,10 @@ const Auth = () => {
     [],
   );
   const inAppBrowser = useMemo(() => isInAppBrowser(), []);
+  const redirectPath = useMemo(
+    () => getSafeRedirectPath(window.location.search, ""),
+    [],
+  );
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -72,9 +76,10 @@ const Auth = () => {
         }
 
         await updatePassword(password);
-        window.history.replaceState({}, document.title, "/auth");
+        const nextUrl = redirectPath ? `/auth?redirect=${encodeURIComponent(redirectPath)}` : "/auth";
+        window.history.replaceState({}, document.title, nextUrl);
         toast.success("Password updated. You can continue to your workspace.");
-        navigate("/", { replace: true });
+        navigate(redirectPath || "/", { replace: true });
         return;
       }
 
@@ -84,6 +89,7 @@ const Auth = () => {
       } else {
         await signIn(email, password);
         toast.success("Welcome back!");
+        navigate(redirectPath || "/", { replace: true });
       }
     } catch (err: any) {
       toast.error(getAuthErrorMessage(err));
@@ -157,6 +163,15 @@ const Auth = () => {
               <p className="text-sm font-medium text-foreground">Embedded browser detected</p>
               <p className="mt-2 text-xs text-muted-foreground">
                 Google sign-in can be blocked inside in-app browsers. If Google does not continue, open this page in Chrome or Safari and try again.
+              </p>
+            </div>
+          )}
+
+          {redirectPath && !recoveryMode && (
+            <div className="mb-5 rounded-2xl border border-border/60 bg-muted/30 p-4 text-left">
+              <p className="text-sm font-medium text-foreground">Sign in required</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Sign in to continue to <span className="font-medium text-foreground">{redirectPath}</span>.
               </p>
             </div>
           )}
@@ -254,7 +269,8 @@ const Auth = () => {
               <button
                 type="button"
                 onClick={() => {
-                  window.history.replaceState({}, document.title, "/auth");
+                  const nextUrl = redirectPath ? `/auth?redirect=${encodeURIComponent(redirectPath)}` : "/auth";
+                  window.history.replaceState({}, document.title, nextUrl);
                   window.location.reload();
                 }}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"

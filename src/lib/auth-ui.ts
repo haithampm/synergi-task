@@ -20,6 +20,18 @@ export const isInAppBrowser = (userAgent?: string) => {
   return IN_APP_BROWSER_PATTERNS.some((pattern) => pattern.test(value));
 };
 
+export const getSafeRedirectPath = (search?: string, fallback = "/") => {
+  const params = new URLSearchParams(search ?? "");
+  const redirect = params.get("redirect")?.trim();
+
+  if (!redirect) return fallback;
+  if (!redirect.startsWith("/")) return fallback;
+  if (redirect.startsWith("//")) return fallback;
+  if (redirect.startsWith("/auth")) return fallback;
+
+  return redirect;
+};
+
 export const getAuthErrorMessage = (error: unknown) => {
   const message =
     error instanceof Error

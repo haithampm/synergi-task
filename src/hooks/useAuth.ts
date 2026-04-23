@@ -4,6 +4,7 @@ import {
   isSupabaseOperational,
   supabase,
 } from '@/integrations/supabase/client';
+import { getSafeRedirectPath } from '@/lib/auth-ui';
 import type { User, Session } from '@supabase/supabase-js';
 
 const ensureSupabaseAuthReady = () => {
@@ -14,7 +15,14 @@ const ensureSupabaseAuthReady = () => {
   );
 };
 
-const buildAuthRedirectUrl = (path = "/auth") => `${window.location.origin}${path}`;
+const buildAuthRedirectUrl = (path = "/auth") => {
+  const url = new URL(path, window.location.origin);
+  const redirectPath = getSafeRedirectPath(window.location.search, "");
+  if (redirectPath) {
+    url.searchParams.set("redirect", redirectPath);
+  }
+  return url.toString();
+};
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
