@@ -5,6 +5,7 @@ import {
   BarChart3, Ticket, Settings, ChevronLeft, ChevronRight, Sparkles,
   Sun, Moon, LogOut, Search, FileUp, GanttChart, CalendarDays, Files, BriefcaseBusiness, StickyNote, User, Activity, Shield
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { useUpdateWorkspaceSettings, useWorkspaceSettings } from '@/hooks/useProjects';
 import { translateText } from '@/lib/i18n';
