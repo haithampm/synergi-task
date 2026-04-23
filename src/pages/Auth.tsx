@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { getSupabaseConfigStatus } from "@/integrations/supabase/client";
 import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
+import { getAuthErrorMessage, isInAppBrowser } from "@/lib/auth-ui";
 import { toast } from "sonner";
 
 const Auth = () => {
@@ -16,6 +17,7 @@ const Auth = () => {
     () => isPasswordRecoveryMode(window.location.search, window.location.hash),
     [],
   );
+  const inAppBrowser = useMemo(() => isInAppBrowser(), []);
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -84,7 +86,7 @@ const Auth = () => {
         toast.success("Welcome back!");
       }
     } catch (err: any) {
-      toast.error(err.message || "Authentication failed");
+      toast.error(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -95,7 +97,7 @@ const Auth = () => {
     try {
       await signInWithGoogle();
     } catch (err: any) {
-      toast.error(err.message || "Google authentication failed");
+      toast.error(getAuthErrorMessage(err));
       setGoogleLoading(false);
     }
   };
@@ -111,7 +113,7 @@ const Auth = () => {
       await sendPasswordResetEmail(email.trim());
       toast.success("Password reset email sent. Check your inbox and spam folder.");
     } catch (err: any) {
-      toast.error(err.message || "Could not send password reset email");
+      toast.error(getAuthErrorMessage(err));
     } finally {
       setResetLoading(false);
     }
@@ -147,6 +149,15 @@ const Auth = () => {
                   Linked project: {supabaseConfig.linkedProjectRef ?? "not set"} | App project: {supabaseConfig.activeProjectRef ?? "not set"}
                 </p>
               )}
+            </div>
+          )}
+
+          {inAppBrowser && !recoveryMode && (
+            <div className="mb-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-left">
+              <p className="text-sm font-medium text-foreground">Embedded browser detected</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Google sign-in can be blocked inside in-app browsers. If Google does not continue, open this page in Chrome or Safari and try again.
+              </p>
             </div>
           )}
 

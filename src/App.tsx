@@ -120,7 +120,7 @@ function ProtectedRoutes() {
 function AuthRoute() {
   const { user, loading } = useAuth();
   const allowRecoveryScreen = isPasswordRecoveryMode(window.location.search, window.location.hash);
-  if (loading) return null;
+  if (loading) return <AppLoader />;
   if (user && !allowRecoveryScreen) return <Navigate to="/" replace />;
   return (
     <Suspense fallback={<AppLoader />}>

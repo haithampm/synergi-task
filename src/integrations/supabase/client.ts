@@ -83,6 +83,44 @@ if (
 
 const supabaseOperational = hasSupabaseEnv && supabaseConfigIssues.length === 0;
 
+type AuthStorageAdapter = {
+  getItem: (key: string) => string | null;
+  removeItem: (key: string) => void;
+  setItem: (key: string, value: string) => void;
+};
+
+const createMemoryStorage = (): AuthStorageAdapter => {
+  const store = new Map<string, string>();
+
+  return {
+    getItem: (key) => store.get(key) ?? null,
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+  };
+};
+
+const createAuthStorage = (): AuthStorageAdapter => {
+  if (typeof window === "undefined") {
+    return createMemoryStorage();
+  }
+
+  try {
+    const testKey = "__supabase_storage_check__";
+    window.localStorage.setItem(testKey, "1");
+    window.localStorage.removeItem(testKey);
+    return window.localStorage;
+  } catch (error) {
+    console.warn("[supabase] localStorage unavailable, using in-memory auth storage.", error);
+    return createMemoryStorage();
+  }
+};
+
+const authStorage = createAuthStorage();
+
 export type SupabaseConfigStatus = {
   activeProjectRef: string | null;
   envProjectRef: string | null;
@@ -120,7 +158,7 @@ export const supabase = createClient<Database>(
   supabaseOperational ? SUPABASE_PUBLISHABLE_KEY! : "placeholder-anon-key",
   {
     auth: {
-      storage: localStorage,
+      storage: authStorage,
       persistSession: true,
       autoRefreshToken: true,
     },
