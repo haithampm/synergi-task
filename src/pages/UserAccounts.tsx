@@ -78,17 +78,17 @@ const UserAccounts = () => {
       }
       setIsSheetOpen(false);
     } catch (error) {
-      toast.error("Failed to save user account");
+      toast.error(error instanceof Error ? error.message : "Failed to save user account");
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to remove this user's access?")) {
+    if (window.confirm("Are you sure you want to suspend this user's access?")) {
       try {
         await deleteAccount.mutateAsync(id);
-        toast.success("User access removed");
+        toast.success("User access suspended");
       } catch (error) {
-        toast.error("Failed to remove user access");
+        toast.error(error instanceof Error ? error.message : "Failed to suspend user access");
       }
     }
   };
@@ -98,13 +98,16 @@ const UserAccounts = () => {
       <AppHeader title="User Accounts" />
       <PageSection
         title="Workspace Access Control"
-        description="Manage user accounts, permissions, and workspace access."
+        description="Review persisted workspace accounts, adjust permissions, and suspend access using database-backed workspace memberships."
         action={
-          <Button onClick={() => handleOpenForm()} className="gap-2">
+          <Button onClick={() => handleOpenForm()} className="gap-2" disabled>
             <Plus className="h-4 w-4" /> Add User
           </Button>
         }
       >
+        <p className="text-sm text-muted-foreground">
+          New-user invitations still need the backend admin invite flow. Existing linked accounts below can be edited and suspended safely.
+        </p>
         <Card className="glass">
           <Table>
             <TableHeader>

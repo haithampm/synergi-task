@@ -11,8 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useDashboardStats, useDashboards, useProjects, useTasks, useUpdateDashboard, useWorkspaceSettings } from '@/hooks/useProjects';
+import { useDashboardStats, useDashboards, useProjects, useTasks, useUpdateDashboard, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
 import { getProjectLifecycleActivityTotal, getProjectLifecycleStageCounts, lifecycleStageCatalog } from '@/lib/project-activities';
+import { getProjectLinkedUserAccounts, resolveProjectLeader } from '@/lib/workspace-access';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -29,6 +30,7 @@ const Dashboard = () => {
   const { data: settings } = useWorkspaceSettings();
   const { data: projects = [] } = useProjects();
   const { data: tasks = [] } = useTasks();
+  const { data: userAccounts = [] } = useUserAccounts();
   const { data: dashboards = [] } = useDashboards();
   const updateDashboard = useUpdateDashboard();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -116,14 +118,8 @@ const Dashboard = () => {
           review: projectTasks.filter((task) => task.status === 'review').length,
           done: projectTasks.filter((task) => task.status === 'done').length,
         };
-        const leadResource =
-          project.radarLifecycle?.ownerName ??
-          (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes('project manager'))?.name ??
-          (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes('service delivery manager'))?.name ??
-          (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes('project manager'))?.name ??
-          (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes('service delivery manager'))?.name ??
-          project.team?.[0] ??
-          'Unassigned';
+        const leader = resolveProjectLeader(project, stats?.teamMembers ?? [], userAccounts);
+        const linkedUsers = getProjectLinkedUserAccounts(project, stats?.teamMembers ?? [], userAccounts);
 
         return {
           rank: index + 1,
@@ -131,11 +127,12 @@ const Dashboard = () => {
           completion,
           totalActivities,
           statusCounts,
-          leadResource,
+          leader,
+          linkedUsers,
           stageCounts,
         };
       }),
-    [projects, tasks],
+    [projects, stats?.teamMembers, tasks, userAccounts],
   );
   const lifecycleSummary = useMemo(() => {
     const totalActivities = lifecycleTotals.reduce((sum, stage) => sum + stage.total, 0);
@@ -207,10 +204,6 @@ const Dashboard = () => {
     }
     navigate(`/tasks?projectId=${projectId}&status=${statusKey}`);
   };
-  const openProjectWorkspace = (projectId: string) => {
-    navigate(`/projects?projectId=${projectId}`);
-  };
-
   return (
     <AppLayout>
       <AppHeader
@@ -416,14 +409,17 @@ const Dashboard = () => {
                 <div key={`mobile-${row.project.id}`} className="rounded-[1.5rem] border bg-gradient-to-b from-background to-muted/20 p-4 shadow-sm">
                   <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse text-right")}>
                     <div className="space-y-1">
-                      <button
-                        type="button"
-                        className="text-base font-semibold text-primary hover:underline"
-                        onClick={() => openProjectWorkspace(row.project.id)}
+                      <Link
+                        to={`/projects?projectId=${row.project.id}`}
+                        className="text-base font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                        aria-label={`Open ${row.project.name} project workspace`}
                       >
                         {row.project.name}
-                      </button>
-                      <p className="text-xs text-muted-foreground">{row.leadResource}</p>
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {row.leader.name}
+                        {row.linkedUsers.length ? ` · ${row.linkedUsers.length} linked user${row.linkedUsers.length === 1 ? '' : 's'}` : ''}
+                      </p>
                     </div>
                     <Badge variant="outline" className="bg-muted/40 text-[11px] font-semibold">
                       #{row.rank}
@@ -516,15 +512,20 @@ const Dashboard = () => {
                         <>
                           <td className="px-4 py-4 font-semibold text-muted-foreground">{row.rank}</td>
                           <td className="px-4 py-4">
-                            <button
-                              type="button"
-                              className="font-medium text-primary hover:underline"
-                              onClick={() => openProjectWorkspace(row.project.id)}
+                            <Link
+                              to={`/projects?projectId=${row.project.id}`}
+                              className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                              aria-label={`Open ${row.project.name} project workspace`}
                             >
                               {row.project.name}
-                            </button>
+                            </Link>
                           </td>
-                          <td className="px-4 py-4 font-medium">{row.leadResource}</td>
+                          <td className="px-4 py-4 font-medium">
+                            <div className="space-y-1">
+                              <p>{row.leader.name}</p>
+                              <p className="text-xs text-muted-foreground">{row.leader.roleLabel}</p>
+                            </div>
+                          </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-wrap justify-end gap-1.5">
                               {[
@@ -608,15 +609,20 @@ const Dashboard = () => {
                               ))}
                             </div>
                           </td>
-                          <td className="px-4 py-4 font-medium">{row.leadResource}</td>
+                          <td className="px-4 py-4 font-medium">
+                            <div className="space-y-1">
+                              <p>{row.leader.name}</p>
+                              <p className="text-xs text-muted-foreground">{row.leader.roleLabel}</p>
+                            </div>
+                          </td>
                           <td className="px-4 py-4">
-                            <button
-                              type="button"
-                              className="font-medium text-primary hover:underline"
-                              onClick={() => openProjectWorkspace(row.project.id)}
+                            <Link
+                              to={`/projects?projectId=${row.project.id}`}
+                              className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                              aria-label={`Open ${row.project.name} project workspace`}
                             >
                               {row.project.name}
-                            </button>
+                            </Link>
                           </td>
                           <td className="px-4 py-4 font-semibold text-muted-foreground">{row.rank}</td>
                         </>

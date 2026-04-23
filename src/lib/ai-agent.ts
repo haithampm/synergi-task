@@ -1,15 +1,127 @@
 import { hasArabicText } from "@/lib/i18n";
+import {
+  fetchMergedChatChannels,
+  fetchMergedDashboards,
+  fetchMergedMeetings,
+  fetchMergedPersonalEvents,
+  fetchMergedProjects,
+  fetchMergedStickyNotes,
+  fetchMergedTasks,
+  fetchMergedTeamMembers,
+  fetchMergedTickets,
+  fetchMergedUserAccounts,
+  mergeSettingsWithRemoteContext,
+} from "@/integrations/supabase/workspace-data";
 import { readWorkspaceData } from "@/lib/workspace-store";
-import { getWorkspaceSearchResults } from "@/lib/workspace-search";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-agent`;
 const REMOTE_AI_ENABLED = import.meta.env.VITE_ENABLE_REMOTE_AI === "true";
 
-const localResponse = (messages: Msg[]) => {
+const includesAny = (prompt: string, ...keywords: string[]) =>
+  keywords.some((keyword) => prompt.includes(keyword));
+
+const extractWorkspaceSearchQuery = (value: string) =>
+  value
+    .trim()
+    .replace(
+      /^(search|find|show|lookup|locate|search for|find me|show me|ابحث|اعثر|أظهر|اظهر)\s+/i,
+      "",
+    )
+    .trim();
+
+const buildSearchResults = (query: string, workspace: Awaited<ReturnType<typeof loadAssistantWorkspaceData>>) => {
+  const normalized = extractWorkspaceSearchQuery(query).toLowerCase();
+  if (!normalized) return [];
+
+  const matches = [
+    ...workspace.projects
+      .filter((project) =>
+        [project.name, project.description, project.department, ...(project.tags ?? [])]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized)),
+      )
+      .map((project) => `${project.name} | Project · ${project.department || "No department"}`),
+    ...workspace.tasks
+      .filter((task) =>
+        [task.title, task.description, task.projectName, task.assignee, ...(task.tags ?? [])]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized)),
+      )
+      .map((task) => `${task.title} | Task · ${task.projectName}`),
+    ...workspace.tickets
+      .filter((ticket) =>
+        [ticket.title, ticket.description, ticket.assignee]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized)),
+      )
+      .map((ticket) => `${ticket.title} | Ticket · ${ticket.status}`),
+    ...workspace.userAccounts
+      .filter((account) =>
+        [account.fullName, account.email, account.department, account.title]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized)),
+      )
+      .map((account) => `${account.fullName} | User · ${account.email}`),
+    ...workspace.projects.flatMap((project) =>
+      (project.documents ?? [])
+        .filter((document) =>
+          [document.name, document.type, document.category, document.phase]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(normalized)),
+        )
+        .map((document) => `${document.name} | Document · ${project.name}`),
+    ),
+    ...workspace.teamMembers
+      .filter((member) =>
+        [member.name, member.role, member.department, member.email]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized)),
+      )
+      .map((member) => `${member.name} | Team · ${member.role}`),
+  ];
+
+  return matches.slice(0, 12);
+};
+
+const loadAssistantWorkspaceData = async () => {
+  const local = readWorkspaceData();
+  const [projects, tasks, tickets, teamMembers, userAccounts, stickyNotes, chatChannels, dashboards, meetings, personalEvents, settings] =
+    await Promise.all([
+      fetchMergedProjects(),
+      fetchMergedTasks(),
+      fetchMergedTickets(),
+      fetchMergedTeamMembers(),
+      fetchMergedUserAccounts(),
+      fetchMergedStickyNotes(),
+      fetchMergedChatChannels(),
+      fetchMergedDashboards(),
+      fetchMergedMeetings(),
+      fetchMergedPersonalEvents(),
+      mergeSettingsWithRemoteContext(local.settings),
+    ]);
+
+  return {
+    ...local,
+    projects,
+    tasks,
+    tickets,
+    teamMembers,
+    userAccounts,
+    stickyNotes,
+    chatChannels,
+    dashboards,
+    meetings,
+    personalEvents,
+    settings,
+  };
+};
+
+const groundedLocalResponse = async (messages: Msg[]) => {
   const latest = messages[messages.length - 1]?.content ?? "";
   const prompt = latest.toLowerCase();
+  const workspace = await loadAssistantWorkspaceData();
   const {
     projects,
     tasks,
@@ -26,44 +138,39 @@ const localResponse = (messages: Msg[]) => {
     projectTemplates,
     auditLogs,
     settings,
-  } =
-    readWorkspaceData();
-  const includesAny = (...keywords: string[]) => keywords.some((keyword) => prompt.includes(keyword));
-  const projectDocs = projects.flatMap((project) => (project.documents ?? []).map((document) => ({ project, document })));
+  } = workspace;
+  const projectDocs = projects.flatMap((project) =>
+    (project.documents ?? []).map((document) => ({ project, document })),
+  );
   const arabic = settings.appearance.language === "ar" || hasArabicText(latest);
 
   const text = {
     noSearch:
-      "\u0644\u0627 \u062a\u0648\u062c\u062f \u0646\u062a\u0627\u0626\u062c \u0645\u0637\u0627\u0628\u0642\u0629 \u0641\u064a \u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639 \u0623\u0648 \u0627\u0644\u0645\u0647\u0627\u0645 \u0623\u0648 \u0627\u0644\u062a\u0630\u0627\u0643\u0631 \u0623\u0648 \u0627\u0644\u0645\u0633\u062a\u0646\u062f\u0627\u062a \u0623\u0648 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0641\u0631\u064a\u0642.",
+      "لا توجد نتائج مطابقة في المشاريع أو المهام أو التذاكر أو المستندات أو بيانات الفريق.",
     noDocs:
-      "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0633\u062a\u0646\u062f\u0627\u062a \u0645\u0634\u0627\u0631\u064a\u0639 \u0645\u062d\u0641\u0648\u0638\u0629 \u0628\u0639\u062f. \u0623\u0646\u0634\u0626 \u0645\u0634\u0631\u0648\u0639\u064b\u0627 \u0623\u0648 \u062d\u062f\u0651\u062b\u0647 \u062b\u0645 \u0627\u0633\u062a\u062e\u062f\u0645 \u062a\u0648\u0644\u064a\u062f \u062d\u0632\u0645\u0629 PMI.",
-    searchIntro: "\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0628\u062d\u062b \u0641\u064a \u0627\u0644\u0646\u0638\u0627\u0645:",
-    docsIntro: "\u0645\u0633\u062a\u0646\u062f\u0627\u062a \u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639 \u0641\u064a \u0627\u0644\u0646\u0638\u0627\u0645:",
-    overview:
-      "\u0645\u0644\u062e\u0635 \u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u0639\u0645\u0644: ",
-    risksNone:
-      "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u062e\u0627\u0637\u0631 \u0643\u0628\u064a\u0631\u0629 \u0645\u0633\u062c\u0644\u0629 \u062d\u0627\u0644\u064a\u064b\u0627.",
-    planIntro: "\u062e\u0637\u0629 \u062a\u0646\u0641\u064a\u0630 \u0645\u0642\u062a\u0631\u062d\u0629:",
-    teamIntro: "\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0641\u0631\u064a\u0642 \u0648\u0627\u0644\u0645\u0648\u0627\u0631\u062f:",
+      "لا توجد مستندات مشاريع محفوظة بعد. أنشئ مشروعًا أو حدّثه ثم استخدم توليد حزمة PMI.",
+    searchIntro: "نتائج البحث في النظام:",
+    docsIntro: "مستندات المشاريع في النظام:",
+    overview: "ملخص مساحة العمل: ",
+    risksNone: "لا توجد مخاطر كبيرة مسجلة حاليًا.",
+    planIntro: "خطة تنفيذ مقترحة:",
+    teamIntro: "بيانات الفريق والموارد:",
     help:
-      "\u064a\u0645\u0643\u0646\u0646\u064a \u0627\u0644\u0628\u062d\u062b \u0641\u064a \u062c\u0645\u064a\u0639 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0646\u0638\u0627\u0645 \u0648\u062a\u0644\u062e\u064a\u0635 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639 \u0648\u0627\u0644\u0645\u062e\u0627\u0637\u0631 \u0648\u0627\u0644\u0645\u0633\u062a\u0646\u062f\u0627\u062a \u0648\u0627\u0644\u0645\u0648\u0627\u0631\u062f \u0648\u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631.",
+      "يمكنني البحث في بيانات النظام الملحقة بقاعدة البيانات وتلخيص حالة المشاريع والمخاطر والمستندات والموارد وسجلات الوصول.",
   };
 
-  if (includesAny("search", "find", "show", "lookup", "locate", "\u0627\u0628\u062d\u062b", "\u0627\u0639\u062b\u0631", "\u0623\u0638\u0647\u0631", "\u0627\u0638\u0647\u0631")) {
-    const results = getWorkspaceSearchResults(latest);
+  if (includesAny(prompt, "search", "find", "show", "lookup", "locate", "ابحث", "اعثر", "أظهر", "اظهر")) {
+    const results = buildSearchResults(latest, workspace);
     if (!results.length) {
       return arabic
         ? text.noSearch
-        : "No matching records were found in projects, tasks, tickets, user accounts, documents, team, dashboards, workflows, or reports.";
+        : "No matching records were found in persisted projects, tasks, tickets, user accounts, documents, or team data.";
     }
 
-    return [
-      arabic ? text.searchIntro : "Workspace search results:",
-      ...results.slice(0, 12).map((result) => `- ${result.title} | ${result.subtitle}`),
-    ].join("\n");
+    return [arabic ? text.searchIntro : "Workspace search results:", ...results.map((result) => `- ${result}`)].join("\n");
   }
 
-  if (includesAny("document", "charter", "brd", "scope", "schedule plan", "template", "\u0645\u0633\u062a\u0646\u062f", "\u0645\u064a\u062b\u0627\u0642", "\u0646\u0637\u0627\u0642", "\u0642\u0627\u0644\u0628")) {
+  if (includesAny(prompt, "document", "charter", "brd", "scope", "schedule plan", "template", "مستند", "ميثاق", "نطاق", "قالب")) {
     if (!projectDocs.length) {
       return arabic ? text.noDocs : "No project documents are stored yet. Create or update a project and generate the PMI package first.";
     }
@@ -74,7 +181,7 @@ const localResponse = (messages: Msg[]) => {
     ].join("\n");
   }
 
-  if (includesAny("calendar", "meeting", "agenda", "event", "outlook", "teams", "\u062a\u0642\u0648\u064a\u0645", "\u0627\u062c\u062a\u0645\u0627\u0639", "\u062d\u062f\u062b", "\u0623\u0648\u062a\u0644\u0648\u0643", "\u062a\u064a\u0645\u0632")) {
+  if (includesAny(prompt, "calendar", "meeting", "agenda", "event", "outlook", "teams", "تقويم", "اجتماع", "حدث")) {
     const meetingSummary = meetings
       .slice(0, 6)
       .map((meeting) => `- ${meeting.title} | ${meeting.provider} | ${new Date(meeting.startsAt).toLocaleString()}`)
@@ -93,7 +200,7 @@ const localResponse = (messages: Msg[]) => {
           personalSummary ? `الأحداث الشخصية:\n${personalSummary}` : "لا توجد أحداث شخصية مجدولة.",
         ].join("\n")
       : [
-          `There are ${meetings.length} tracked meetings and ${personalEvents.length} personal events in the workspace calendar.`,
+          `There are ${meetings.length} persisted meetings and ${personalEvents.length} personal events in the workspace calendar.`,
           settings.integrations.outlook.connected ? "- Outlook Calendar is connected." : "- Outlook Calendar is ready to connect.",
           settings.integrations.teams.connected ? "- Microsoft Teams is connected." : "- Microsoft Teams is ready to connect.",
           meetingSummary ? `Upcoming meetings:\n${meetingSummary}` : "No meetings are scheduled right now.",
@@ -101,16 +208,14 @@ const localResponse = (messages: Msg[]) => {
         ].join("\n");
   }
 
-  if (includesAny("integration", "onedrive", "whatsapp", "sync", "connector", "\u062a\u0643\u0627\u0645\u0644", "\u0648\u0627\u062a\u0633\u0627\u0628", "\u0648\u0646 \u062f\u0631\u0627\u064a\u0641", "\u0645\u0632\u0627\u0645\u0646\u0629")) {
+  if (includesAny(prompt, "integration", "onedrive", "whatsapp", "sync", "connector", "تكامل", "واتساب", "مزامنة")) {
     const integrationSummary = Object.values(settings.integrations)
       .map((integration) => `- ${integration.providerLabel}: ${integration.connected ? "Connected" : "Ready"} | mode: ${integration.syncMode}`)
       .join("\n");
-    return arabic
-      ? `حالة التكاملات:\n${integrationSummary}`
-      : `Integration status:\n${integrationSummary}`;
+    return arabic ? `حالة التكاملات:\n${integrationSummary}` : `Integration status:\n${integrationSummary}`;
   }
 
-  if (includesAny("report", "dashboard", "template", "\u062a\u0642\u0631\u064a\u0631", "\u0644\u0648\u062d\u0629", "\u0642\u0627\u0644\u0628")) {
+  if (includesAny(prompt, "report", "dashboard", "template", "تقرير", "لوحة", "قالب")) {
     return [
       `Dashboard templates: ${dashboards.map((dashboard) => dashboard.name).join(", ")}.`,
       `Report templates: ${reportTemplates.map((template) => template.name).join(", ")}.`,
@@ -119,45 +224,31 @@ const localResponse = (messages: Msg[]) => {
     ].join("\n");
   }
 
-  if (includesAny("user", "users", "account", "access", "admin", "\u0645\u0633\u062a\u062e\u062f\u0645", "\u062d\u0633\u0627\u0628", "\u0635\u0644\u0627\u062d\u064a\u0627\u062a", "\u0645\u0633\u0624\u0648\u0644")) {
+  if (includesAny(prompt, "user", "users", "account", "access", "admin", "مستخدم", "حساب", "صلاحيات", "مسؤول")) {
     return arabic
       ? [
-          `\u062d\u0633\u0627\u0628\u0627\u062a \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645\u064a\u0646 \u0627\u0644\u0645\u0633\u062c\u0644\u0629: ${userAccounts.length}.`,
-          `- \u0627\u0644\u0645\u0634\u0631\u0641\u0648\u0646: ${userAccounts.filter((account) => account.roleId === "admin").map((account) => account.fullName).join(", ") || "\u0644\u0627 \u064a\u0648\u062c\u062f"}.`,
-          `- \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0627\u0644\u0645\u0648\u0642\u0648\u0641\u0629: ${userAccounts.filter((account) => account.status === "suspended").length}.`,
-          `- \u0635\u0641\u062d\u0629 \u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0645\u062a\u0627\u062d\u0629 \u0641\u064a Settings.`,
+          `حسابات المستخدمين المسجلة: ${userAccounts.length}.`,
+          `- المشرفون: ${userAccounts.filter((account) => account.roleId === "admin").map((account) => account.fullName).join(", ") || "لا يوجد"}.`,
+          `- الحسابات الموقوفة: ${userAccounts.filter((account) => account.status === "suspended").length}.`,
+          "- صفحة إدارة الصلاحيات متاحة في User Accounts وSettings.",
         ].join("\n")
       : [
           `Tracked user accounts: ${userAccounts.length}.`,
           `Admin users: ${userAccounts.filter((account) => account.roleId === "admin").map((account) => account.fullName).join(", ") || "none"}.`,
           `Suspended accounts: ${userAccounts.filter((account) => account.status === "suspended").length}.`,
-          "You can manage user access, roles, and team links from Settings.",
+          "You can manage user access, roles, and team links from the User Accounts and Settings screens.",
         ].join("\n");
   }
 
-  if (includesAny("sticky", "note", "todo", "to do", "\u0645\u0644\u0627\u062d\u0638\u0629", "\u0645\u0647\u0627\u0645 \u0634\u062e\u0635\u064a\u0629", "\u062a\u0648 \u062f\u0648")) {
+  if (includesAny(prompt, "sticky", "note", "todo", "to do", "ملاحظة")) {
     const noteSummary = stickyNotes
       .slice(0, 6)
       .map((note) => `- ${note.title} | ${note.ownerName} | ${note.done ? "done" : "open"}`)
       .join("\n");
-    return arabic
-      ? noteSummary || "لا توجد ملاحظات لاصقة مسجلة حاليًا."
-      : noteSummary || "There are no sticky notes saved right now.";
+    return arabic ? noteSummary || "لا توجد ملاحظات لاصقة مسجلة حاليًا." : noteSummary || "There are no sticky notes saved right now.";
   }
 
-  if (
-    includesAny(
-      "status",
-      "overview",
-      "summary",
-      "summarize",
-      "portfolio",
-      "active project",
-      "active projects",
-      "\u062d\u0627\u0644\u0629",
-      "\u0645\u0644\u062e\u0635",
-    )
-  ) {
+  if (includesAny(prompt, "status", "overview", "summary", "summarize", "portfolio", "active project", "active projects", "حالة", "ملخص")) {
     const activeProjects = projects.filter((project) => project.status === "active").length;
     const inProgressTasks = tasks.filter((task) => task.status === "in-progress").length;
     const openTickets = tickets.filter((ticket) => ticket.status === "open").length;
@@ -165,10 +256,10 @@ const localResponse = (messages: Msg[]) => {
 
     return arabic
       ? [
-          `${text.overview}${activeProjects} \u0645\u0634\u0631\u0648\u0639 \u0646\u0634\u0637\u060c ${inProgressTasks} \u0645\u0647\u0645\u0629 \u0642\u064a\u062f \u0627\u0644\u062a\u0646\u0641\u064a\u0630\u060c \u0648${openTickets} \u062a\u0630\u0643\u0631\u0629 \u0645\u0641\u062a\u0648\u062d\u0629.`,
+          `${text.overview}${activeProjects} مشروع نشط، ${inProgressTasks} مهمة قيد التنفيذ، و${openTickets} تذكرة مفتوحة.`,
           `- الاجتماعات القادمة: ${upcomingMeetings}.`,
-          `- \u0623\u0643\u062b\u0631 \u0645\u0634\u0631\u0648\u0639 \u0645\u0639\u0631\u0636 \u0644\u0644\u0645\u062e\u0627\u0637\u0631: ${projects.find((project) => project.status === "at-risk")?.name ?? "\u0644\u0627 \u064a\u0648\u062c\u062f"}.`,
-          `- \u062d\u062c\u0645 \u0627\u0644\u0641\u0631\u064a\u0642: ${teamMembers.length} \u0639\u0636\u0648.`,
+          `- أكثر مشروع معرّض للمخاطر: ${projects.find((project) => project.status === "at-risk")?.name ?? "لا يوجد"}.`,
+          `- حجم الفريق: ${teamMembers.length} عضو.`,
         ].join("\n")
       : [
           `Workspace overview: ${activeProjects} active projects, ${inProgressTasks} tasks in progress, ${openTickets} open tickets, and ${upcomingMeetings} upcoming meetings.`,
@@ -177,30 +268,32 @@ const localResponse = (messages: Msg[]) => {
         ].join("\n");
   }
 
-  if (includesAny("risk", "\u0645\u062e\u0627\u0637\u0631")) {
+  if (includesAny(prompt, "risk", "مخاطر")) {
     const riskyProjects = projects.filter((project) => project.status === "at-risk" || project.progress < 30);
-    if (riskyProjects.length === 0) {
-      return arabic ? text.risksNone : "No major risks are flagged in the current workspace. Focus on clearing open tickets and keeping schedule dependencies updated.";
+    if (!riskyProjects.length) {
+      return arabic
+        ? text.risksNone
+        : "No major risks are flagged in the current persisted workspace data. Focus on clearing open tickets and keeping schedule dependencies updated.";
     }
 
     return riskyProjects
       .map((project) =>
         arabic
-          ? `- ${project.name} \u062d\u0627\u0644\u062a\u0647 ${project.status} \u0648\u0646\u0633\u0628\u0629 \u0627\u0644\u062a\u0642\u062f\u0645 ${project.progress}%\u060c \u0648\u064a\u0646\u0635\u062d \u0628\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0639\u0648\u0627\u0626\u0642 \u0648\u0627\u0644\u0645\u0639\u0627\u0644\u0645.`
+          ? `- ${project.name} حالته ${project.status} ونسبة التقدم ${project.progress}%، وينصح بمراجعة العوائق والمعالم.`
           : `Risk: ${project.name} is ${project.status} at ${project.progress}% progress. Suggested action: review blockers, rebalance owners, and confirm milestone dates.`,
       )
       .join("\n");
   }
 
-  if (includesAny("task", "plan", "\u0645\u0647\u0627\u0645", "\u062e\u0637\u0629")) {
+  if (includesAny(prompt, "task", "plan", "مهام", "خطة")) {
     return arabic
       ? [
           text.planIntro,
-          "1. \u0631\u0627\u062c\u0639 \u0646\u0637\u0627\u0642 \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0648\u0627\u0644\u0645\u0639\u0627\u0644\u0645.",
-          "2. \u0642\u0633\u0645 \u0627\u0644\u0639\u0645\u0644 \u0625\u0644\u0649 \u0645\u0647\u0627\u0645 \u0645\u0631\u0628\u0648\u0637\u0629 \u0628\u0627\u0644\u0645\u0627\u0644\u0643\u064a\u0646.",
-          "3. \u062d\u062f\u062b \u0627\u0644\u062a\u0628\u0639\u064a\u0627\u062a \u0641\u064a \u0627\u0644\u062c\u062f\u0648\u0644 \u0627\u0644\u0632\u0645\u0646\u064a.",
-          "4. \u0631\u0627\u062c\u0639 \u0627\u0644\u0623\u062d\u0645\u0627\u0644 \u0641\u064a \u0627\u0644\u0641\u0631\u064a\u0642.",
-          "5. \u062a\u0627\u0628\u0639 \u0627\u0644\u0639\u0648\u0627\u0626\u0642 \u0641\u064a \u0627\u0644\u062a\u0630\u0627\u0643\u0631.",
+          "1. راجع نطاق المشروع والمعالم.",
+          "2. قسم العمل إلى مهام مرتبطة بالمالكين.",
+          "3. حدّث التبعيات في الجدول الزمني.",
+          "4. راجع الأحمال في الفريق.",
+          "5. تابع العوائق في التذاكر.",
         ].join("\n")
       : [
           "Suggested execution plan:",
@@ -212,13 +305,13 @@ const localResponse = (messages: Msg[]) => {
         ].join("\n");
   }
 
-  if (includesAny("team", "resource", "utilization", "capacity", "\u0641\u0631\u064a\u0642", "\u0645\u0648\u0627\u0631\u062f", "\u0627\u0633\u062a\u062e\u062f\u0627\u0645", "\u0637\u0627\u0642\u0629")) {
+  if (includesAny(prompt, "team", "resource", "utilization", "capacity", "فريق", "موارد", "طاقة")) {
     return arabic
       ? [
           text.teamIntro,
-          `- ${teamMembers.length} \u0639\u0636\u0648 \u0641\u064a \u0627\u0644\u0641\u0631\u064a\u0642.`,
-          `- \u0642\u0646\u0648\u0627\u062a \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629: ${chatChannels.map((channel) => channel.name).join(", ")}.`,
-          `- \u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644: ${workflows.map((workflow) => workflow.name).join(", ")}.`,
+          `- ${teamMembers.length} عضو في الفريق.`,
+          `- قنوات المحادثة: ${chatChannels.map((channel) => channel.name).join(", ")}.`,
+          `- سير العمل: ${workflows.map((workflow) => workflow.name).join(", ")}.`,
         ].join("\n")
       : [
           `Team members tracked: ${teamMembers.length}.`,
@@ -232,19 +325,17 @@ const localResponse = (messages: Msg[]) => {
         ].join("\n");
   }
 
-  if (includesAny("audit", "history", "activity", "log", "\u062a\u062f\u0642\u064a\u0642", "\u0633\u062c\u0644", "\u0646\u0634\u0627\u0637")) {
+  if (includesAny(prompt, "audit", "history", "activity", "log", "تدقيق", "سجل", "نشاط")) {
     const auditSummary = auditLogs
       .slice(0, 6)
       .map((log) => `- ${log.action} | ${log.actorName} | ${new Date(log.createdAt).toLocaleString()}`)
       .join("\n");
-    return arabic
-      ? auditSummary || "لا توجد سجلات تدقيق حديثة."
-      : auditSummary || "There are no recent audit log entries.";
+    return arabic ? auditSummary || "لا توجد سجلات تدقيق حديثة." : auditSummary || "There are no recent audit log entries.";
   }
 
   return arabic
     ? text.help
-    : "I can search the workspace and summarize project status, risks, documents, user access, dashboards, resources, and next steps. Ask me to find a project, search documents, review user accounts, show tagged tasks, review risks, or summarize the portfolio.";
+    : "I can search the live workspace data and summarize project status, risks, documents, user access, dashboards, resources, and next steps. Ask me to find a project, review user accounts, summarize the portfolio, or show stored documents.";
 };
 
 export async function streamAgentChat({
@@ -263,7 +354,7 @@ export async function streamAgentChat({
     !import.meta.env.VITE_SUPABASE_URL ||
     !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
   ) {
-    onDelta(localResponse(messages));
+    onDelta(await groundedLocalResponse(messages));
     onDone();
     return;
   }
@@ -281,7 +372,7 @@ export async function streamAgentChat({
     });
 
     if (!resp.ok || !resp.body) {
-      onDelta(localResponse(messages));
+      onDelta(await groundedLocalResponse(messages));
       onDone();
       return;
     }
@@ -325,13 +416,13 @@ export async function streamAgentChat({
     }
 
     if (!emittedContent) {
-      onDelta(localResponse(messages));
+      onDelta(await groundedLocalResponse(messages));
     }
 
     onDone();
   } catch (error) {
     onError?.(error instanceof Error ? error.message : "AI request failed");
-    onDelta(localResponse(messages));
+    onDelta(await groundedLocalResponse(messages));
     onDone();
   }
 }

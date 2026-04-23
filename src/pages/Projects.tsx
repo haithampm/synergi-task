@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Bot, Calendar, Download, ExternalLink, FileText, Filter, FolderKanban, GitBranch, LayoutGrid, MessageSquare, Milestone, Plus, Save, Search, Table2, Tags, Ticket, Trash2, Upload, Wand2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AppHeader from "@/components/layout/AppHeader";
@@ -15,12 +15,13 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { useChatChannels, useCreateChatChannel, useCreateChatMessage, useCreateProject, useCreateTask, useDeleteProject, useProjects, useTasks, useTeamMembers, useTickets, useUpdateChatChannel, useUpdateProject, useWorkspaceSettings, useWorkflows } from "@/hooks/useProjects";
+import { useChatChannels, useCreateChatChannel, useCreateChatMessage, useCreateProject, useCreateTask, useDeleteProject, useProjects, useTasks, useTeamMembers, useTickets, useUpdateChatChannel, useUpdateProject, useUserAccounts, useWorkspaceSettings, useWorkflows } from "@/hooks/useProjects";
 import { streamAgentChat } from "@/lib/ai-agent";
 import { getActiveCustomFields, normalizeCustomFieldValues } from "@/lib/custom-fields";
 import { getProjectLifecycleActivityTotal, getProjectLifecycleStageCounts, lifecycleStageCatalog } from "@/lib/project-activities";
 import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/project-documents";
 import { generateScheduleFromProjectNature } from "@/lib/project-schedule";
+import { getProjectLinkedUserAccounts, resolveProjectLeader } from "@/lib/workspace-access";
 import {
   makeId,
   type WorkspaceProject,
@@ -164,6 +165,7 @@ const Projects = () => {
   const { data: tasks = [] } = useTasks();
   const { data: tickets = [] } = useTickets();
   const { data: teamMembers = [] } = useTeamMembers();
+  const { data: userAccounts = [] } = useUserAccounts();
   const { data: chatChannels = [] } = useChatChannels();
   const { data: settings } = useWorkspaceSettings();
   const { data: workflows = [] } = useWorkflows();
@@ -280,21 +282,18 @@ const Projects = () => {
     () =>
       projects.slice(0, 18).map((project, index) => {
         const totalActivities = getProjectLifecycleActivityTotal(project, tasks);
+        const leader = resolveProjectLeader(project, teamMembers, userAccounts);
+        const linkedUsers = getProjectLinkedUserAccounts(project, teamMembers, userAccounts);
         return {
           rank: index + 1,
           project,
-          lead:
-            project.radarLifecycle?.ownerName ??
-            (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes("project manager"))?.name ??
-            (project.resources ?? []).find((resource) => resource.role.toLowerCase().includes("service delivery manager"))?.name ??
-            (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes("project manager"))?.name ??
-            (project.teamStructure ?? []).find((node) => node.title.toLowerCase().includes("service delivery manager"))?.name ??
-            "Unassigned",
+          leader,
+          linkedUsers,
           totalActivities,
           stageCounts: getProjectLifecycleStageCounts(project, tasks),
         };
       }),
-    [projects, tasks],
+    [projects, tasks, teamMembers, userAccounts],
   );
   const openProjectTasks = (projectId: string) => navigate(`/tasks?projectId=${projectId}`);
   const openProjectTickets = (projectId: string) => navigate(`/tickets?projectId=${projectId}`);
@@ -747,11 +746,23 @@ const Projects = () => {
                         </td>
                       ))}
                       <td className="px-3 py-3 font-semibold">{row.totalActivities}</td>
-                      <td className="px-3 py-3">{row.lead}</td>
                       <td className="px-3 py-3">
-                        <button type="button" className="font-medium text-primary hover:underline" onClick={() => openProject(row.project)}>
+                        <div className="min-w-[180px]">
+                          <p className="font-medium">{row.leader.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {row.leader.roleLabel}
+                            {row.linkedUsers.length ? ` | ${row.linkedUsers.length} linked user${row.linkedUsers.length === 1 ? "" : "s"}` : ""}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Link
+                          to={`/projects?projectId=${row.project.id}`}
+                          className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                          aria-label={`Open ${row.project.name} project workspace`}
+                        >
                           {row.project.name}
-                        </button>
+                        </Link>
                       </td>
                       <td className="px-3 py-3 text-muted-foreground">{row.rank}</td>
                     </tr>

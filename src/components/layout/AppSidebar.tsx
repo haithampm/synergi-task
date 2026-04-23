@@ -7,31 +7,32 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
-import { useUpdateWorkspaceSettings, useWorkspaceSettings } from '@/hooks/useProjects';
+import { useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
+import { hasWorkspacePermission } from '@/lib/workspace-access';
 
 const navSections = [
   {
     title: 'Overview',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-      { icon: BarChart3, label: 'Reports', path: '/reports' },
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'view_dashboard' },
+      { icon: BarChart3, label: 'Reports', path: '/reports', permission: 'view_reports' },
     ],
   },
   {
     title: 'Management',
     items: [
-      { icon: FolderKanban, label: 'Projects', path: '/projects' },
-      { icon: GanttChart, label: 'Schedule', path: '/schedule' },
-      { icon: CheckSquare, label: 'To Do', path: '/tasks' },
-      { icon: Files, label: 'Documents', path: '/documents' },
-      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources' },
+      { icon: FolderKanban, label: 'Projects', path: '/projects', permission: 'manage_projects' },
+      { icon: GanttChart, label: 'Schedule', path: '/schedule', permission: 'manage_schedule' },
+      { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks' },
+      { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents' },
+      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },
     ],
   },
   {
     title: 'Collaboration',
     items: [
-      { icon: Users, label: 'Team', path: '/team' },
-      { icon: MessageSquare, label: 'Team Chat', path: '/team-chat' },
+      { icon: Users, label: 'Team', path: '/team', permission: 'manage_team' },
+      { icon: MessageSquare, label: 'Team Chat', path: '/team-chat', permission: 'team_chat' },
       { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
       { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes' },
     ],
@@ -39,22 +40,55 @@ const navSections = [
   {
     title: 'Administration',
     items: [
-      { icon: Shield, label: 'User Accounts', path: '/user-accounts' },
-      { icon: Activity, label: 'App Monitor', path: '/app-monitor' },
-      { icon: FileUp, label: 'Import/Export', path: '/import-export' },
-      { icon: Settings, label: 'Settings', path: '/settings' },
+      { icon: Shield, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users' },
+      { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations' },
+      { icon: FileUp, label: 'Import/Export', path: '/import-export', permission: 'export' },
+      { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges' },
     ],
   },
 ];
 
+const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+
 const AppSidebar = () => {
   const location = useLocation();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const { data: settings } = useWorkspaceSettings();
+  const { data: userAccounts = [] } = useUserAccounts();
   const updateSettings = useUpdateWorkspaceSettings();
   const [collapsed, setCollapsed] = useState(settings?.appearance.sidebarCollapsed ?? false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isArabic = settings?.appearance.language === 'ar';
+  const currentUserAccount = useMemo(
+    () =>
+      userAccounts.find((account) => account.id === settings?.currentUser.userAccountId) ??
+      userAccounts.find((account) => normalizeText(account.email) === normalizeText(user?.email ?? settings?.profile.email)),
+    [settings?.currentUser.userAccountId, settings?.profile.email, user?.email, userAccounts],
+  );
+  const currentRoleId = currentUserAccount?.roleId ?? settings?.currentUser.roleId;
+  const filteredSections = useMemo(
+    () =>
+      navSections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) =>
+            hasWorkspacePermission(currentRoleId, settings?.privilegeRoles, item.permission),
+          ),
+        }))
+        .filter((section) => section.items.length > 0),
+    [currentRoleId, settings?.privilegeRoles],
+  );
+  const activeProfileName = currentUserAccount?.fullName ?? settings?.currentUser.displayName ?? 'Workspace User';
+  const activeProfileEmail = user?.email ?? currentUserAccount?.email ?? settings?.profile.email ?? '';
+  const activeRoleLabel =
+    settings?.privilegeRoles.find((role) => role.id === currentRoleId)?.name ?? currentRoleId ?? 'Workspace User';
+  const initials =
+    activeProfileName
+      .split(' ')
+      .map((part) => part[0] ?? '')
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || 'WU';
 
   const sideClasses = useMemo(
     () =>
@@ -132,7 +166,7 @@ const AppSidebar = () => {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto py-4">
-          {navSections.map((section) => (
+          {filteredSections.map((section) => (
             <div key={section.title} className="mb-6">
               {!collapsed && (
                 <h3 className="mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -144,8 +178,19 @@ const AppSidebar = () => {
                   <Link
                     key={item.path}
                     to={item.path}
+                    aria-current={
+                      item.path === '/dashboard'
+                        ? location.pathname === '/dashboard'
+                          ? 'page'
+                          : undefined
+                        : location.pathname.startsWith(item.path)
+                          ? 'page'
+                          : undefined
+                    }
                     className={`flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${
-                      location.pathname === item.path ? 'bg-accent text-accent-foreground font-medium shadow-sm' : 'text-muted-foreground'
+                      ((item.path === '/dashboard' && location.pathname === '/dashboard') || (item.path !== '/dashboard' && location.pathname.startsWith(item.path)))
+                        ? 'bg-accent text-accent-foreground font-medium shadow-sm'
+                        : 'text-muted-foreground'
                     } ${item.highlight ? 'text-primary' : ''}`}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -157,6 +202,18 @@ const AppSidebar = () => {
           ))}
         </div>
         <div className="border-t p-4">
+          <div className={`mb-3 flex items-center gap-3 rounded-2xl border border-border/70 bg-background/80 px-3 py-3 ${collapsed ? 'justify-center' : ''}`}>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+              {initials}
+            </div>
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-foreground">{activeProfileName}</p>
+                <p className="truncate text-xs text-muted-foreground">{activeProfileEmail}</p>
+                <p className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{activeRoleLabel}</p>
+              </div>
+            )}
+          </div>
           <Link
             to="/profile"
             className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-accent ${

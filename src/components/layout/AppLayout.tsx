@@ -39,7 +39,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       >
         {children}
         <div className="px-6 pb-6 pt-2 text-center text-xs text-muted-foreground">
-          {`© ${new Date().getFullYear()} ${settings?.branding.appName ?? 'Synergi PM Workspace'} by Haitham Elmohamdy`}
+          {`© ${new Date().getFullYear()} ${settings?.branding.appName ?? 'Synergi PM Workspace'} by Haitham Elmohamady`}
         </div>
       </main>
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>

@@ -6,6 +6,9 @@ import {
 import type { Tables } from "@/integrations/supabase/types";
 import {
   readWorkspaceData,
+  type WorkspaceChatChannel,
+  type WorkspaceChatMessage,
+  type WorkspaceDashboard,
   type WorkspaceDocumentVersion,
   type WorkspaceMeeting,
   type WorkspacePersonalEvent,
@@ -15,11 +18,22 @@ import {
   type WorkspaceStickyNote,
   type WorkspaceTask,
   type WorkspaceTeamMember,
+  type WorkspaceTicket,
+  type WorkspaceUserAccount,
 } from "@/lib/workspace-store";
+import {
+  mergeWorkspaceUserAccounts,
+  normalizeWorkspaceRoleId,
+  toRemoteWorkspaceRoleId,
+} from "@/lib/workspace-access";
 
 type RemoteProfile = Tables<"profiles">;
 type RemoteProject = Tables<"projects">;
 type RemoteTask = Tables<"tasks">;
+type RemoteTicket = Tables<"tickets">;
+type RemoteChatChannel = Tables<"chat_channels">;
+type RemoteChatMessage = Tables<"chat_messages">;
+type RemoteDashboard = Tables<"dashboards">;
 type RemoteProjectDocument = Tables<"project_documents">;
 type RemoteWorkspace = Tables<"workspaces">;
 type RemoteWorkspaceMembership = Tables<"workspace_memberships">;
@@ -833,6 +847,189 @@ const mergeStickyNotesByIdentity = (
   return [...mergedRemote, ...remainingLocal];
 };
 
+const mapRemoteTicketToWorkspace = (
+  remote: RemoteTicket,
+  existing?: WorkspaceTicket,
+): WorkspaceTicket => ({
+  ...(existing ?? {
+    id: remote.id,
+    title: remote.title,
+    description: "",
+    status: "open",
+    priority: "medium",
+    assignee: "Unassigned",
+    createdAt: remote.created_at,
+    sla: "",
+    comments: [],
+    customFieldValues: {},
+  }),
+  id: remote.id,
+  title: remote.title,
+  description: remote.description ?? existing?.description ?? "",
+  status: (remote.status as WorkspaceTicket["status"]) ?? existing?.status ?? "open",
+  priority: (remote.priority as WorkspaceTicket["priority"]) ?? existing?.priority ?? "medium",
+  assignee: existing?.assignee ?? "Unassigned",
+  projectId: remote.project_id ?? existing?.projectId,
+  taskId: remote.task_id ?? existing?.taskId,
+  createdAt: remote.created_at,
+  sla:
+    remote.sla_deadline
+      ? `Due ${new Date(remote.sla_deadline).toLocaleString()}`
+      : existing?.sla ?? "No SLA set",
+  comments: existing?.comments ?? [],
+  customFieldValues:
+    (remote.custom_field_values as Record<string, string | number | boolean> | null) ??
+    existing?.customFieldValues ??
+    {},
+});
+
+const mergeTicketsByIdentity = (
+  localTickets: WorkspaceTicket[],
+  remoteTickets: RemoteTicket[],
+) => {
+  const remainingLocal = [...localTickets];
+  const mergedRemote = remoteTickets.map((remote) => {
+    const localIndex = remainingLocal.findIndex((ticket) => ticket.id === remote.id);
+    const existing = localIndex >= 0 ? remainingLocal.splice(localIndex, 1)[0] : undefined;
+    return mapRemoteTicketToWorkspace(remote, existing);
+  });
+
+  return [...mergedRemote, ...remainingLocal];
+};
+
+const mapRemoteChatMessageToWorkspace = (
+  remote: RemoteChatMessage,
+  teamMembers: WorkspaceTeamMember[],
+  userAccounts: WorkspaceUserAccount[],
+  existing?: WorkspaceChatMessage,
+): WorkspaceChatMessage => {
+  const author =
+    teamMembers.find((member) => member.id === existing?.authorId) ??
+    userAccounts.find((account) => normalizeText(account.email) === normalizeText(existing?.authorName));
+
+  return {
+    ...(existing ?? {
+      id: remote.id,
+      authorName: "Workspace User",
+      message: remote.message,
+      createdAt: remote.created_at,
+    }),
+    id: remote.id,
+    authorId: remote.author_user_id ?? existing?.authorId,
+    authorName: (author as WorkspaceTeamMember | undefined)?.name ?? (author as WorkspaceUserAccount | undefined)?.fullName ?? existing?.authorName ?? "Workspace User",
+    message: remote.message,
+    createdAt: remote.created_at,
+    parentId: remote.parent_message_id ?? existing?.parentId,
+    mentions: remote.mentions ?? existing?.mentions ?? [],
+    attachments: Array.isArray(remote.attachments)
+      ? (remote.attachments as Array<{ name: string; url?: string }>)
+      : existing?.attachments ?? [],
+    pinned: remote.pinned ?? existing?.pinned ?? false,
+  };
+};
+
+const mapRemoteChatChannelToWorkspace = (
+  remote: RemoteChatChannel,
+  messages: WorkspaceChatMessage[],
+  existing?: WorkspaceChatChannel,
+): WorkspaceChatChannel => ({
+  ...(existing ?? {
+    id: remote.id,
+    name: remote.name,
+    topic: remote.topic ?? "",
+    memberIds: [],
+    messages: [],
+  }),
+  id: remote.id,
+  name: remote.name,
+  topic: remote.topic ?? existing?.topic ?? "",
+  memberIds: existing?.memberIds ?? [],
+  messages,
+  projectId: remote.project_id ?? existing?.projectId,
+  kind: remote.kind ?? existing?.kind ?? "general",
+  readOnly: remote.read_only ?? existing?.readOnly ?? false,
+  whatsappGroupUrl: remote.whatsapp_group_url ?? existing?.whatsappGroupUrl ?? "",
+  quickLinks: Array.isArray(remote.quick_links)
+    ? (remote.quick_links as WorkspaceChatChannel["quickLinks"])
+    : existing?.quickLinks ?? [],
+});
+
+const mapRemoteDashboardToWorkspace = (
+  remote: RemoteDashboard,
+  existing?: WorkspaceDashboard,
+): WorkspaceDashboard => {
+  const layout = Array.isArray(remote.layout) ? remote.layout : existing?.widgets ?? [];
+  return {
+    ...(existing ?? { id: remote.id, name: remote.name, isDefault: remote.is_default, widgets: [] }),
+    id: remote.id,
+    name: remote.name,
+    isDefault: remote.is_default,
+    widgets: layout as WorkspaceDashboard["widgets"],
+  };
+};
+
+const mergeDashboardsByIdentity = (
+  localDashboards: WorkspaceDashboard[],
+  remoteDashboards: RemoteDashboard[],
+) => {
+  const remainingLocal = [...localDashboards];
+  const mergedRemote = remoteDashboards.map((remote) => {
+    const localIndex = remainingLocal.findIndex((dashboard) => dashboard.id === remote.id);
+    const existing = localIndex >= 0 ? remainingLocal.splice(localIndex, 1)[0] : undefined;
+    return mapRemoteDashboardToWorkspace(remote, existing);
+  });
+
+  return [...mergedRemote, ...remainingLocal];
+};
+
+const buildRemoteWorkspaceUserAccounts = (
+  memberships: RemoteWorkspaceMembership[],
+  profiles: RemoteProfile[],
+  teamMembers: WorkspaceTeamMember[],
+  localAccounts: WorkspaceUserAccount[],
+  workspaceEmailFallback?: string | null,
+) =>
+  memberships.map((membership) => {
+    const profile = profiles.find((item) => item.user_id === membership.user_id);
+    const linkedMember =
+      teamMembers.find((member) => member.id === profile?.id || member.id === membership.user_id) ??
+      teamMembers.find((member) => normalizeText(member.email) === normalizeText(workspaceEmailFallback)) ??
+      teamMembers.find((member) => normalizeText(member.email) === normalizeText(localAccounts.find((account) => account.id === membership.id)?.email));
+    const existing = localAccounts.find(
+      (account) =>
+        account.id === membership.id ||
+        normalizeText(account.email) === normalizeText(linkedMember?.email) ||
+        normalizeText(account.fullName) === normalizeText(profile?.display_name) ||
+        normalizeText(account.fullName) === normalizeText(linkedMember?.name),
+    );
+
+    const fullName =
+      profile?.display_name ??
+      linkedMember?.name ??
+      existing?.fullName ??
+      membership.user_id;
+
+    return {
+      id: membership.id,
+      fullName,
+      email: linkedMember?.email ?? existing?.email ?? workspaceEmailFallback ?? "",
+      roleId: normalizeWorkspaceRoleId(membership.role),
+      status: membership.status === "active" ? "active" : membership.status === "suspended" ? "suspended" : "invited",
+      authProvider: existing?.authProvider ?? "email",
+      teamMemberId: linkedMember?.id ?? existing?.teamMemberId,
+      title: membership.title ?? linkedMember?.role ?? existing?.title ?? "",
+      department: linkedMember?.department ?? profile?.department ?? existing?.department ?? "",
+      createdAt: membership.joined_at,
+      lastAccessAt: existing?.lastAccessAt,
+      invitationSentAt: existing?.invitationSentAt,
+      passwordResetSentAt: existing?.passwordResetSentAt,
+      lastNotificationAt: existing?.lastNotificationAt,
+      notificationCount: existing?.notificationCount,
+      invitedBy: existing?.invitedBy,
+      notes: existing?.notes,
+    } satisfies WorkspaceUserAccount;
+  });
+
 export const fetchMergedProjects = async () => {
   const local = readWorkspaceData().projects;
   const userId = await getAuthenticatedUserId();
@@ -906,6 +1103,125 @@ export const fetchMergedTeamMembers = async () => {
 
   if (error || !data) return localMembers;
   return mergeTeamMembersByIdentity(localMembers, data as unknown as RemoteTeamMember[]);
+};
+
+export const fetchMergedUserAccounts = async () => {
+  const localData = readWorkspaceData();
+  const workspaceId = await getRemoteWorkspaceId();
+  const userId = await getAuthenticatedUserId();
+  if (!workspaceId || !userId) return localData.userAccounts;
+
+  const [membershipsResult, profilesResult, teamMembers] = await Promise.all([
+    supabase
+      .from("workspace_memberships")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("joined_at", { ascending: true }),
+    supabase.from("profiles").select("*"),
+    fetchMergedTeamMembers(),
+  ]);
+
+  if (membershipsResult.error || !membershipsResult.data || profilesResult.error || !profilesResult.data) {
+    return localData.userAccounts;
+  }
+
+  const remoteAccounts = buildRemoteWorkspaceUserAccounts(
+    membershipsResult.data,
+    profilesResult.data,
+    teamMembers,
+    localData.userAccounts,
+    localData.settings.profile.email,
+  );
+
+  return mergeWorkspaceUserAccounts(localData.userAccounts, remoteAccounts);
+};
+
+export const fetchMergedTickets = async () => {
+  const localTickets = readWorkspaceData().tickets;
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return localTickets;
+
+  const { data, error } = await supabase
+    .from("tickets")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false });
+
+  if (error || !data) return localTickets;
+  return mergeTicketsByIdentity(localTickets, data);
+};
+
+export const fetchMergedChatChannels = async () => {
+  const localChannels = readWorkspaceData().chatChannels;
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return localChannels;
+
+  const channelsResult = await supabase
+    .from("chat_channels")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: true });
+
+  if (channelsResult.error || !channelsResult.data) {
+    return localChannels;
+  }
+
+  const channelIds = channelsResult.data.map((channel) => channel.id);
+  const [messagesResult, teamMembers, userAccounts] = await Promise.all([
+    channelIds.length
+      ? supabase
+          .from("chat_messages")
+          .select("*")
+          .in("channel_id", channelIds)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    fetchMergedTeamMembers(),
+    fetchMergedUserAccounts(),
+  ]);
+
+  if (messagesResult.error || !messagesResult.data) return localChannels;
+
+  const remoteMessagesByChannel = messagesResult.data.reduce<Record<string, WorkspaceChatMessage[]>>(
+    (acc, message) => {
+      acc[message.channel_id] = acc[message.channel_id] ?? [];
+      const existingMessage = localChannels
+        .flatMap((channel) => channel.messages)
+        .find((item) => item.id === message.id);
+      acc[message.channel_id].push(
+        mapRemoteChatMessageToWorkspace(message, teamMembers, userAccounts, existingMessage),
+      );
+      return acc;
+    },
+    {},
+  );
+
+  const remainingLocal = [...localChannels];
+  const mergedRemote = channelsResult.data.map((channel) => {
+    const localIndex = remainingLocal.findIndex((item) => item.id === channel.id);
+    const existing = localIndex >= 0 ? remainingLocal.splice(localIndex, 1)[0] : undefined;
+    return mapRemoteChatChannelToWorkspace(
+      channel,
+      remoteMessagesByChannel[channel.id] ?? existing?.messages ?? [],
+      existing,
+    );
+  });
+
+  return [...mergedRemote, ...remainingLocal];
+};
+
+export const fetchMergedDashboards = async () => {
+  const localDashboards = readWorkspaceData().dashboards;
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return localDashboards;
+
+  const { data, error } = await supabase
+    .from("dashboards")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false });
+
+  if (error || !data) return localDashboards;
+  return mergeDashboardsByIdentity(localDashboards, data);
 };
 
 export const fetchMergedMeetings = async (projectId?: string) => {
@@ -1155,6 +1471,168 @@ export const deleteRemoteTask = async (taskId: string) => {
   assertNoSupabaseError(error, "Failed to delete task");
 };
 
+export const upsertRemoteTicket = async (ticket: WorkspaceTicket) => {
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return;
+
+  const { data, error } = await supabase
+    .from("tickets")
+    .upsert(
+      {
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description ?? null,
+        status: ticket.status,
+        priority: ticket.priority,
+        project_id: ticket.projectId ?? null,
+        task_id: ticket.taskId ?? null,
+        workspace_id: workspaceId,
+        custom_field_values: ticket.customFieldValues ?? {},
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert ticket");
+  if (!data) throw new Error("Ticket save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const deleteRemoteTicket = async (ticketId: string) => {
+  const { error } = await supabase.from("tickets").delete().eq("id", ticketId);
+  assertNoSupabaseError(error, "Failed to delete ticket");
+};
+
+export const upsertRemoteChatChannel = async (channel: WorkspaceChatChannel) => {
+  const workspaceId = await getRemoteWorkspaceId();
+  const userId = await getAuthenticatedUserId();
+  if (!workspaceId) return;
+
+  const { data, error } = await supabase
+    .from("chat_channels")
+    .upsert(
+      {
+        id: channel.id,
+        workspace_id: workspaceId,
+        created_by: userId ?? null,
+        name: channel.name,
+        topic: channel.topic ?? null,
+        project_id: channel.projectId ?? null,
+        kind: channel.kind ?? "general",
+        read_only: channel.readOnly ?? false,
+        whatsapp_group_url: channel.whatsappGroupUrl ?? null,
+        quick_links: channel.quickLinks ?? [],
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert chat channel");
+  if (!data) throw new Error("Chat channel save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const upsertRemoteChatMessage = async (
+  message: WorkspaceChatMessage & { channelId: string },
+) => {
+  const userId = await getAuthenticatedUserId();
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .upsert(
+      {
+        id: message.id,
+        channel_id: message.channelId,
+        author_user_id: userId ?? null,
+        message: message.message,
+        parent_message_id: message.parentId ?? null,
+        mentions: message.mentions ?? [],
+        attachments: message.attachments ?? [],
+        pinned: message.pinned ?? false,
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert chat message");
+  if (!data) throw new Error("Chat message save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const upsertRemoteDashboard = async (dashboard: WorkspaceDashboard) => {
+  const workspaceId = await getRemoteWorkspaceId();
+  const userId = await getAuthenticatedUserId();
+  if (!workspaceId) return;
+
+  const { data, error } = await supabase
+    .from("dashboards")
+    .upsert(
+      {
+        id: dashboard.id,
+        workspace_id: workspaceId,
+        created_by: userId ?? null,
+        name: dashboard.name,
+        is_default: dashboard.isDefault,
+        layout: dashboard.widgets ?? [],
+      },
+      { onConflict: "id" },
+    )
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to upsert dashboard");
+  if (!data) throw new Error("Dashboard save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const syncWorkspaceUserAccount = async (
+  account: Partial<WorkspaceUserAccount> & { id: string },
+) => {
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return;
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from("workspace_memberships")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("id", account.id)
+    .limit(1);
+  assertNoSupabaseError(membershipError, "Failed to load workspace membership");
+
+  const membership = memberships?.[0];
+  if (!membership) {
+    throw new Error("This workspace account is not linked to a remote membership yet.");
+  }
+
+  const remoteRole = toRemoteWorkspaceRoleId(account.roleId ?? membership.role);
+
+  const { error: updateMembershipError } = await supabase
+    .from("workspace_memberships")
+    .update({
+      role: remoteRole as never,
+      status: account.status ?? membership.status,
+      title: account.title ?? membership.title,
+    })
+    .eq("id", membership.id);
+  assertNoSupabaseError(updateMembershipError, "Failed to update workspace membership");
+
+  const remoteTeamMembers = await fetchMergedTeamMembers();
+  const linkedMember = remoteTeamMembers.find(
+    (member) =>
+      member.id === account.teamMemberId ||
+      normalizeText(member.email) === normalizeText(account.email),
+  );
+
+  if (linkedMember) {
+    await upsertRemoteTeamMember({
+      ...linkedMember,
+      name: account.fullName ?? linkedMember.name,
+      email: account.email ?? linkedMember.email,
+      role: account.title ?? linkedMember.role,
+      department: account.department ?? linkedMember.department,
+      privilegeRole: account.roleId ?? linkedMember.privilegeRole,
+    });
+  }
+};
+
 export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
   const workspaceId = await getRemoteWorkspaceId();
   if (!workspaceId) return;
@@ -1167,7 +1645,7 @@ export const upsertRemoteTeamMember = async (member: WorkspaceTeamMember) => {
       email: member.email || null,
       role_title: member.role || null,
       department: member.department || null,
-      privilege_role: member.privilegeRole ?? "team_member",
+      privilege_role: toRemoteWorkspaceRoleId(member.privilegeRole ?? "team_member"),
       capacity_hours: member.capacityHours ?? 40,
       utilization_target: member.utilizationTarget ?? 85,
       metadata: {

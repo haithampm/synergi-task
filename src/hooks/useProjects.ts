@@ -25,25 +25,35 @@ import { buildDashboardWidgets } from "@/lib/dashboard-widgets";
 import { applyRadarRowsToWorkspace, type RadarImportRow } from "@/lib/radar-import";
 import {
   checkSupabaseConnection,
+  deleteRemoteTicket,
   deleteRemoteStickyNote,
   deleteRemoteProject,
   deleteRemoteTask,
+  fetchMergedChatChannels,
+  fetchMergedDashboards,
   fetchMergedMeetings,
   fetchMergedPersonalEvents,
   fetchMergedProjects,
   fetchMergedStickyNotes,
   fetchMergedTasks,
   fetchMergedTeamMembers,
+  fetchMergedTickets,
+  fetchMergedUserAccounts,
   generatePersistentEntityId,
   isSupabaseReady,
   mergeSettingsWithRemoteContext,
+  syncWorkspaceUserAccount,
   syncProfileFromSettings,
+  upsertRemoteChatChannel,
+  upsertRemoteChatMessage,
+  upsertRemoteDashboard,
   upsertRemoteMeeting,
   upsertRemotePersonalEvent,
   upsertRemoteProject,
   upsertRemoteProjectDocuments,
   upsertRemoteStickyNote,
   upsertRemoteTask,
+  upsertRemoteTicket,
   upsertRemoteTeamMember,
 } from "@/integrations/supabase/workspace-data";
 
@@ -227,7 +237,8 @@ export function useTasks(projectId?: string) {
 export function useTickets() {
   return useQuery({
     queryKey: workspaceKeys.tickets,
-    queryFn: async () => readWorkspaceData().tickets,
+    queryFn: async () => fetchMergedTickets(),
+    ...liveSyncOptions,
   });
 }
 
@@ -250,7 +261,8 @@ export function useWorkspaceSettings() {
 export function useUserAccounts() {
   return useQuery({
     queryKey: workspaceKeys.users,
-    queryFn: async () => readWorkspaceData().userAccounts,
+    queryFn: async () => fetchMergedUserAccounts(),
+    ...liveSyncOptions,
   });
 }
 
@@ -293,7 +305,8 @@ export function useDatabaseConnection() {
 export function useChatChannels() {
   return useQuery({
     queryKey: workspaceKeys.chat,
-    queryFn: async () => readWorkspaceData().chatChannels,
+    queryFn: async () => fetchMergedChatChannels(),
+    ...liveSyncOptions,
   });
 }
 
@@ -307,7 +320,8 @@ export function useWorkflows() {
 export function useDashboards() {
   return useQuery({
     queryKey: workspaceKeys.dashboards,
-    queryFn: async () => readWorkspaceData().dashboards,
+    queryFn: async () => fetchMergedDashboards(),
+    ...liveSyncOptions,
   });
 }
 
@@ -337,11 +351,16 @@ export function useDashboardStats() {
     queryKey: workspaceKeys.dashboard,
     queryFn: async () => {
       const local = readWorkspaceData();
-      const projects = await fetchMergedProjects();
-      const tasks = await fetchMergedTasks();
-      const teamMembers = await fetchMergedTeamMembers();
-      const meetings = await fetchMergedMeetings();
-      const { tickets, chatChannels, workflows, dashboards } = local;
+      const [projects, tasks, teamMembers, meetings, tickets, chatChannels, dashboards] = await Promise.all([
+        fetchMergedProjects(),
+        fetchMergedTasks(),
+        fetchMergedTeamMembers(),
+        fetchMergedMeetings(),
+        fetchMergedTickets(),
+        fetchMergedChatChannels(),
+        fetchMergedDashboards(),
+      ]);
+      const { workflows } = local;
       const settings = await mergeSettingsWithRemoteContext(local.settings);
       const normalizedTasks = tasks.map((task) => normalizeTask(task, projects));
       const overdueTasks = normalizedTasks.filter(
@@ -368,6 +387,7 @@ export function useDashboardStats() {
         tasks: normalizedTasks,
         tickets,
         meetings,
+        teamMembers,
         chatChannels,
         workflows,
         dashboards,
@@ -788,50 +808,11 @@ export function useCreateUserAccount() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (account: Partial<WorkspaceUserAccount> & { fullName: string; email: string }) =>
-      updateWorkspaceData((current) => {
-        const linkedTeamMember = account.teamMemberId
-          ? current.teamMembers.find((member) => member.id === account.teamMemberId)
-          : undefined;
-        const record: WorkspaceUserAccount = {
-          id: makeId("user"),
-          fullName: account.fullName,
-          email: account.email,
-          roleId: account.roleId ?? linkedTeamMember?.privilegeRole ?? "viewer",
-          status: account.status ?? "invited",
-          authProvider: account.authProvider ?? "email",
-          teamMemberId: account.teamMemberId ?? "",
-          title: account.title ?? linkedTeamMember?.role ?? "",
-          department: account.department ?? linkedTeamMember?.department ?? "",
-          createdAt: account.createdAt ?? new Date().toISOString().slice(0, 10),
-          lastAccessAt: account.lastAccessAt,
-          invitedBy: account.invitedBy ?? current.settings.currentUser.displayName,
-          notes: account.notes ?? "",
-        };
-
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: [record, ...current.userAccounts],
-            teamMembers: current.teamMembers.map((member) =>
-              member.id === record.teamMemberId
-                ?  {
-              
-                    ...member,
-                    email: record.email,
-                    privilegeRole: record.roleId,
-                  }
-                : member,
-            ),
-          },
-          {
-            action: "User access created",
-            entityType: "user",
-            entityId: record.id,
-            detail: `${record.fullName} was added with ${record.roleId} access.`,
-          },
-        );
-      }).userAccounts[0],
+    mutationFn: async (_account: Partial<WorkspaceUserAccount> & { fullName: string; email: string }) => {
+      throw new Error(
+        "Creating brand-new workspace access still requires a server-side admin invitation flow. Existing linked accounts can be edited and persisted normally.",
+      );
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -840,8 +821,9 @@ export function useUpdateUserAccount() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceUserAccount> & { id: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceUserAccount> & { id: string }) => {
+      await syncWorkspaceUserAccount({ id, ...updates });
+      return updateWorkspaceData((current) => {
         const existing = current.userAccounts.find((account) => account.id === id);
         if (!existing) return current;
         const teamMemberId = updates.teamMemberId ?? existing?.teamMemberId ?? "";
@@ -874,7 +856,8 @@ export function useUpdateUserAccount() {
             detail: `${updates.fullName ?? existing.fullName} was updated: ${summarizeUpdatedFields(updates)}.`,
           },
         );
-      }).userAccounts.find((account) => account.id === id),
+      }).userAccounts.find((account) => account.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -883,15 +866,18 @@ export function useDeleteUserAccount() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (id: string) => {
+      await syncWorkspaceUserAccount({ id, status: "suspended" });
+      return updateWorkspaceData((current) => {
         const existing = current.userAccounts.find((account) => account.id === id);
         if (!existing) return current;
 
         return appendAuditLog(
           {
             ...current,
-            userAccounts: current.userAccounts.filter((account) => account.id !== id),
+            userAccounts: current.userAccounts.map((account) =>
+              account.id === id ? { ...account, status: "suspended" } : account,
+            ),
             teamMembers: current.teamMembers.map((member) =>
               member.id === existing.teamMemberId
                 ? {
@@ -905,10 +891,11 @@ export function useDeleteUserAccount() {
             action: "User access removed",
             entityType: "user",
             entityId: id,
-            detail: `${existing.fullName} was removed from workspace access.`,
+            detail: `${existing.fullName} access was suspended.`,
           },
         );
-      }).userAccounts.find((account) => account.id === id),
+      }).userAccounts.find((account) => account.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1094,33 +1081,37 @@ export function useCreateTicket() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (ticket: Partial<WorkspaceTicket> & { title: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async (ticket: Partial<WorkspaceTicket> & { title: string }) => {
+      const record = {
+        id: ticket.id ?? generatePersistentEntityId("ticket"),
+        title: ticket.title,
+        description: ticket.description ?? "",
+        status: ticket.status ?? "open",
+        priority: ticket.priority ?? "medium",
+        assignee: ticket.assignee ?? "Unassigned",
+        projectId: ticket.projectId,
+        taskId: ticket.taskId,
+        createdAt: ticket.createdAt ?? new Date().toISOString().slice(0, 10),
+        sla: ticket.sla ?? "24h remaining",
+        comments: ticket.comments ?? [],
+        customFieldValues: ticket.customFieldValues ?? {},
+      } satisfies WorkspaceTicket;
+
+      await upsertRemoteTicket(record);
+      return updateWorkspaceData((current) => {
         const nextId = `TK-${String(current.tickets.length + 1).padStart(3, "0")}`;
-        const record: WorkspaceTicket = {
-          id: nextId,
-          title: ticket.title,
-          description: ticket.description ?? "",
-          status: ticket.status ?? "open",
-          priority: ticket.priority ?? "medium",
-          assignee: ticket.assignee ?? "Unassigned",
-          projectId: ticket.projectId,
-          taskId: ticket.taskId,
-          createdAt: ticket.createdAt ?? new Date().toISOString().slice(0, 10),
-          sla: ticket.sla ?? "24h remaining",
-          comments: ticket.comments ?? [],
-          customFieldValues: ticket.customFieldValues ?? {},
-        };
+        const localRecord = { ...record, id: ticket.id ?? nextId };
         return appendAuditLog(
-          { ...current, tickets: [record, ...current.tickets] },
+          { ...current, tickets: [localRecord, ...current.tickets.filter((item) => item.id !== localRecord.id)] },
           {
             action: "Ticket created",
             entityType: "ticket",
-            entityId: record.id,
-            detail: `${record.id} - ${record.title} was opened for ${record.assignee}.`,
+            entityId: localRecord.id,
+            detail: `${localRecord.id} - ${localRecord.title} was opened for ${localRecord.assignee}.`,
           },
         );
-      }).tickets[0],
+      }).tickets[0];
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1129,8 +1120,13 @@ export function useUpdateTicket() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTicket> & { id: string }) =>
-      updateWorkspaceData((current) => {
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceTicket> & { id: string }) => {
+      const existingTickets = await fetchMergedTickets();
+      const existingRemote = existingTickets.find((ticket) => ticket.id === id);
+      if (!existingRemote) throw new Error("Ticket not found");
+
+      await upsertRemoteTicket({ ...existingRemote, ...updates, id });
+      return updateWorkspaceData((current) => {
         const existing = current.tickets.find((ticket) => ticket.id === id);
         if (!existing) return current;
 
@@ -1146,7 +1142,8 @@ export function useUpdateTicket() {
             detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
           },
         );
-      }).tickets.find((ticket) => ticket.id === id),
+      }).tickets.find((ticket) => ticket.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1165,8 +1162,18 @@ export function useCreateChatMessage() {
       authorName: string;
       authorId?: string;
       message: string;
-    }) =>
-      updateWorkspaceData((current) => {
+    }) => {
+      const record = {
+        id: generatePersistentEntityId("chat"),
+        channelId,
+        authorId,
+        authorName,
+        message,
+        createdAt: new Date().toISOString(),
+      };
+
+      await upsertRemoteChatMessage(record);
+      return updateWorkspaceData((current) => {
         const channel = current.chatChannels.find((item) => item.id === channelId);
         const next = {
           ...current,
@@ -1176,7 +1183,7 @@ export function useCreateChatMessage() {
                   ...item,
                   messages: [
                     ...item.messages,
-                    { id: makeId("chat"), authorName, authorId, message, createdAt: new Date().toISOString() },
+                    { id: record.id, authorName, authorId, message, createdAt: record.createdAt },
                   ],
                 }
               : item,
@@ -1190,7 +1197,8 @@ export function useCreateChatMessage() {
           actorName: authorName,
           detail: `A new message was posted in ${channel?.name ?? "team chat"}.`,
         });
-      }).chatChannels.find((channel) => channel.id === channelId),
+      }).chatChannels.find((channel) => channel.id === channelId);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1199,31 +1207,33 @@ export function useCreateChatChannel() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (channel: Partial<WorkspaceChatChannel> & { name: string; topic: string }) =>
-      updateWorkspaceData((current) => {
-        const record = {
-          id: makeId("channel"),
-          name: channel.name,
-          topic: channel.topic,
-          memberIds: channel.memberIds ?? [],
-          messages: channel.messages ?? [],
-          projectId: channel.projectId,
-          kind: channel.kind ?? "general",
-          readOnly: channel.readOnly ?? false,
-          whatsappGroupUrl: channel.whatsappGroupUrl ?? "",
-          quickLinks: channel.quickLinks ?? [],
-        };
+    mutationFn: async (channel: Partial<WorkspaceChatChannel> & { name: string; topic: string }) => {
+      const remoteRecord: WorkspaceChatChannel = {
+        id: generatePersistentEntityId("channel"),
+        name: channel.name,
+        topic: channel.topic,
+        memberIds: channel.memberIds ?? [],
+        messages: channel.messages ?? [],
+        projectId: channel.projectId,
+        kind: channel.kind ?? "general",
+        readOnly: channel.readOnly ?? false,
+        whatsappGroupUrl: channel.whatsappGroupUrl ?? "",
+        quickLinks: channel.quickLinks ?? [],
+      };
 
+      await upsertRemoteChatChannel(remoteRecord);
+      return updateWorkspaceData((current) => {
         return appendAuditLog(
-          { ...current, chatChannels: [...current.chatChannels, record] },
+          { ...current, chatChannels: [...current.chatChannels, remoteRecord] },
           {
             action: "Chat channel created",
             entityType: "chat",
-            entityId: record.id,
-            detail: `${record.name} was created for collaboration.`,
+            entityId: remoteRecord.id,
+            detail: `${remoteRecord.name} was created for collaboration.`,
           },
         );
-      }).chatChannels.at(-1),
+      }).chatChannels.at(-1);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1232,11 +1242,17 @@ export function useUpdateChatChannel() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceChatChannel> & { id: string }) =>
-      updateWorkspaceData((current) => ({
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceChatChannel> & { id: string }) => {
+      const existingChannels = await fetchMergedChatChannels();
+      const existingRemote = existingChannels.find((channel) => channel.id === id);
+      if (!existingRemote) throw new Error("Chat channel not found");
+
+      await upsertRemoteChatChannel({ ...existingRemote, ...updates, id });
+      return updateWorkspaceData((current) => ({
         ...current,
         chatChannels: current.chatChannels.map((channel) => (channel.id === id ? { ...channel, ...updates } : channel)),
-      })).chatChannels.find((channel) => channel.id === id),
+      })).chatChannels.find((channel) => channel.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1258,8 +1274,23 @@ export function useUpdateDashboard() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceDashboard> & { id: string }) =>
-      updateWorkspaceData((current) => ({
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceDashboard> & { id: string }) => {
+      const existingDashboards = await fetchMergedDashboards();
+      const existingRemote = existingDashboards.find((dashboard) => dashboard.id === id);
+      if (!existingRemote) throw new Error("Dashboard not found");
+
+      const nextDashboards = existingDashboards.map((dashboard) => {
+        if (updates.isDefault) {
+          return dashboard.id === id
+            ? { ...dashboard, ...updates, isDefault: true }
+            : { ...dashboard, isDefault: false };
+        }
+
+        return dashboard.id === id ? { ...dashboard, ...updates } : dashboard;
+      });
+
+      await Promise.all(nextDashboards.map((dashboard) => upsertRemoteDashboard(dashboard)));
+      return updateWorkspaceData((current) => ({
         ...current,
         dashboards: current.dashboards.map((dashboard) => {
           if (updates.isDefault) {
@@ -1270,7 +1301,8 @@ export function useUpdateDashboard() {
 
           return dashboard.id === id ? { ...dashboard, ...updates } : dashboard;
         }),
-      })).dashboards.find((dashboard) => dashboard.id === id),
+      })).dashboards.find((dashboard) => dashboard.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1279,19 +1311,25 @@ export function useCreateDashboard() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (dashboard: Partial<WorkspaceDashboard> & { name: string }) =>
-      updateWorkspaceData((current) => {
-        const shouldBeDefault = dashboard.isDefault ?? current.dashboards.length === 0;
-        const nextWidgets = (dashboard.widgets?.length ? dashboard.widgets : buildDashboardWidgets()).map((widget) => ({
+    mutationFn: async (dashboard: Partial<WorkspaceDashboard> & { name: string }) => {
+      const remoteRecord: WorkspaceDashboard = {
+        id: generatePersistentEntityId("dashboard"),
+        name: dashboard.name,
+        isDefault: dashboard.isDefault ?? false,
+        widgets: (dashboard.widgets?.length ? dashboard.widgets : buildDashboardWidgets()).map((widget) => ({
           ...widget,
-          id: makeId("widget"),
-        }));
+          id: widget.id || makeId("widget"),
+        })),
+      };
 
+      await upsertRemoteDashboard(remoteRecord);
+      return updateWorkspaceData((current) => {
+        const shouldBeDefault = dashboard.isDefault ?? current.dashboards.length === 0;
         const record: WorkspaceDashboard = {
-          id: makeId("dashboard"),
+          id: remoteRecord.id,
           name: dashboard.name,
           isDefault: shouldBeDefault,
-          widgets: nextWidgets,
+          widgets: remoteRecord.widgets,
         };
 
         return {
@@ -1303,7 +1341,8 @@ export function useCreateDashboard() {
             ),
           ],
         };
-      }).dashboards[0],
+      }).dashboards[0];
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
