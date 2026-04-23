@@ -5,6 +5,7 @@ import { getWorkspaceSearchResults } from "@/lib/workspace-search";
 type Msg = { role: "user" | "assistant"; content: string };
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-agent`;
+const REMOTE_AI_ENABLED = import.meta.env.VITE_ENABLE_REMOTE_AI === "true";
 
 const localResponse = (messages: Msg[]) => {
   const latest = messages[messages.length - 1]?.content ?? "";
@@ -144,7 +145,19 @@ const localResponse = (messages: Msg[]) => {
       : noteSummary || "There are no sticky notes saved right now.";
   }
 
-  if (includesAny("status", "overview", "\u062d\u0627\u0644\u0629", "\u0645\u0644\u062e\u0635")) {
+  if (
+    includesAny(
+      "status",
+      "overview",
+      "summary",
+      "summarize",
+      "portfolio",
+      "active project",
+      "active projects",
+      "\u062d\u0627\u0644\u0629",
+      "\u0645\u0644\u062e\u0635",
+    )
+  ) {
     const activeProjects = projects.filter((project) => project.status === "active").length;
     const inProgressTasks = tasks.filter((task) => task.status === "in-progress").length;
     const openTickets = tickets.filter((ticket) => ticket.status === "open").length;
@@ -245,7 +258,11 @@ export async function streamAgentChat({
   onDone: () => void;
   onError?: (error: string) => void;
 }) {
-  if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
+  if (
+    !REMOTE_AI_ENABLED ||
+    !import.meta.env.VITE_SUPABASE_URL ||
+    !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  ) {
     onDelta(localResponse(messages));
     onDone();
     return;

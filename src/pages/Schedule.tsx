@@ -483,6 +483,7 @@ const Schedule = () => {
   };
 
   const ganttOrigin = projectStart ?? new Date();
+  const selectedProjectId = currentProject?.id ?? projects[0]?.id ?? '__no-project__';
 
   return (
     <AppLayout>
@@ -490,9 +491,19 @@ const Schedule = () => {
       <div className="p-6 space-y-6 animate-fade-in">
         <div className="flex items-center justify-between gap-4 flex-wrap bg-card p-4 rounded-2xl border shadow-sm">
           <div className="flex items-center gap-4 flex-wrap">
-            <Select value={currentProject?.id} onValueChange={(value) => setSearchParams({ projectId: value }, { replace: true })}>
+            <Select
+              value={selectedProjectId}
+              onValueChange={(value) => {
+                if (value === '__no-project__') return;
+                setSearchParams({ projectId: value }, { replace: true });
+              }}
+            >
               <SelectTrigger className="w-64"><SelectValue placeholder="Select project" /></SelectTrigger>
-              <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {projects.length
+                  ? projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)
+                  : <SelectItem value="__no-project__">No projects available</SelectItem>}
+              </SelectContent>
             </Select>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Project Window</p>
