@@ -8,24 +8,28 @@ import {
   readWorkspaceData,
   type WorkspaceChatChannel,
   type WorkspaceChatMessage,
+  type WorkspaceAuditLog,
+  type WorkspaceConfigOption,
+  type WorkspaceCustomFieldConfig,
   type WorkspaceDashboard,
   type WorkspaceDocumentVersion,
+  type WorkspaceFieldConfig,
+  type WorkspaceIntegrationConnection,
   type WorkspaceMeeting,
   type WorkspacePersonalEvent,
   type WorkspaceProject,
   type WorkspaceProjectDocument,
+  type WorkspaceProjectTemplate,
+  type WorkspaceReportTemplate,
   type WorkspaceSettings,
   type WorkspaceStickyNote,
   type WorkspaceTask,
   type WorkspaceTeamMember,
   type WorkspaceTicket,
   type WorkspaceUserAccount,
+  type WorkspaceWorkflow,
 } from "@/lib/workspace-store";
-import {
-  mergeWorkspaceUserAccounts,
-  normalizeWorkspaceRoleId,
-  toRemoteWorkspaceRoleId,
-} from "@/lib/workspace-access";
+import { normalizeWorkspaceRoleId, toRemoteWorkspaceRoleId } from "@/lib/workspace-access";
 
 type RemoteProfile = Tables<"profiles">;
 type RemoteProject = Tables<"projects">;
@@ -37,6 +41,7 @@ type RemoteDashboard = Tables<"dashboards">;
 type RemoteProjectDocument = Tables<"project_documents">;
 type RemoteWorkspace = Tables<"workspaces">;
 type RemoteWorkspaceMembership = Tables<"workspace_memberships">;
+type RemoteAuditEvent = Tables<"audit_events">;
 type RemoteTeamMember = {
   id: string;
   workspace_id: string;
@@ -274,6 +279,69 @@ const parseBudget = (value?: string | null) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const asObjectRecord = (value: unknown) => (isObjectRecord(value) ? value : {});
+
+const asStringArray = (value: unknown, fallback: string[] = []) =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : fallback;
+
+const asFieldConfigs = (value: unknown, fallback: WorkspaceFieldConfig[] = []) =>
+  Array.isArray(value)
+    ? value.filter((item): item is WorkspaceFieldConfig => isObjectRecord(item) && typeof item.key === "string")
+    : fallback;
+
+const asCustomFieldConfigs = (value: unknown, fallback: WorkspaceCustomFieldConfig[] = []) =>
+  Array.isArray(value)
+    ? value.filter((item): item is WorkspaceCustomFieldConfig => isObjectRecord(item) && typeof item.id === "string")
+    : fallback;
+
+const asWorkflows = (value: unknown, fallback: WorkspaceWorkflow[] = []) =>
+  Array.isArray(value)
+    ? value.filter((item): item is WorkspaceWorkflow => isObjectRecord(item) && typeof item.id === "string")
+    : fallback;
+
+const asReportTemplates = (value: unknown, fallback: WorkspaceReportTemplate[] = []) =>
+  Array.isArray(value)
+    ? value.filter((item): item is WorkspaceReportTemplate => isObjectRecord(item) && typeof item.id === "string")
+    : fallback;
+
+const asProjectTemplates = (value: unknown, fallback: WorkspaceProjectTemplate[] = []) =>
+  Array.isArray(value)
+    ? value.filter((item): item is WorkspaceProjectTemplate => isObjectRecord(item) && typeof item.id === "string")
+    : fallback;
+
+const toIntegrationConnection = (
+  fallback: WorkspaceIntegrationConnection,
+  value: unknown,
+): WorkspaceIntegrationConnection => {
+  const record = asObjectRecord(value);
+  const config = asObjectRecord(record.configuration);
+
+  return {
+    ...fallback,
+    providerLabel: typeof record.providerLabel === "string" ? record.providerLabel : fallback.providerLabel,
+    enabled: typeof record.enabled === "boolean" ? record.enabled : fallback.enabled,
+    connected: typeof record.connected === "boolean" ? record.connected : fallback.connected,
+    syncMode:
+      record.syncMode === "read" || record.syncMode === "write" || record.syncMode === "two-way"
+        ? record.syncMode
+        : fallback.syncMode,
+    status: typeof record.status === "string" ? record.status : fallback.status,
+    lastSyncAt: typeof record.lastSyncAt === "string" ? record.lastSyncAt : fallback.lastSyncAt,
+    scopes: asStringArray(record.scopes, fallback.scopes),
+    configuration: {
+      clientId: typeof config.clientId === "string" ? config.clientId : fallback.configuration?.clientId,
+      tenantId: typeof config.tenantId === "string" ? config.tenantId : fallback.configuration?.tenantId,
+      redirectUri:
+        typeof config.redirectUri === "string" ? config.redirectUri : fallback.configuration?.redirectUri,
+      resourceUrl:
+        typeof config.resourceUrl === "string" ? config.resourceUrl : fallback.configuration?.resourceUrl,
+    },
+  };
+};
+
 const assertNoSupabaseError = (error: { message: string } | null, context: string) => {
   if (error) {
     throw new Error(`${context}: ${error.message}`);
@@ -474,12 +542,20 @@ export const fetchRemoteWorkspaceContext = async (): Promise<RemoteWorkspaceCont
   };
 };
 
+const getWorkspaceBrandingState = (workspace: RemoteWorkspace | null | undefined) =>
+  asObjectRecord(workspace?.branding);
+
 export const mergeSettingsWithRemoteContext = async (
   localSettings: WorkspaceSettings,
 ): Promise<WorkspaceSettings> => {
   const context = await fetchRemoteWorkspaceContext();
   if (!context) return localSettings;
 
+  const brandingState = getWorkspaceBrandingState(context.workspace);
+  const notifications = asObjectRecord(brandingState.notifications);
+  const appearance = asObjectRecord(brandingState.appearance);
+  const security = asObjectRecord(brandingState.security);
+  const integrations = asObjectRecord(brandingState.integrations);
   const profileNames = splitDisplayName(context.profile?.display_name);
 
   return {
@@ -504,39 +580,109 @@ export const mergeSettingsWithRemoteContext = async (
       roleId: context.membership?.role ?? localSettings.currentUser.roleId,
       authUserId: context.profile?.user_id ?? localSettings.currentUser.authUserId,
     },
+    notifications: {
+      ...localSettings.notifications,
+      email: typeof notifications.email === "boolean" ? notifications.email : localSettings.notifications.email,
+      push: typeof notifications.push === "boolean" ? notifications.push : localSettings.notifications.push,
+      reminders:
+        typeof notifications.reminders === "boolean"
+          ? notifications.reminders
+          : localSettings.notifications.reminders,
+      digest: typeof notifications.digest === "boolean" ? notifications.digest : localSettings.notifications.digest,
+      inApp: typeof notifications.inApp === "boolean" ? notifications.inApp : localSettings.notifications.inApp,
+    },
+    appearance: {
+      ...localSettings.appearance,
+      ...(appearance as Partial<WorkspaceSettings["appearance"]>),
+    },
+    security: {
+      ...localSettings.security,
+      ...(security as Partial<WorkspaceSettings["security"]>),
+    },
+    ai: {
+      ...localSettings.ai,
+      ...(asObjectRecord(context.workspace?.ai_settings) as Partial<WorkspaceSettings["ai"]>),
+    },
+    msProject: {
+      ...localSettings.msProject,
+      ...(asObjectRecord(context.workspace?.ms_project_settings) as Partial<WorkspaceSettings["msProject"]>),
+    },
+    metadata: asFieldConfigs(brandingState.metadata, localSettings.metadata),
+    customFields: asCustomFieldConfigs(brandingState.customFields, localSettings.customFields),
+    branding: {
+      ...localSettings.branding,
+      appName: typeof brandingState.appName === "string" ? brandingState.appName : localSettings.branding.appName,
+      homeLabel:
+        typeof brandingState.homeLabel === "string" ? brandingState.homeLabel : localSettings.branding.homeLabel,
+    },
+    privilegeRoles: Array.isArray(brandingState.privilegeRoles)
+      ? (brandingState.privilegeRoles as WorkspaceSettings["privilegeRoles"])
+      : localSettings.privilegeRoles,
+    integrations: {
+      outlook: toIntegrationConnection(localSettings.integrations.outlook, integrations.outlook),
+      teams: toIntegrationConnection(localSettings.integrations.teams, integrations.teams),
+      onedrive: toIntegrationConnection(localSettings.integrations.onedrive, integrations.onedrive),
+      whatsapp: toIntegrationConnection(localSettings.integrations.whatsapp, integrations.whatsapp),
+      googleCalendar: toIntegrationConnection(localSettings.integrations.googleCalendar, integrations.googleCalendar),
+    },
   };
 };
 
 const mapRemoteProjectToWorkspace = (
   remote: RemoteProject,
   existing?: WorkspaceProject,
-): WorkspaceProject => ({
-  ...(existing ?? createFallbackProject(remote.id, remote.name)),
-  id: remote.id,
-  name: remote.name,
-  description: remote.description ?? existing?.description ?? "",
-  status: (remote.status as WorkspaceProject["status"]) ?? existing?.status ?? "active",
-  progress: remote.progress ?? existing?.progress ?? 0,
-  priority: (remote.priority as WorkspaceProject["priority"]) ?? existing?.priority ?? "medium",
-  startDate: remote.start_date ?? existing?.startDate ?? "",
-  endDate: remote.end_date ?? existing?.endDate ?? "",
-  start_date: remote.start_date ?? existing?.start_date ?? "",
-  end_date: remote.end_date ?? existing?.end_date ?? "",
-  budget: toDisplayBudget(remote.budget, existing?.budget),
-  risk_level: (remote.risk_level as WorkspaceProject["risk_level"]) ?? existing?.risk_level ?? "medium",
-  department: remote.department ?? existing?.department ?? "",
-  projectNature: remote.project_nature ?? existing?.projectNature ?? "",
-  tags: remote.tags ?? existing?.tags ?? [],
-  namespace: remote.namespace ?? existing?.namespace ?? "",
-  workflowId: remote.workflow_id ?? existing?.workflowId,
-  customFieldValues:
-    (remote.custom_field_values as Record<string, string | number | boolean> | null) ??
-    existing?.customFieldValues ??
-    {},
-  radarLifecycle:
-    (remote.radar_lifecycle as WorkspaceProject["radarLifecycle"] | null) ??
-    existing?.radarLifecycle,
-});
+): WorkspaceProject => {
+  const lifecycle = asObjectRecord(remote.radar_lifecycle);
+  const workspacePayload = asObjectRecord(lifecycle._workspace);
+  const nextLifecycle = { ...lifecycle };
+  delete nextLifecycle._workspace;
+
+  return {
+    ...(existing ?? createFallbackProject(remote.id, remote.name)),
+    id: remote.id,
+    name: remote.name,
+    description: remote.description ?? existing?.description ?? "",
+    status: (remote.status as WorkspaceProject["status"]) ?? existing?.status ?? "active",
+    progress: remote.progress ?? existing?.progress ?? 0,
+    priority: (remote.priority as WorkspaceProject["priority"]) ?? existing?.priority ?? "medium",
+    startDate: remote.start_date ?? existing?.startDate ?? "",
+    endDate: remote.end_date ?? existing?.endDate ?? "",
+    start_date: remote.start_date ?? existing?.start_date ?? "",
+    end_date: remote.end_date ?? existing?.end_date ?? "",
+    budget: toDisplayBudget(remote.budget, existing?.budget),
+    risk_level: (remote.risk_level as WorkspaceProject["risk_level"]) ?? existing?.risk_level ?? "medium",
+    department: remote.department ?? existing?.department ?? "",
+    projectNature: remote.project_nature ?? existing?.projectNature ?? "",
+    tags: remote.tags ?? existing?.tags ?? [],
+    namespace: remote.namespace ?? existing?.namespace ?? "",
+    workflowId: remote.workflow_id ?? existing?.workflowId,
+    team: asStringArray(workspacePayload.team, existing?.team ?? []),
+    files: Array.isArray(workspacePayload.files) ? (workspacePayload.files as WorkspaceProject["files"]) : existing?.files ?? [],
+    milestones: Array.isArray(workspacePayload.milestones)
+      ? (workspacePayload.milestones as NonNullable<WorkspaceProject["milestones"]>)
+      : existing?.milestones ?? [],
+    resources: Array.isArray(workspacePayload.resources)
+      ? (workspacePayload.resources as NonNullable<WorkspaceProject["resources"]>)
+      : existing?.resources ?? [],
+    teamStructure: Array.isArray(workspacePayload.teamStructure)
+      ? (workspacePayload.teamStructure as NonNullable<WorkspaceProject["teamStructure"]>)
+      : existing?.teamStructure ?? [],
+    stakeholders: Array.isArray(workspacePayload.stakeholders)
+      ? (workspacePayload.stakeholders as NonNullable<WorkspaceProject["stakeholders"]>)
+      : existing?.stakeholders ?? [],
+    risks: Array.isArray(workspacePayload.risks)
+      ? (workspacePayload.risks as NonNullable<WorkspaceProject["risks"]>)
+      : existing?.risks ?? [],
+    customFieldValues:
+      (remote.custom_field_values as Record<string, string | number | boolean> | null) ??
+      existing?.customFieldValues ??
+      {},
+    radarLifecycle:
+      Object.keys(nextLifecycle).length > 0
+        ? (nextLifecycle as WorkspaceProject["radarLifecycle"])
+        : existing?.radarLifecycle,
+  };
+};
 
 const mergeProjectsByIdentity = (
   localProjects: WorkspaceProject[],
@@ -563,6 +709,10 @@ const mapRemoteTaskToWorkspace = (
 ): WorkspaceTask => {
   const project = localProjects.find((item) => item.id === remote.project_id);
   const durationDays = remote.duration_days ? Number(remote.duration_days) : null;
+  const customFieldValues = asObjectRecord(remote.custom_field_values);
+  const workspacePayload = asObjectRecord(customFieldValues._workspace);
+  const nextCustomFieldValues = { ...customFieldValues };
+  delete nextCustomFieldValues._workspace;
   return {
     ...(existing ?? createFallbackTask(remote.id, remote.title)),
     id: remote.id,
@@ -584,14 +734,30 @@ const mapRemoteTaskToWorkspace = (
     predecessors: remote.depends_on ?? existing?.predecessors ?? [],
     tags: remote.tags ?? existing?.tags ?? [],
     workloadHours: remote.workload_hours ?? existing?.workloadHours ?? remote.estimated_hours ?? 0,
+    assignee: typeof workspacePayload.assignee === "string" ? workspacePayload.assignee : existing?.assignee ?? "",
+    assignees: Array.isArray(workspacePayload.assignees)
+      ? (workspacePayload.assignees as NonNullable<WorkspaceTask["assignees"]>)
+      : existing?.assignees ?? [],
+    comments: Array.isArray(workspacePayload.comments)
+      ? (workspacePayload.comments as NonNullable<WorkspaceTask["comments"]>)
+      : existing?.comments ?? [],
+    files: Array.isArray(workspacePayload.files)
+      ? (workspacePayload.files as NonNullable<WorkspaceTask["files"]>)
+      : existing?.files ?? [],
     duration:
       durationDays !== null && Number.isFinite(durationDays)
         ? `${durationDays}d`
-        : existing?.duration ?? "3d",
-    customFieldValues:
-      (remote.custom_field_values as Record<string, string | number | boolean> | null) ??
-      existing?.customFieldValues ??
-      {},
+        : typeof workspacePayload.duration === "string"
+          ? workspacePayload.duration
+          : existing?.duration ?? "3d",
+    workflowStage:
+      typeof workspacePayload.workflowStage === "string"
+        ? workspacePayload.workflowStage
+        : existing?.workflowStage ?? existing?.status ?? "todo",
+    timesheetEntries: Array.isArray(workspacePayload.timesheetEntries)
+      ? (workspacePayload.timesheetEntries as NonNullable<WorkspaceTask["timesheetEntries"]>)
+      : existing?.timesheetEntries ?? [],
+    customFieldValues: nextCustomFieldValues as Record<string, string | number | boolean>,
   };
 };
 
@@ -850,38 +1016,49 @@ const mergeStickyNotesByIdentity = (
 const mapRemoteTicketToWorkspace = (
   remote: RemoteTicket,
   existing?: WorkspaceTicket,
-): WorkspaceTicket => ({
-  ...(existing ?? {
+): WorkspaceTicket => {
+  const customFieldValues = asObjectRecord(remote.custom_field_values);
+  const workspacePayload = asObjectRecord(customFieldValues._workspace);
+  const nextCustomFieldValues = { ...customFieldValues };
+  delete nextCustomFieldValues._workspace;
+
+  return {
+    ...(existing ?? {
+      id: remote.id,
+      title: remote.title,
+      description: "",
+      status: "open",
+      priority: "medium",
+      assignee: "Unassigned",
+      createdAt: remote.created_at,
+      sla: "",
+      comments: [],
+      customFieldValues: {},
+    }),
     id: remote.id,
     title: remote.title,
-    description: "",
-    status: "open",
-    priority: "medium",
-    assignee: "Unassigned",
+    description: remote.description ?? existing?.description ?? "",
+    status: (remote.status as WorkspaceTicket["status"]) ?? existing?.status ?? "open",
+    priority: (remote.priority as WorkspaceTicket["priority"]) ?? existing?.priority ?? "medium",
+    assignee:
+      typeof workspacePayload.assignee === "string"
+        ? workspacePayload.assignee
+        : existing?.assignee ?? "Unassigned",
+    projectId: remote.project_id ?? existing?.projectId,
+    taskId: remote.task_id ?? existing?.taskId,
     createdAt: remote.created_at,
-    sla: "",
-    comments: [],
-    customFieldValues: {},
-  }),
-  id: remote.id,
-  title: remote.title,
-  description: remote.description ?? existing?.description ?? "",
-  status: (remote.status as WorkspaceTicket["status"]) ?? existing?.status ?? "open",
-  priority: (remote.priority as WorkspaceTicket["priority"]) ?? existing?.priority ?? "medium",
-  assignee: existing?.assignee ?? "Unassigned",
-  projectId: remote.project_id ?? existing?.projectId,
-  taskId: remote.task_id ?? existing?.taskId,
-  createdAt: remote.created_at,
-  sla:
-    remote.sla_deadline
-      ? `Due ${new Date(remote.sla_deadline).toLocaleString()}`
-      : existing?.sla ?? "No SLA set",
-  comments: existing?.comments ?? [],
-  customFieldValues:
-    (remote.custom_field_values as Record<string, string | number | boolean> | null) ??
-    existing?.customFieldValues ??
-    {},
-});
+    sla:
+      typeof workspacePayload.sla === "string"
+        ? workspacePayload.sla
+        : remote.sla_deadline
+          ? `Due ${new Date(remote.sla_deadline).toLocaleString()}`
+          : existing?.sla ?? "No SLA set",
+    comments: Array.isArray(workspacePayload.comments)
+      ? (workspacePayload.comments as NonNullable<WorkspaceTicket["comments"]>)
+      : existing?.comments ?? [],
+    customFieldValues: nextCustomFieldValues as Record<string, string | number | boolean>,
+  };
+};
 
 const mergeTicketsByIdentity = (
   localTickets: WorkspaceTicket[],
@@ -986,13 +1163,22 @@ const buildRemoteWorkspaceUserAccounts = (
   memberships: RemoteWorkspaceMembership[],
   profiles: RemoteProfile[],
   teamMembers: WorkspaceTeamMember[],
+  remoteTeamMembers: RemoteTeamMember[],
+  auditEvents: RemoteAuditEvent[],
   localAccounts: WorkspaceUserAccount[],
   workspaceEmailFallback?: string | null,
 ) =>
   memberships.map((membership) => {
     const profile = profiles.find((item) => item.user_id === membership.user_id);
+    const remoteMember = remoteTeamMembers.find(
+      (member) =>
+        member.id === membership.id ||
+        member.user_id === membership.user_id ||
+        normalizeText(member.email) === normalizeText(localAccounts.find((account) => account.id === membership.id)?.email),
+    );
     const linkedMember =
       teamMembers.find((member) => member.id === profile?.id || member.id === membership.user_id) ??
+      teamMembers.find((member) => member.id === remoteMember?.id) ??
       teamMembers.find((member) => normalizeText(member.email) === normalizeText(workspaceEmailFallback)) ??
       teamMembers.find((member) => normalizeText(member.email) === normalizeText(localAccounts.find((account) => account.id === membership.id)?.email));
     const existing = localAccounts.find(
@@ -1008,6 +1194,13 @@ const buildRemoteWorkspaceUserAccounts = (
       linkedMember?.name ??
       existing?.fullName ??
       membership.user_id;
+    const remoteMetadata = asObjectRecord(remoteMember?.metadata);
+    const accountAuditEvents = auditEvents.filter(
+      (event) =>
+        event.entity_type === "user" &&
+        (event.entity_id === membership.id || asObjectRecord(event.payload).userAccountId === membership.id),
+    );
+    const lastEventAt = (action: string) => accountAuditEvents.find((event) => event.action === action)?.created_at;
 
     return {
       id: membership.id,
@@ -1015,18 +1208,25 @@ const buildRemoteWorkspaceUserAccounts = (
       email: linkedMember?.email ?? existing?.email ?? workspaceEmailFallback ?? "",
       roleId: normalizeWorkspaceRoleId(membership.role),
       status: membership.status === "active" ? "active" : membership.status === "suspended" ? "suspended" : "invited",
-      authProvider: existing?.authProvider ?? "email",
+      authProvider:
+        remoteMetadata.authProvider === "google" || remoteMetadata.authProvider === "hybrid"
+          ? remoteMetadata.authProvider
+          : existing?.authProvider ?? "email",
       teamMemberId: linkedMember?.id ?? existing?.teamMemberId,
       title: membership.title ?? linkedMember?.role ?? existing?.title ?? "",
       department: linkedMember?.department ?? profile?.department ?? existing?.department ?? "",
       createdAt: membership.joined_at,
-      lastAccessAt: existing?.lastAccessAt,
-      invitationSentAt: existing?.invitationSentAt,
-      passwordResetSentAt: existing?.passwordResetSentAt,
-      lastNotificationAt: existing?.lastNotificationAt,
-      notificationCount: existing?.notificationCount,
-      invitedBy: existing?.invitedBy,
-      notes: existing?.notes,
+      lastAccessAt: lastEventAt("Account access recorded") ?? existing?.lastAccessAt,
+      invitationSentAt: lastEventAt("Invitation email sent") ?? existing?.invitationSentAt,
+      passwordResetSentAt: lastEventAt("Password reset email sent") ?? existing?.passwordResetSentAt,
+      lastNotificationAt: lastEventAt("User notification sent") ?? existing?.lastNotificationAt,
+      notificationCount:
+        accountAuditEvents.filter((event) => event.action === "User notification sent").length ||
+        existing?.notificationCount,
+      invitedBy:
+        typeof remoteMetadata.invitedBy === "string" ? remoteMetadata.invitedBy : existing?.invitedBy,
+      notes:
+        typeof remoteMetadata.accessNotes === "string" ? remoteMetadata.accessNotes : existing?.notes,
     } satisfies WorkspaceUserAccount;
   });
 
@@ -1043,7 +1243,13 @@ export const fetchMergedProjects = async () => {
 
   if (error || !data) return local;
 
-  const mergedProjects = mergeProjectsByIdentity(local, data);
+  const mergedProjects = data.map((remote) => {
+    const existing = local.find(
+      (project) =>
+        project.id === remote.id || normalizeText(project.name) === normalizeText(remote.name),
+    );
+    return mapRemoteProjectToWorkspace(remote, existing);
+  });
   if (!workspaceId) return mergedProjects;
 
   const { data: remoteDocuments, error: documentError } = await supabase
@@ -1087,7 +1293,15 @@ export const fetchMergedTasks = async (projectId?: string) => {
   const { data, error } = await query;
 
   if (error || !data) return localTasks;
-  return mergeTasksByIdentity(localTasks, data, mergedProjects);
+  return data.map((remote) => {
+    const existing = localTasks.find(
+      (task) =>
+        task.id === remote.id ||
+        (normalizeText(task.title) === normalizeText(remote.title) &&
+          (task.project_id ?? task.projectId ?? "") === (remote.project_id ?? "")),
+    );
+    return mapRemoteTaskToWorkspace(remote, mergedProjects, existing);
+  });
 };
 
 export const fetchMergedTeamMembers = async () => {
@@ -1102,7 +1316,15 @@ export const fetchMergedTeamMembers = async () => {
     .order("updated_at", { ascending: false });
 
   if (error || !data) return localMembers;
-  return mergeTeamMembersByIdentity(localMembers, data as unknown as RemoteTeamMember[]);
+  return (data as unknown as RemoteTeamMember[]).map((remote) => {
+    const existing = localMembers.find(
+      (member) =>
+        member.id === remote.id ||
+        normalizeText(member.email) === normalizeText(remote.email) ||
+        normalizeText(member.name) === normalizeText(remote.name),
+    );
+    return mapRemoteTeamMemberToWorkspace(remote, existing);
+  });
 };
 
 export const fetchMergedUserAccounts = async () => {
@@ -1111,7 +1333,7 @@ export const fetchMergedUserAccounts = async () => {
   const userId = await getAuthenticatedUserId();
   if (!workspaceId || !userId) return localData.userAccounts;
 
-  const [membershipsResult, profilesResult, teamMembers] = await Promise.all([
+  const [membershipsResult, profilesResult, teamMembers, remoteMembersResult, auditEventsResult] = await Promise.all([
     supabase
       .from("workspace_memberships")
       .select("*")
@@ -1119,21 +1341,41 @@ export const fetchMergedUserAccounts = async () => {
       .order("joined_at", { ascending: true }),
     supabase.from("profiles").select("*"),
     fetchMergedTeamMembers(),
+    supabase
+      .from("team_members" as never)
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("audit_events")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("entity_type", "user")
+      .order("created_at", { ascending: false }),
   ]);
 
-  if (membershipsResult.error || !membershipsResult.data || profilesResult.error || !profilesResult.data) {
+  if (
+    membershipsResult.error ||
+    !membershipsResult.data ||
+    profilesResult.error ||
+    !profilesResult.data ||
+    remoteMembersResult.error ||
+    !remoteMembersResult.data ||
+    auditEventsResult.error ||
+    !auditEventsResult.data
+  ) {
     return localData.userAccounts;
   }
 
-  const remoteAccounts = buildRemoteWorkspaceUserAccounts(
+  return buildRemoteWorkspaceUserAccounts(
     membershipsResult.data,
     profilesResult.data,
     teamMembers,
+    remoteMembersResult.data as unknown as RemoteTeamMember[],
+    auditEventsResult.data,
     localData.userAccounts,
     localData.settings.profile.email,
   );
-
-  return mergeWorkspaceUserAccounts(localData.userAccounts, remoteAccounts);
 };
 
 export const fetchMergedTickets = async () => {
@@ -1148,7 +1390,10 @@ export const fetchMergedTickets = async () => {
     .order("updated_at", { ascending: false });
 
   if (error || !data) return localTickets;
-  return mergeTicketsByIdentity(localTickets, data);
+  return data.map((remote) => {
+    const existing = localTickets.find((ticket) => ticket.id === remote.id);
+    return mapRemoteTicketToWorkspace(remote, existing);
+  });
 };
 
 export const fetchMergedChatChannels = async () => {
@@ -1206,7 +1451,7 @@ export const fetchMergedChatChannels = async () => {
     );
   });
 
-  return [...mergedRemote, ...remainingLocal];
+  return mergedRemote;
 };
 
 export const fetchMergedDashboards = async () => {
@@ -1221,7 +1466,10 @@ export const fetchMergedDashboards = async () => {
     .order("updated_at", { ascending: false });
 
   if (error || !data) return localDashboards;
-  return mergeDashboardsByIdentity(localDashboards, data);
+  return data.map((remote) => {
+    const existing = localDashboards.find((dashboard) => dashboard.id === remote.id);
+    return mapRemoteDashboardToWorkspace(remote, existing);
+  });
 };
 
 export const fetchMergedMeetings = async (projectId?: string) => {
@@ -1241,7 +1489,10 @@ export const fetchMergedMeetings = async (projectId?: string) => {
 
   const { data, error } = await query;
   if (error || !data) return localMeetings;
-  return mergeMeetingsByIdentity(localMeetings, data as unknown as RemoteMeeting[]);
+  return (data as unknown as RemoteMeeting[]).map((remote) => {
+    const existing = localMeetings.find((meeting) => meeting.id === remote.id);
+    return mapRemoteMeetingToWorkspace(remote, existing);
+  });
 };
 
 export const fetchMergedPersonalEvents = async () => {
@@ -1256,7 +1507,10 @@ export const fetchMergedPersonalEvents = async () => {
     .order("created_at", { ascending: false });
 
   if (error || !data) return localEvents;
-  return mergePersonalEventsByIdentity(localEvents, data as unknown as RemotePersonalEvent[]);
+  return (data as unknown as RemotePersonalEvent[]).map((remote) => {
+    const existing = localEvents.find((event) => event.id === remote.id);
+    return mapRemotePersonalEventToWorkspace(remote, existing);
+  });
 };
 
 export const fetchMergedStickyNotes = async () => {
@@ -1271,7 +1525,60 @@ export const fetchMergedStickyNotes = async () => {
     .order("updated_at", { ascending: false });
 
   if (error || !data) return localNotes;
-  return mergeStickyNotesByIdentity(localNotes, data as unknown as RemoteStickyNote[]);
+  return (data as unknown as RemoteStickyNote[]).map((remote) => {
+    const existing = localNotes.find((note) => note.id === remote.id);
+    return mapRemoteStickyNoteToWorkspace(remote, existing);
+  });
+};
+
+export const fetchMergedAuditLogs = async () => {
+  const localAuditLogs = readWorkspaceData().auditLogs;
+  const workspaceId = await getRemoteWorkspaceId();
+  if (!workspaceId) return localAuditLogs;
+
+  const { data, error } = await supabase
+    .from("audit_events")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return localAuditLogs;
+
+  return data.map(
+    (event): WorkspaceAuditLog => ({
+      id: event.id,
+      action: event.action,
+      entityType: event.entity_type as WorkspaceAuditLog["entityType"],
+      entityId: event.entity_id ?? event.id,
+      actorName:
+        typeof asObjectRecord(event.payload).actorName === "string"
+          ? String(asObjectRecord(event.payload).actorName)
+          : "Workspace User",
+      detail: event.detail ?? "",
+      createdAt: event.created_at,
+    }),
+  );
+};
+
+export const fetchMergedWorkflows = async () => {
+  const localWorkflows = readWorkspaceData().workflows;
+  const context = await fetchRemoteWorkspaceContext();
+  if (!context?.workspace) return localWorkflows;
+  return asWorkflows(getWorkspaceBrandingState(context.workspace).workflows, localWorkflows);
+};
+
+export const fetchMergedReportTemplates = async () => {
+  const localTemplates = readWorkspaceData().reportTemplates;
+  const context = await fetchRemoteWorkspaceContext();
+  if (!context?.workspace) return localTemplates;
+  return asReportTemplates(getWorkspaceBrandingState(context.workspace).reportTemplates, localTemplates);
+};
+
+export const fetchMergedProjectTemplates = async () => {
+  const localTemplates = readWorkspaceData().projectTemplates;
+  const context = await fetchRemoteWorkspaceContext();
+  if (!context?.workspace) return localTemplates;
+  return asProjectTemplates(getWorkspaceBrandingState(context.workspace).projectTemplates, localTemplates);
 };
 
 export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
@@ -1294,6 +1601,105 @@ export const syncProfileFromSettings = async (settings: WorkspaceSettings) => {
     .single();
   assertNoSupabaseError(error, "Failed to sync profile settings");
   if (!data) throw new Error("Profile save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const syncWorkspaceSettings = async (settings: WorkspaceSettings) => {
+  const context = await fetchRemoteWorkspaceContext();
+  if (!context?.workspace) return settings;
+
+  const currentBranding = getWorkspaceBrandingState(context.workspace);
+  const { data, error } = await supabase
+    .from("workspaces")
+    .update({
+      name: settings.namespace.organization,
+      slug: settings.namespace.slug,
+      portfolio_office: settings.namespace.portfolioOffice || null,
+      branding: {
+        ...currentBranding,
+        appName: settings.branding.appName,
+        homeLabel: settings.branding.homeLabel,
+        notifications: settings.notifications,
+        appearance: settings.appearance,
+        security: settings.security,
+        metadata: settings.metadata,
+        customFields: settings.customFields,
+        privilegeRoles: settings.privilegeRoles,
+        integrations: settings.integrations,
+        workflows: readWorkspaceData().workflows,
+        reportTemplates: readWorkspaceData().reportTemplates,
+        projectTemplates: readWorkspaceData().projectTemplates,
+      },
+      ai_settings: settings.ai,
+      ms_project_settings: settings.msProject,
+    })
+    .eq("id", context.workspace.id)
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to sync workspace settings");
+  if (!data) throw new Error("Workspace settings save returned no row -- RLS may have blocked the write");
+
+  await syncProfileFromSettings(settings);
+  return mergeSettingsWithRemoteContext(settings);
+};
+
+export const syncRemoteWorkspaceState = async (patch: Record<string, unknown>) => {
+  const context = await fetchRemoteWorkspaceContext();
+  if (!context?.workspace) return null;
+
+  const { data, error } = await supabase
+    .from("workspaces")
+    .update({
+      branding: {
+        ...getWorkspaceBrandingState(context.workspace),
+        ...patch,
+      },
+    })
+    .eq("id", context.workspace.id)
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to sync workspace presentation state");
+  if (!data) throw new Error("Workspace state save returned no row -- RLS may have blocked the write");
+  return data;
+};
+
+export const createRemoteAuditLog = async ({
+  action,
+  entityType,
+  entityId,
+  detail,
+  actorName,
+  payload = {},
+}: {
+  action: string;
+  entityType: WorkspaceAuditLog["entityType"];
+  entityId?: string | null;
+  detail: string;
+  actorName?: string;
+  payload?: Record<string, unknown>;
+}) => {
+  const workspaceId = await getRemoteWorkspaceId();
+  const userId = await getAuthenticatedUserId();
+  if (!workspaceId) return null;
+
+  const { data, error } = await supabase
+    .from("audit_events")
+    .insert({
+      workspace_id: workspaceId,
+      actor_user_id: userId,
+      entity_type: entityType,
+      entity_id: entityId,
+      action,
+      detail,
+      payload: {
+        ...payload,
+        actorName,
+        userAccountId: payload.userAccountId ?? entityId ?? null,
+      },
+    })
+    .select()
+    .single();
+  assertNoSupabaseError(error, "Failed to create audit event");
   return data;
 };
 
@@ -1325,7 +1731,18 @@ export const upsertRemoteProject = async (project: WorkspaceProject) => {
         tags: project.tags ?? [],
         workflow_id: project.workflowId ?? null,
         custom_field_values: project.customFieldValues ?? {},
-        radar_lifecycle: project.radarLifecycle ?? {},
+        radar_lifecycle: {
+          ...(project.radarLifecycle ?? {}),
+          _workspace: {
+            team: project.team ?? [],
+            files: project.files ?? [],
+            milestones: project.milestones ?? [],
+            resources: project.resources ?? [],
+            teamStructure: project.teamStructure ?? [],
+            stakeholders: project.stakeholders ?? [],
+            risks: project.risks ?? [],
+          },
+        },
       },
       { onConflict: "id" },
     )
@@ -1411,10 +1828,11 @@ export const upsertRemoteProjectDocuments = async (
 };
 
 export const deleteRemoteProject = async (projectId: string) => {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) return;
-  const { error } = await supabase.from("projects").delete().eq("id", projectId);
-  assertNoSupabaseError(error, "Failed to delete project");
+  const { error } = await supabase
+    .from("projects")
+    .update({ status: "archived" })
+    .eq("id", projectId);
+  assertNoSupabaseError(error, "Failed to archive project");
 };
 
 export const upsertRemoteTask = async (task: WorkspaceTask) => {
@@ -1450,7 +1868,18 @@ export const upsertRemoteTask = async (task: WorkspaceTask) => {
         actual_hours: null,
         workload_hours: task.workloadHours ?? null,
         duration_days: durationDays,
-        custom_field_values: task.customFieldValues ?? {},
+        custom_field_values: {
+          ...(task.customFieldValues ?? {}),
+          _workspace: {
+            assignee: task.assignee ?? "",
+            assignees: task.assignees ?? [],
+            comments: task.comments ?? [],
+            files: task.files ?? [],
+            duration: task.duration ?? null,
+            workflowStage: task.workflowStage ?? null,
+            timesheetEntries: task.timesheetEntries ?? [],
+          },
+        },
         ai_generated: false,
         created_by: userId,
       },
@@ -1487,7 +1916,14 @@ export const upsertRemoteTicket = async (ticket: WorkspaceTicket) => {
         project_id: ticket.projectId ?? null,
         task_id: ticket.taskId ?? null,
         workspace_id: workspaceId,
-        custom_field_values: ticket.customFieldValues ?? {},
+        custom_field_values: {
+          ...(ticket.customFieldValues ?? {}),
+          _workspace: {
+            assignee: ticket.assignee ?? "Unassigned",
+            sla: ticket.sla ?? "",
+            comments: ticket.comments ?? [],
+          },
+        },
       },
       { onConflict: "id" },
     )
@@ -1614,22 +2050,37 @@ export const syncWorkspaceUserAccount = async (
     .eq("id", membership.id);
   assertNoSupabaseError(updateMembershipError, "Failed to update workspace membership");
 
-  const remoteTeamMembers = await fetchMergedTeamMembers();
-  const linkedMember = remoteTeamMembers.find(
+  const { data: remoteTeamMembers, error: remoteTeamMembersError } = await supabase
+    .from("team_members" as never)
+    .select("*")
+    .eq("workspace_id", workspaceId);
+  assertNoSupabaseError(remoteTeamMembersError, "Failed to load remote team members");
+
+  const linkedMember = (remoteTeamMembers as unknown as RemoteTeamMember[] | null)?.find(
     (member) =>
       member.id === account.teamMemberId ||
       normalizeText(member.email) === normalizeText(account.email),
   );
 
   if (linkedMember) {
-    await upsertRemoteTeamMember({
-      ...linkedMember,
-      name: account.fullName ?? linkedMember.name,
-      email: account.email ?? linkedMember.email,
-      role: account.title ?? linkedMember.role,
-      department: account.department ?? linkedMember.department,
-      privilegeRole: account.roleId ?? linkedMember.privilegeRole,
-    });
+    const existingMetadata = asObjectRecord(linkedMember.metadata);
+    const { error: updateTeamMemberError } = await supabase
+      .from("team_members" as never)
+      .update({
+        name: account.fullName ?? linkedMember.name,
+        email: account.email ?? linkedMember.email,
+        role_title: account.title ?? linkedMember.role_title,
+        department: account.department ?? linkedMember.department,
+        privilege_role: toRemoteWorkspaceRoleId(account.roleId ?? linkedMember.privilege_role),
+        metadata: {
+          ...existingMetadata,
+          accessNotes: account.notes ?? existingMetadata.accessNotes ?? null,
+          authProvider: account.authProvider ?? existingMetadata.authProvider ?? null,
+          invitedBy: account.invitedBy ?? existingMetadata.invitedBy ?? null,
+        },
+      } as never)
+      .eq("id", linkedMember.id);
+    assertNoSupabaseError(updateTeamMemberError, "Failed to update linked team member");
   }
 };
 

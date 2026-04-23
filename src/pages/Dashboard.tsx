@@ -22,6 +22,7 @@ const statusColor: Record<string, string> = {
   'on-hold': 'bg-warning/10 text-warning border-warning/20',
   completed: 'bg-muted text-muted-foreground border-border',
   'at-risk': 'bg-destructive/10 text-destructive border-destructive/20',
+  archived: 'bg-zinc-500/10 text-zinc-700 border-zinc-500/20 dark:text-zinc-300',
 };
 
 const Dashboard = () => {
@@ -85,10 +86,19 @@ const Dashboard = () => {
   );
   const portfolioStatusData = useMemo(
     () =>
-      (['active', 'on-hold', 'completed', 'at-risk'] as const).map((status) => ({
+      (['active', 'on-hold', 'completed', 'at-risk', 'archived'] as const).map((status) => ({
         name: status.replace('-', ' '),
         value: projects.filter((project) => project.status === status).length,
-        fill: status === 'active' ? '#10b981' : status === 'on-hold' ? '#f59e0b' : status === 'completed' ? '#64748b' : '#f43f5e',
+        fill:
+          status === 'active'
+            ? '#10b981'
+            : status === 'on-hold'
+              ? '#f59e0b'
+              : status === 'completed'
+                ? '#64748b'
+                : status === 'archived'
+                  ? '#71717a'
+                  : '#f43f5e',
       })),
     [projects],
   );

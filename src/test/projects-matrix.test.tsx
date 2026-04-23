@@ -6,6 +6,15 @@ import Projects from "@/pages/Projects";
 import { initialWorkspaceData } from "@/lib/workspace-store";
 
 const data = initialWorkspaceData();
+const projects = [
+  ...data.projects,
+  {
+    ...data.projects[0],
+    id: "archived-project",
+    name: "Archived Legacy Rollout",
+    status: "archived" as const,
+  },
+];
 const baseMutation = {
   mutate: vi.fn(),
   mutateAsync: vi.fn(async (value?: unknown) => value),
@@ -45,7 +54,7 @@ vi.mock("@/lib/ai-agent", () => ({
 }));
 
 vi.mock("@/hooks/useProjects", () => ({
-  useProjects: () => ({ data: data.projects, isLoading: false }),
+  useProjects: () => ({ data: projects, isLoading: false }),
   useTasks: () => ({ data: data.tasks }),
   useTickets: () => ({ data: data.tickets }),
   useTeamMembers: () => ({ data: data.teamMembers }),
@@ -76,5 +85,15 @@ describe("Projects implementation matrix", () => {
 
     expect(link).toHaveAttribute("href", "/projects?projectId=1");
     expect(screen.getAllByText(/linked user/i).length).toBeGreaterThan(0);
+  });
+
+  it("hides archived projects from the default active view", () => {
+    render(
+      <MemoryRouter initialEntries={["/projects"]}>
+        <Projects />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText("Archived Legacy Rollout")).not.toBeInTheDocument();
   });
 });

@@ -467,7 +467,7 @@ export interface WorkspaceData {
 
 const STORAGE_KEY = "synergi-workspace-data";
 const fullCycleScenarioProjectId = "sample-full-cycle-program";
-const projectStatuses = new Set<WorkspaceProject["status"]>(["active", "on-hold", "completed", "at-risk"]);
+const projectStatuses = new Set<WorkspaceProject["status"]>(["active", "on-hold", "completed", "at-risk", "archived"]);
 const teamMemberStatuses = new Set<WorkspaceTeamMember["status"]>(["online", "away", "offline"]);
 const requestedProjectCatalogNames = [
   "EPM-IDT Phase 3",

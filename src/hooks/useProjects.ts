@@ -25,25 +25,31 @@ import { buildDashboardWidgets } from "@/lib/dashboard-widgets";
 import { applyRadarRowsToWorkspace, type RadarImportRow } from "@/lib/radar-import";
 import {
   checkSupabaseConnection,
+  createRemoteAuditLog,
   deleteRemoteTicket,
   deleteRemoteStickyNote,
   deleteRemoteProject,
   deleteRemoteTask,
+  fetchMergedAuditLogs,
   fetchMergedChatChannels,
   fetchMergedDashboards,
   fetchMergedMeetings,
   fetchMergedPersonalEvents,
+  fetchMergedProjectTemplates,
   fetchMergedProjects,
+  fetchMergedReportTemplates,
   fetchMergedStickyNotes,
   fetchMergedTasks,
   fetchMergedTeamMembers,
   fetchMergedTickets,
   fetchMergedUserAccounts,
+  fetchMergedWorkflows,
   generatePersistentEntityId,
   isSupabaseReady,
   mergeSettingsWithRemoteContext,
+  syncRemoteWorkspaceState,
+  syncWorkspaceSettings,
   syncWorkspaceUserAccount,
-  syncProfileFromSettings,
   upsertRemoteChatChannel,
   upsertRemoteChatMessage,
   upsertRemoteDashboard,
@@ -105,6 +111,12 @@ export const invalidateWorkspace = (qc: ReturnType<typeof useQueryClient>) =>
     qc.invalidateQueries({ queryKey: workspaceKeys.audit }),
     qc.invalidateQueries({ queryKey: workspaceKeys.dashboard }),
   ]);
+
+const writeWorkspacePatch = (patch: Partial<WorkspaceData>) =>
+  updateWorkspaceData((current) => ({
+    ...current,
+    ...patch,
+  }));
 
 const normalizeTask = (task: WorkspaceTask, projects: WorkspaceProject[]): WorkspaceTask => {
   const project = projects.find((item) => item.id === (task.project_id ?? task.projectId));
@@ -313,7 +325,8 @@ export function useChatChannels() {
 export function useWorkflows() {
   return useQuery({
     queryKey: workspaceKeys.workflows,
-    queryFn: async () => readWorkspaceData().workflows,
+    queryFn: async () => fetchMergedWorkflows(),
+    ...liveSyncOptions,
   });
 }
 
@@ -328,21 +341,24 @@ export function useDashboards() {
 export function useReportTemplates() {
   return useQuery({
     queryKey: workspaceKeys.reports,
-    queryFn: async () => readWorkspaceData().reportTemplates,
+    queryFn: async () => fetchMergedReportTemplates(),
+    ...liveSyncOptions,
   });
 }
 
 export function useProjectTemplates() {
   return useQuery({
     queryKey: workspaceKeys.templates,
-    queryFn: async () => readWorkspaceData().projectTemplates,
+    queryFn: async () => fetchMergedProjectTemplates(),
+    ...liveSyncOptions,
   });
 }
 
 export function useAuditLogs() {
   return useQuery({
     queryKey: workspaceKeys.audit,
-    queryFn: async () => readWorkspaceData().auditLogs,
+    queryFn: async () => fetchMergedAuditLogs(),
+    ...liveSyncOptions,
   });
 }
 
@@ -412,57 +428,51 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: async (project: Partial<WorkspaceProject> & { name: string }) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("project") : makeId("project");
-      const created = updateWorkspaceData((current) => {
-        const record: WorkspaceProject = {
-          id: nextId,
-          name: project.name,
-          description: project.description ?? "",
-          status: (project.status as WorkspaceProject["status"]) ?? "active",
-          progress: project.progress ?? 0,
-          team: project.team ?? [],
-          startDate: project.startDate ?? project.start_date ?? new Date().toISOString().slice(0, 10),
-          endDate: project.endDate ?? project.end_date ?? "",
-          tasksTotal: 0,
-          tasksCompleted: 0,
-          priority: (project.priority as WorkspaceProject["priority"]) ?? "medium",
-          start_date: project.start_date ?? project.startDate,
-          end_date: project.end_date ?? project.endDate,
-          budget: project.budget ?? "",
-          department: project.department ?? "",
-          projectNature: project.projectNature ?? "",
-          tags: project.tags ?? [],
-          milestones: project.milestones ?? [],
-          resources: project.resources ?? [],
-          teamStructure: project.teamStructure ?? [],
-          stakeholders: project.stakeholders ?? [],
-          risks: project.risks ?? [],
-          documents: project.documents ?? [],
-          files: project.files ?? [],
-          customFieldValues: project.customFieldValues ?? {},
-          risk_level: project.risk_level ?? "medium",
-          namespace: project.namespace ?? current.settings.namespace.slug,
-          workflowId: project.workflowId ?? current.workflows.find((workflow) => workflow.entity === "task")?.id,
-        };
+      const current = readWorkspaceData();
+      const record: WorkspaceProject = {
+        id: nextId,
+        name: project.name,
+        description: project.description ?? "",
+        status: (project.status as WorkspaceProject["status"]) ?? "active",
+        progress: project.progress ?? 0,
+        team: project.team ?? [],
+        startDate: project.startDate ?? project.start_date ?? new Date().toISOString().slice(0, 10),
+        endDate: project.endDate ?? project.end_date ?? "",
+        tasksTotal: 0,
+        tasksCompleted: 0,
+        priority: (project.priority as WorkspaceProject["priority"]) ?? "medium",
+        start_date: project.start_date ?? project.startDate,
+        end_date: project.end_date ?? project.endDate,
+        budget: project.budget ?? "",
+        department: project.department ?? "",
+        projectNature: project.projectNature ?? "",
+        tags: project.tags ?? [],
+        milestones: project.milestones ?? [],
+        resources: project.resources ?? [],
+        teamStructure: project.teamStructure ?? [],
+        stakeholders: project.stakeholders ?? [],
+        risks: project.risks ?? [],
+        documents: project.documents ?? [],
+        files: project.files ?? [],
+        customFieldValues: project.customFieldValues ?? {},
+        risk_level: project.risk_level ?? "medium",
+        namespace: project.namespace ?? current.settings.namespace.slug,
+        workflowId: project.workflowId ?? current.workflows.find((workflow) => workflow.entity === "task")?.id,
+      };
 
-        return appendAuditLog(
-          { ...current, projects: [record, ...current.projects] },
-          {
-            action: "Project created",
-            entityType: "project",
-            entityId: record.id,
-            detail: `${record.name} was created in ${record.namespace}.`,
-          },
-        );
-      }).projects[0];
+      await upsertRemoteProject(record);
+      await upsertRemoteProjectDocuments(record.id, record.documents ?? []);
+      await createRemoteAuditLog({
+        action: "Project created",
+        entityType: "project",
+        entityId: record.id,
+        detail: `${record.name} was created in ${record.namespace}.`,
+        actorName: current.settings.currentUser.displayName,
+      });
 
-      try {
-        await upsertRemoteProject(created);
-        await upsertRemoteProjectDocuments(created.id, created.documents ?? []);
-      } catch (error) {
-        toast.error("Supabase project sync skipped", error);
-      }
-
-      return created;
+      const [projects, auditLogs] = await Promise.all([fetchMergedProjects(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ projects, auditLogs });
+      return projects.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -473,43 +483,34 @@ export function useUpdateProject() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceProject> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.projects.find((project) => project.id === id);
-        if (!existing) return current;
-
-        const nextProjects = current.projects.map((project) => {
-          if (project.id !== id) return project;
-          const next = { ...project, ...updates };
-          return {
-            ...next,
-            startDate: next.startDate ?? next.start_date ?? project.startDate,
-            endDate: next.endDate ?? next.end_date ?? project.endDate,
-            start_date: next.start_date ?? next.startDate ?? project.start_date,
-            end_date: next.end_date ?? next.endDate ?? project.end_date,
-          };
-        });
-
-        return appendAuditLog(
-          { ...current, projects: nextProjects },
-          {
-            action: "Project updated",
-            entityType: "project",
-            entityId: id,
-            detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).projects.find((project) => project.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemoteProject(updated);
-          await upsertRemoteProjectDocuments(updated.id, updated.documents ?? []);
-        } catch (error) {
-          toast.error("Supabase project update skipped", error);
-        }
+      const existingProjects = await fetchMergedProjects();
+      const existing = existingProjects.find((project) => project.id === id);
+      if (!existing) {
+        throw new Error("Project not found");
       }
 
-      return updated;
+      const updated: WorkspaceProject = {
+        ...existing,
+        ...updates,
+        startDate: updates.startDate ?? updates.start_date ?? existing.startDate,
+        endDate: updates.endDate ?? updates.end_date ?? existing.endDate,
+        start_date: updates.start_date ?? updates.startDate ?? existing.start_date,
+        end_date: updates.end_date ?? updates.endDate ?? existing.end_date,
+      };
+
+      await upsertRemoteProject(updated);
+      await upsertRemoteProjectDocuments(updated.id, updated.documents ?? []);
+      await createRemoteAuditLog({
+        action: "Project updated",
+        entityType: "project",
+        entityId: id,
+        detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+
+      const [projects, auditLogs] = await Promise.all([fetchMergedProjects(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ projects, auditLogs });
+      return projects.find((project) => project.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -520,32 +521,24 @@ export function useDeleteProject() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const deleted = updateWorkspaceData((current) => {
-        const existing = current.projects.find((project) => project.id === id);
-        const next = {
-          ...current,
-          projects: current.projects.filter((project) => project.id !== id),
-          tasks: current.tasks.filter((task) => (task.project_id ?? task.projectId) !== id),
-          tickets: current.tickets.filter((ticket) => ticket.projectId !== id),
-        };
-
-        return existing
-          ? appendAuditLog(next, {
-              action: "Project deleted",
-              entityType: "project",
-              entityId: id,
-              detail: `${existing.name} and its linked tasks and tickets were removed.`,
-            })
-          : next;
-      });
-
-      try {
-        await deleteRemoteProject(id);
-      } catch (error) {
-        toast.error("Supabase project delete skipped", error);
+      const existingProjects = await fetchMergedProjects();
+      const existing = existingProjects.find((project) => project.id === id);
+      if (!existing) {
+        throw new Error("Project not found");
       }
 
-      return deleted;
+      await deleteRemoteProject(id);
+      await createRemoteAuditLog({
+        action: "Project archived",
+        entityType: "project",
+        entityId: id,
+        detail: `${existing.name} was archived and removed from the active project list.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+
+      const [projects, auditLogs] = await Promise.all([fetchMergedProjects(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ projects, auditLogs });
+      return projects;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -557,58 +550,55 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: async (task: Partial<WorkspaceTask> & { title: string }) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("task") : makeId("task");
-      const created = updateWorkspaceData((current) => {
-        const project = current.projects.find((item) => item.id === (task.project_id ?? task.projectId));
-        const dueDate = task.due_date ?? task.dueDate ?? "";
-        const record: WorkspaceTask = {
-          id: nextId,
-          title: task.title,
-          description: task.description ?? "",
-          status: (task.status as WorkspaceTask["status"]) ?? "todo",
-          priority: (task.priority as WorkspaceTask["priority"]) ?? "medium",
-          assignee: task.assignee ?? "",
-          project_id: task.project_id ?? task.projectId ?? "",
-          projectId: task.projectId ?? task.project_id ?? "",
-          projectName: project?.name ?? "Unassigned",
-          due_date: dueDate,
-          dueDate,
-          tags: task.tags ?? [],
-          phase: task.phase ?? "Execution",
-          parentTaskId: task.parentTaskId,
-          progress: task.progress ?? 0,
-          isMilestone: task.isMilestone ?? false,
-          start_date: task.start_date ?? project?.start_date,
-          end_date: task.end_date ?? dueDate,
-          predecessors: task.predecessors ?? [],
-          assignees: task.assignees ?? [],
-          comments: task.comments ?? [],
-          files: task.files ?? [],
-          duration: task.duration ?? "3d",
-          workloadHours: task.workloadHours ?? 24,
-          workflowStage: task.workflowStage ?? task.status ?? "todo",
-          timesheetEntries: task.timesheetEntries ?? [],
-          customFieldValues: task.customFieldValues ?? {},
-        };
+      const projects = await fetchMergedProjects();
+      const project = projects.find((item) => item.id === (task.project_id ?? task.projectId));
+      const dueDate = task.due_date ?? task.dueDate ?? "";
+      const record: WorkspaceTask = {
+        id: nextId,
+        title: task.title,
+        description: task.description ?? "",
+        status: (task.status as WorkspaceTask["status"]) ?? "todo",
+        priority: (task.priority as WorkspaceTask["priority"]) ?? "medium",
+        assignee: task.assignee ?? "",
+        project_id: task.project_id ?? task.projectId ?? "",
+        projectId: task.projectId ?? task.project_id ?? "",
+        projectName: project?.name ?? "Unassigned",
+        due_date: dueDate,
+        dueDate,
+        tags: task.tags ?? [],
+        phase: task.phase ?? "Execution",
+        parentTaskId: task.parentTaskId,
+        progress: task.progress ?? 0,
+        isMilestone: task.isMilestone ?? false,
+        start_date: task.start_date ?? project?.start_date,
+        end_date: task.end_date ?? dueDate,
+        predecessors: task.predecessors ?? [],
+        assignees: task.assignees ?? [],
+        comments: task.comments ?? [],
+        files: task.files ?? [],
+        duration: task.duration ?? "3d",
+        workloadHours: task.workloadHours ?? 24,
+        workflowStage: task.workflowStage ?? task.status ?? "todo",
+        timesheetEntries: task.timesheetEntries ?? [],
+        customFieldValues: task.customFieldValues ?? {},
+      };
 
-        const nextTasks = [record, ...current.tasks];
-        return appendAuditLog(
-          { ...current, tasks: nextTasks, projects: recalcProjects(current.projects, nextTasks) },
-          {
-            action: "Task created",
-            entityType: "task",
-            entityId: record.id,
-            detail: `${record.title} was created for ${record.projectName || "the workspace"} in ${record.phase}.`,
-          },
-        );
-      }).tasks[0];
+      await upsertRemoteTask(record);
+      await createRemoteAuditLog({
+        action: "Task created",
+        entityType: "task",
+        entityId: record.id,
+        detail: `${record.title} was created for ${record.projectName || "the workspace"} in ${record.phase}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
 
-      try {
-        await upsertRemoteTask(created);
-      } catch (error) {
-        toast.error(`Task save failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-      }
-
-      return created;
+      const [tasks, nextProjects, auditLogs] = await Promise.all([
+        fetchMergedTasks(),
+        fetchMergedProjects(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({ tasks, projects: nextProjects, auditLogs });
+      return tasks.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -619,53 +609,45 @@ export function useUpdateTask() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceTask> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.tasks.find((task) => task.id === id);
-        if (!existing) return current;
-
-        const nextTasks = current.tasks.map((task) => {
-          if (task.id !== id) return task;
-          const projectId = updates.project_id ?? updates.projectId ?? task.project_id ?? task.projectId;
-          const project = current.projects.find((item) => item.id === projectId);
-          const dueDate = updates.due_date ?? updates.dueDate ?? task.due_date ?? task.dueDate;
-          return {
-            ...task,
-            ...updates,
-            project_id: projectId,
-            projectId,
-            projectName: updates.projectName ?? project?.name ?? task.projectName,
-            due_date: dueDate,
-            dueDate,
-            parentTaskId: updates.parentTaskId ?? task.parentTaskId,
-            workloadHours: updates.workloadHours ?? task.workloadHours,
-            timesheetEntries: updates.timesheetEntries ?? task.timesheetEntries ?? [],
-          };
-        });
-
-        return appendAuditLog(
-          {
-            ...current,
-            tasks: nextTasks,
-            projects: recalcProjects(current.projects, nextTasks),
-          },
-          {
-            action: "Task updated",
-            entityType: "task",
-            entityId: id,
-            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).tasks.find((task) => task.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemoteTask(updated);
-        } catch (error) {
-          toast.error(`Task update failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-        }
+      const existingTasks = await fetchMergedTasks();
+      const existing = existingTasks.find((task) => task.id === id);
+      if (!existing) {
+        throw new Error("Task not found");
       }
 
-      return updated;
+      const projects = await fetchMergedProjects();
+      const projectId = updates.project_id ?? updates.projectId ?? existing.project_id ?? existing.projectId;
+      const project = projects.find((item) => item.id === projectId);
+      const dueDate = updates.due_date ?? updates.dueDate ?? existing.due_date ?? existing.dueDate;
+      const updated: WorkspaceTask = {
+        ...existing,
+        ...updates,
+        project_id: projectId,
+        projectId,
+        projectName: updates.projectName ?? project?.name ?? existing.projectName,
+        due_date: dueDate,
+        dueDate,
+        parentTaskId: updates.parentTaskId ?? existing.parentTaskId,
+        workloadHours: updates.workloadHours ?? existing.workloadHours,
+        timesheetEntries: updates.timesheetEntries ?? existing.timesheetEntries ?? [],
+      };
+
+      await upsertRemoteTask(updated);
+      await createRemoteAuditLog({
+        action: "Task updated",
+        entityType: "task",
+        entityId: id,
+        detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+
+      const [tasks, nextProjects, auditLogs] = await Promise.all([
+        fetchMergedTasks(),
+        fetchMergedProjects(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({ tasks, projects: nextProjects, auditLogs });
+      return tasks.find((task) => task.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -676,33 +658,29 @@ export function useDeleteTask() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const deleted = updateWorkspaceData((current) => {
-        const existing = current.tasks.find((task) => task.id === id);
-        const nextTasks = current.tasks.filter((task) => task.id !== id);
-        const next = {
-          ...current,
-          tasks: nextTasks,
-          tickets: current.tickets.filter((ticket) => ticket.taskId !== id),
-          projects: recalcProjects(current.projects, nextTasks),
-        };
-
-        return existing
-          ? appendAuditLog(next, {
-              action: "Task deleted",
-              entityType: "task",
-              entityId: id,
-              detail: `${existing.title} and linked ticket references were removed.`,
-            })
-          : next;
-      });
-
-      try {
-        await deleteRemoteTask(id);
-      } catch (error) {
-        toast.error("Supabase task delete skipped", error);
+      const existingTasks = await fetchMergedTasks();
+      const existing = existingTasks.find((task) => task.id === id);
+      if (!existing) {
+        throw new Error("Task not found");
       }
 
-      return deleted;
+      await deleteRemoteTask(id);
+      await createRemoteAuditLog({
+        action: "Task deleted",
+        entityType: "task",
+        entityId: id,
+        detail: `${existing.title} and linked ticket references were removed.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+
+      const [tasks, projects, tickets, auditLogs] = await Promise.all([
+        fetchMergedTasks(),
+        fetchMergedProjects(),
+        fetchMergedTickets(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({ tasks, projects, tickets, auditLogs });
+      return tasks;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -714,52 +692,43 @@ export function useCreateTeamMember() {
   return useMutation({
     mutationFn: async (member: Partial<WorkspaceTeamMember> & { name: string }) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("member") : makeId("member");
-      const created = updateWorkspaceData((current) => {
-        const initials = member.name
-          .split(" ")
-          .map((part) => part[0]?.toUpperCase() ?? "")
-          .join("")
-          .slice(0, 2);
+      const initials = member.name
+        .split(" ")
+        .map((part) => part[0]?.toUpperCase() ?? "")
+        .join("")
+        .slice(0, 2);
 
-        const record: WorkspaceTeamMember = {
-          id: nextId,
-          name: member.name,
-          role: member.role ?? "",
-          avatar: member.avatar ?? initials,
-          email: member.email ?? "",
-          tasksAssigned: member.tasksAssigned ?? 0,
-          tasksCompleted: member.tasksCompleted ?? 0,
-          status: member.status ?? "online",
-          phone: member.phone ?? "",
-          department: member.department ?? "",
-          avatarColor: member.avatarColor ?? "gradient-primary",
-          assignedProjectIds: member.assignedProjectIds ?? [],
-          capacityHours: member.capacityHours ?? 40,
-          utilizationTarget: member.utilizationTarget ?? 85,
-          privilegeRole: member.privilegeRole ?? "lead",
-          customFieldValues: member.customFieldValues ?? {},
-        };
+      const record: WorkspaceTeamMember = {
+        id: nextId,
+        name: member.name,
+        role: member.role ?? "",
+        avatar: member.avatar ?? initials,
+        email: member.email ?? "",
+        tasksAssigned: member.tasksAssigned ?? 0,
+        tasksCompleted: member.tasksCompleted ?? 0,
+        status: member.status ?? "online",
+        phone: member.phone ?? "",
+        department: member.department ?? "",
+        avatarColor: member.avatarColor ?? "gradient-primary",
+        assignedProjectIds: member.assignedProjectIds ?? [],
+        capacityHours: member.capacityHours ?? 40,
+        utilizationTarget: member.utilizationTarget ?? 85,
+        privilegeRole: member.privilegeRole ?? "lead",
+        customFieldValues: member.customFieldValues ?? {},
+      };
 
-        return appendAuditLog(
-          { ...current, teamMembers: [...current.teamMembers, record] },
-          {
-            action: "Team member created",
-            entityType: "team",
-            entityId: record.id,
-            detail: `${record.name} was added as ${record.role || "a team member"}.`,
-          },
-        );
-      }).teamMembers.at(-1);
+      await upsertRemoteTeamMember(record);
+      await createRemoteAuditLog({
+        action: "Team member created",
+        entityType: "team",
+        entityId: record.id,
+        detail: `${record.name} was added as ${record.role || "a team member"}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
 
-      if (created) {
-        try {
-          await upsertRemoteTeamMember(created);
-        } catch (error) {
-          toast.error("Supabase team member sync skipped", error);
-        }
-      }
-
-      return created;
+      const [teamMembers, auditLogs] = await Promise.all([fetchMergedTeamMembers(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ teamMembers, auditLogs });
+      return teamMembers.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -770,35 +739,25 @@ export function useUpdateTeamMember() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceTeamMember> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.teamMembers.find((member) => member.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            teamMembers: current.teamMembers.map((member) =>
-              member.id === id ? { ...member, ...updates } : member,
-            ),
-          },
-          {
-            action: "Team member updated",
-            entityType: "team",
-            entityId: id,
-            detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).teamMembers.find((member) => member.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemoteTeamMember(updated);
-        } catch (error) {
-          toast.error("Supabase team member update skipped", error);
-        }
+      const existingMembers = await fetchMergedTeamMembers();
+      const existing = existingMembers.find((member) => member.id === id);
+      if (!existing) {
+        throw new Error("Team member not found");
       }
 
-      return updated;
+      const updated: WorkspaceTeamMember = { ...existing, ...updates };
+      await upsertRemoteTeamMember(updated);
+      await createRemoteAuditLog({
+        action: "Team member updated",
+        entityType: "team",
+        entityId: id,
+        detail: `${updates.name ?? existing.name} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+
+      const [teamMembers, auditLogs] = await Promise.all([fetchMergedTeamMembers(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ teamMembers, auditLogs });
+      return teamMembers.find((member) => member.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -823,40 +782,23 @@ export function useUpdateUserAccount() {
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceUserAccount> & { id: string }) => {
       await syncWorkspaceUserAccount({ id, ...updates });
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) => account.id === id);
-        if (!existing) return current;
-        const teamMemberId = updates.teamMemberId ?? existing?.teamMemberId ?? "";
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === id
-                ? {
-                    ...account,
-                    ...updates,
-                    teamMemberId,
-                  }
-                : account,
-            ),
-            teamMembers: current.teamMembers.map((member) =>
-              member.id === teamMemberId
-                ? {
-                    ...member,
-                    email: updates.email ?? existing?.email ?? member.email,
-                    privilegeRole: updates.roleId ?? existing?.roleId ?? member.privilegeRole,
-                  }
-                : member,
-            ),
-          },
-          {
-            action: "User access updated",
-            entityType: "user",
-            entityId: id,
-            detail: `${updates.fullName ?? existing.fullName} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === id);
+      const existing = (await fetchMergedUserAccounts()).find((account) => account.id === id);
+      await createRemoteAuditLog({
+        action: "User access updated",
+        entityType: "user",
+        entityId: id,
+        detail: `${updates.fullName ?? existing?.fullName ?? "User"} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+        payload: { userAccountId: id },
+      });
+
+      const [userAccounts, teamMembers, auditLogs] = await Promise.all([
+        fetchMergedUserAccounts(),
+        fetchMergedTeamMembers(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({ userAccounts, teamMembers, auditLogs });
+      return userAccounts.find((account) => account.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -868,33 +810,23 @@ export function useDeleteUserAccount() {
   return useMutation({
     mutationFn: async (id: string) => {
       await syncWorkspaceUserAccount({ id, status: "suspended" });
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) => account.id === id);
-        if (!existing) return current;
+      const existing = (await fetchMergedUserAccounts()).find((account) => account.id === id);
+      await createRemoteAuditLog({
+        action: "User access removed",
+        entityType: "user",
+        entityId: id,
+        detail: `${existing?.fullName ?? "User"} access was suspended.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+        payload: { userAccountId: id },
+      });
 
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === id ? { ...account, status: "suspended" } : account,
-            ),
-            teamMembers: current.teamMembers.map((member) =>
-              member.id === existing.teamMemberId
-                ? {
-                    ...member,
-                    email: null,
-                  }
-                : member,
-            ),
-          },
-          {
-            action: "User access removed",
-            entityType: "user",
-            entityId: id,
-            detail: `${existing.fullName} access was suspended.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === id);
+      const [userAccounts, teamMembers, auditLogs] = await Promise.all([
+        fetchMergedUserAccounts(),
+        fetchMergedTeamMembers(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({ userAccounts, teamMembers, auditLogs });
+      return userAccounts.find((account) => account.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -905,33 +837,19 @@ export function useRecordUserInvitation() {
 
   return useMutation({
     mutationFn: async ({ id, actorName }: { id: string; actorName?: string }) => {
-      const sentAt = new Date().toISOString();
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) => account.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === id
-                ? {
-                    ...account,
-                    status: account.status === "suspended" ? account.status : "invited",
-                    invitationSentAt: sentAt,
-                  }
-                : account,
-            ),
-          },
-          {
-            action: "Invitation email sent",
-            entityType: "user",
-            entityId: id,
-            actorName,
-            detail: `${existing.fullName} received a workspace invitation email at ${existing.email}.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === id);
+      const existing = (await fetchMergedUserAccounts()).find((account) => account.id === id);
+      if (!existing) return undefined;
+      await createRemoteAuditLog({
+        action: "Invitation email sent",
+        entityType: "user",
+        entityId: id,
+        actorName,
+        detail: `${existing.fullName} received a workspace invitation email at ${existing.email}.`,
+        payload: { userAccountId: id },
+      });
+      const [userAccounts, auditLogs] = await Promise.all([fetchMergedUserAccounts(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ userAccounts, auditLogs });
+      return userAccounts.find((account) => account.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -942,32 +860,19 @@ export function useRecordUserPasswordReset() {
 
   return useMutation({
     mutationFn: async ({ id, actorName }: { id: string; actorName?: string }) => {
-      const sentAt = new Date().toISOString();
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) => account.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === id
-                ? {
-                    ...account,
-                    passwordResetSentAt: sentAt,
-                  }
-                : account,
-            ),
-          },
-          {
-            action: "Password reset email sent",
-            entityType: "user",
-            entityId: id,
-            actorName,
-            detail: `${existing.fullName} received a password reset email at ${existing.email}.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === id);
+      const existing = (await fetchMergedUserAccounts()).find((account) => account.id === id);
+      if (!existing) return undefined;
+      await createRemoteAuditLog({
+        action: "Password reset email sent",
+        entityType: "user",
+        entityId: id,
+        actorName,
+        detail: `${existing.fullName} received a password reset email at ${existing.email}.`,
+        payload: { userAccountId: id },
+      });
+      const [userAccounts, auditLogs] = await Promise.all([fetchMergedUserAccounts(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ userAccounts, auditLogs });
+      return userAccounts.find((account) => account.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -986,33 +891,19 @@ export function useSendUserNotification() {
       message: string;
       actorName?: string;
     }) => {
-      const sentAt = new Date().toISOString();
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) => account.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === id
-                ? {
-                    ...account,
-                    lastNotificationAt: sentAt,
-                    notificationCount: (account.notificationCount ?? 0) + 1,
-                  }
-                : account,
-            ),
-          },
-          {
-            action: "User notification sent",
-            entityType: "user",
-            entityId: id,
-            actorName,
-            detail: `${existing.fullName} was notified: ${message.trim()}.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === id);
+      const existing = (await fetchMergedUserAccounts()).find((account) => account.id === id);
+      if (!existing) return undefined;
+      await createRemoteAuditLog({
+        action: "User notification sent",
+        entityType: "user",
+        entityId: id,
+        actorName,
+        detail: `${existing.fullName} was notified: ${message.trim()}.`,
+        payload: { userAccountId: id, message: message.trim() },
+      });
+      const [userAccounts, auditLogs] = await Promise.all([fetchMergedUserAccounts(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ userAccounts, auditLogs });
+      return userAccounts.find((account) => account.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1033,45 +924,37 @@ export function useRegisterUserAccess() {
       displayName?: string;
       authUserId?: string;
     }) => {
-      const accessAt = new Date().toISOString();
       const normalizedEmail = (email ?? "").trim().toLowerCase();
-      return updateWorkspaceData((current) => {
-        const existing = current.userAccounts.find((account) =>
-          userAccountId ? account.id === userAccountId : account.email.trim().toLowerCase() === normalizedEmail,
-        );
-        if (!existing) return current;
+      const userAccounts = await fetchMergedUserAccounts();
+      const existing = userAccounts.find((account) =>
+        userAccountId ? account.id === userAccountId : account.email.trim().toLowerCase() === normalizedEmail,
+      );
+      if (!existing) return undefined;
 
-        return appendAuditLog(
-          {
-            ...current,
-            userAccounts: current.userAccounts.map((account) =>
-              account.id === existing.id
-                ? {
-                    ...account,
-                    status: account.status === "suspended" ? "suspended" : "active",
-                    lastAccessAt: accessAt,
-                  }
-                : account,
-            ),
-            settings: {
-              ...current.settings,
-              currentUser: {
-                ...current.settings.currentUser,
-                authUserId: authUserId ?? current.settings.currentUser.authUserId,
-                userAccountId: existing.id,
-                displayName: displayName ?? current.settings.currentUser.displayName,
-              },
-            },
+      await createRemoteAuditLog({
+        action: "Account access recorded",
+        entityType: "user",
+        entityId: existing.id,
+        actorName: displayName ?? existing.fullName,
+        detail: `${existing.fullName} accessed the application using ${existing.authProvider} authentication.`,
+        payload: { userAccountId: existing.id, authUserId: authUserId ?? null },
+      });
+
+      const [nextUserAccounts, auditLogs] = await Promise.all([fetchMergedUserAccounts(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({
+        userAccounts: nextUserAccounts,
+        auditLogs,
+        settings: {
+          ...readWorkspaceData().settings,
+          currentUser: {
+            ...readWorkspaceData().settings.currentUser,
+            authUserId: authUserId ?? readWorkspaceData().settings.currentUser.authUserId,
+            userAccountId: existing.id,
+            displayName: displayName ?? readWorkspaceData().settings.currentUser.displayName,
           },
-          {
-            action: "Account access recorded",
-            entityType: "user",
-            entityId: existing.id,
-            actorName: displayName ?? existing.fullName,
-            detail: `${existing.fullName} accessed the application using ${existing.authProvider} authentication.`,
-          },
-        );
-      }).userAccounts.find((account) => account.id === userAccountId || account.email.trim().toLowerCase() === normalizedEmail);
+        },
+      });
+      return nextUserAccounts.find((account) => account.id === existing.id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1098,19 +981,16 @@ export function useCreateTicket() {
       } satisfies WorkspaceTicket;
 
       await upsertRemoteTicket(record);
-      return updateWorkspaceData((current) => {
-        const nextId = `TK-${String(current.tickets.length + 1).padStart(3, "0")}`;
-        const localRecord = { ...record, id: ticket.id ?? nextId };
-        return appendAuditLog(
-          { ...current, tickets: [localRecord, ...current.tickets.filter((item) => item.id !== localRecord.id)] },
-          {
-            action: "Ticket created",
-            entityType: "ticket",
-            entityId: localRecord.id,
-            detail: `${localRecord.id} - ${localRecord.title} was opened for ${localRecord.assignee}.`,
-          },
-        );
-      }).tickets[0];
+      await createRemoteAuditLog({
+        action: "Ticket created",
+        entityType: "ticket",
+        entityId: record.id,
+        detail: `${record.id} - ${record.title} was opened for ${record.assignee}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [tickets, auditLogs] = await Promise.all([fetchMergedTickets(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ tickets, auditLogs });
+      return tickets.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1126,23 +1006,16 @@ export function useUpdateTicket() {
       if (!existingRemote) throw new Error("Ticket not found");
 
       await upsertRemoteTicket({ ...existingRemote, ...updates, id });
-      return updateWorkspaceData((current) => {
-        const existing = current.tickets.find((ticket) => ticket.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            tickets: current.tickets.map((ticket) => (ticket.id === id ? { ...ticket, ...updates } : ticket)),
-          },
-          {
-            action: "Ticket updated",
-            entityType: "ticket",
-            entityId: id,
-            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).tickets.find((ticket) => ticket.id === id);
+      await createRemoteAuditLog({
+        action: "Ticket updated",
+        entityType: "ticket",
+        entityId: id,
+        detail: `${updates.title ?? existingRemote.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [tickets, auditLogs] = await Promise.all([fetchMergedTickets(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ tickets, auditLogs });
+      return tickets.find((ticket) => ticket.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1261,11 +1134,13 @@ export function useUpdateWorkflow() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceWorkflow> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        workflows: current.workflows.map((workflow) => (workflow.id === id ? { ...workflow, ...updates } : workflow)),
-      })).workflows.find((workflow) => workflow.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceWorkflow> & { id: string }) => {
+      const workflows = await fetchMergedWorkflows();
+      const nextWorkflows = workflows.map((workflow) => (workflow.id === id ? { ...workflow, ...updates } : workflow));
+      await syncRemoteWorkspaceState({ workflows: nextWorkflows });
+      writeWorkspacePatch({ workflows: nextWorkflows });
+      return nextWorkflows.find((workflow) => workflow.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1290,18 +1165,9 @@ export function useUpdateDashboard() {
       });
 
       await Promise.all(nextDashboards.map((dashboard) => upsertRemoteDashboard(dashboard)));
-      return updateWorkspaceData((current) => ({
-        ...current,
-        dashboards: current.dashboards.map((dashboard) => {
-          if (updates.isDefault) {
-            return dashboard.id === id
-              ? { ...dashboard, ...updates, isDefault: true }
-              : { ...dashboard, isDefault: false };
-          }
-
-          return dashboard.id === id ? { ...dashboard, ...updates } : dashboard;
-        }),
-      })).dashboards.find((dashboard) => dashboard.id === id);
+      const dashboards = await fetchMergedDashboards();
+      writeWorkspacePatch({ dashboards });
+      return dashboards.find((dashboard) => dashboard.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1323,25 +1189,9 @@ export function useCreateDashboard() {
       };
 
       await upsertRemoteDashboard(remoteRecord);
-      return updateWorkspaceData((current) => {
-        const shouldBeDefault = dashboard.isDefault ?? current.dashboards.length === 0;
-        const record: WorkspaceDashboard = {
-          id: remoteRecord.id,
-          name: dashboard.name,
-          isDefault: shouldBeDefault,
-          widgets: remoteRecord.widgets,
-        };
-
-        return {
-          ...current,
-          dashboards: [
-            record,
-            ...current.dashboards.map((item) =>
-              shouldBeDefault ? { ...item, isDefault: false } : item,
-            ),
-          ],
-        };
-      }).dashboards[0];
+      const dashboards = await fetchMergedDashboards();
+      writeWorkspacePatch({ dashboards });
+      return dashboards.find((item) => item.id === remoteRecord.id) ?? remoteRecord;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1351,11 +1201,15 @@ export function useUpdateReportTemplate() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<WorkspaceReportTemplate> & { id: string }) =>
-      updateWorkspaceData((current) => ({
-        ...current,
-        reportTemplates: current.reportTemplates.map((template) => (template.id === id ? { ...template, ...updates } : template)),
-      })).reportTemplates.find((template) => template.id === id),
+    mutationFn: async ({ id, ...updates }: Partial<WorkspaceReportTemplate> & { id: string }) => {
+      const reportTemplates = await fetchMergedReportTemplates();
+      const nextTemplates = reportTemplates.map((template) =>
+        template.id === id ? { ...template, ...updates } : template,
+      );
+      await syncRemoteWorkspaceState({ reportTemplates: nextTemplates });
+      writeWorkspacePatch({ reportTemplates: nextTemplates });
+      return nextTemplates.find((template) => template.id === id);
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1366,42 +1220,34 @@ export function useCreateMeeting() {
   return useMutation({
     mutationFn: async (meeting: Partial<WorkspaceMeeting> & { title: string; startsAt: string; endsAt: string }) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("meeting") : makeId("meeting");
-      const created = updateWorkspaceData((current) => {
-        const record = {
-          id: nextId,
-          title: meeting.title,
-          type: meeting.type ?? "Planning",
-          projectId: meeting.projectId,
-          taskId: meeting.taskId,
-          channelId: meeting.channelId,
-          organizerId: meeting.organizerId,
-          attendeeIds: meeting.attendeeIds ?? [],
-          startsAt: meeting.startsAt,
-          endsAt: meeting.endsAt,
-          provider: meeting.provider ?? "workspace",
-          joinUrl: meeting.joinUrl,
-          notes: meeting.notes,
-          status: meeting.status ?? "scheduled",
-        };
+      const record: WorkspaceMeeting = {
+        id: nextId,
+        title: meeting.title,
+        type: meeting.type ?? "Planning",
+        projectId: meeting.projectId,
+        taskId: meeting.taskId,
+        channelId: meeting.channelId,
+        organizerId: meeting.organizerId,
+        attendeeIds: meeting.attendeeIds ?? [],
+        startsAt: meeting.startsAt,
+        endsAt: meeting.endsAt,
+        provider: meeting.provider ?? "workspace",
+        joinUrl: meeting.joinUrl,
+        notes: meeting.notes,
+        status: meeting.status ?? "scheduled",
+      };
 
-        return appendAuditLog(
-          { ...current, meetings: [record, ...current.meetings] },
-          {
-            action: "Meeting scheduled",
-            entityType: "meeting",
-            entityId: record.id,
-            detail: `${record.title} was scheduled for ${new Date(record.startsAt).toLocaleString()}.`,
-          },
-        );
-      }).meetings[0];
-
-      try {
-        await upsertRemoteMeeting(created);
-      } catch (error) {
-        toast.error("Supabase meeting sync skipped", error);
-      }
-
-      return created;
+      await upsertRemoteMeeting(record);
+      await createRemoteAuditLog({
+        action: "Meeting scheduled",
+        entityType: "meeting",
+        entityId: record.id,
+        detail: `${record.title} was scheduled for ${new Date(record.startsAt).toLocaleString()}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [meetings, auditLogs] = await Promise.all([fetchMergedMeetings(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ meetings, auditLogs });
+      return meetings.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1412,33 +1258,24 @@ export function useUpdateMeeting() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceMeeting> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.meetings.find((meeting) => meeting.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            meetings: current.meetings.map((meeting) => (meeting.id === id ? { ...meeting, ...updates } : meeting)),
-          },
-          {
-            action: "Meeting updated",
-            entityType: "meeting",
-            entityId: id,
-            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).meetings.find((meeting) => meeting.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemoteMeeting(updated);
-        } catch (error) {
-          toast.error("Supabase meeting update skipped", error);
-        }
+      const meetings = await fetchMergedMeetings();
+      const existing = meetings.find((meeting) => meeting.id === id);
+      if (!existing) {
+        throw new Error("Meeting not found");
       }
 
-      return updated;
+      const updated: WorkspaceMeeting = { ...existing, ...updates };
+      await upsertRemoteMeeting(updated);
+      await createRemoteAuditLog({
+        action: "Meeting updated",
+        entityType: "meeting",
+        entityId: id,
+        detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [nextMeetings, auditLogs] = await Promise.all([fetchMergedMeetings(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ meetings: nextMeetings, auditLogs });
+      return nextMeetings.find((meeting) => meeting.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1450,35 +1287,27 @@ export function useCreatePersonalEvent() {
   return useMutation({
     mutationFn: async (event: Partial<WorkspacePersonalEvent> & { title: string; memberId: string; startsAt: string; endsAt: string }) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("event") : makeId("event");
-      const created = updateWorkspaceData((current) => {
-        const record = {
-          id: nextId,
-          title: event.title,
-          memberId: event.memberId,
-          type: event.type ?? "personal",
-          startsAt: event.startsAt,
-          endsAt: event.endsAt,
-          notes: event.notes,
-        };
+      const record: WorkspacePersonalEvent = {
+        id: nextId,
+        title: event.title,
+        memberId: event.memberId,
+        type: event.type ?? "personal",
+        startsAt: event.startsAt,
+        endsAt: event.endsAt,
+        notes: event.notes,
+      };
 
-        return appendAuditLog(
-          { ...current, personalEvents: [record, ...current.personalEvents] },
-          {
-            action: "Personal event created",
-            entityType: "event",
-            entityId: record.id,
-            detail: `${record.title} was added to the personal calendar.`,
-          },
-        );
-      }).personalEvents[0];
-
-      try {
-        await upsertRemotePersonalEvent(created);
-      } catch (error) {
-        toast.error("Supabase personal event sync skipped", error);
-      }
-
-      return created;
+      await upsertRemotePersonalEvent(record);
+      await createRemoteAuditLog({
+        action: "Personal event created",
+        entityType: "event",
+        entityId: record.id,
+        detail: `${record.title} was added to the personal calendar.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [personalEvents, auditLogs] = await Promise.all([fetchMergedPersonalEvents(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ personalEvents, auditLogs });
+      return personalEvents.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1489,33 +1318,24 @@ export function useUpdatePersonalEvent() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspacePersonalEvent> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.personalEvents.find((event) => event.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            personalEvents: current.personalEvents.map((event) => (event.id === id ? { ...event, ...updates } : event)),
-          },
-          {
-            action: "Personal event updated",
-            entityType: "event",
-            entityId: id,
-            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).personalEvents.find((event) => event.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemotePersonalEvent(updated);
-        } catch (error) {
-          toast.error("Supabase personal event update skipped", error);
-        }
+      const personalEvents = await fetchMergedPersonalEvents();
+      const existing = personalEvents.find((event) => event.id === id);
+      if (!existing) {
+        throw new Error("Personal event not found");
       }
 
-      return updated;
+      const updated: WorkspacePersonalEvent = { ...existing, ...updates };
+      await upsertRemotePersonalEvent(updated);
+      await createRemoteAuditLog({
+        action: "Personal event updated",
+        entityType: "event",
+        entityId: id,
+        detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [nextPersonalEvents, auditLogs] = await Promise.all([fetchMergedPersonalEvents(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ personalEvents: nextPersonalEvents, auditLogs });
+      return nextPersonalEvents.find((event) => event.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1526,28 +1346,29 @@ export function useUpdateWorkspaceSettings() {
 
   return useMutation({
     mutationFn: async (settings: WorkspaceSettings) => {
-      const nextSettings = updateWorkspaceData((current) =>
-        appendAuditLog(
-          {
-            ...current,
-            settings,
-          },
-          {
-            action: "Settings updated",
-            entityType: "settings",
-            entityId: current.settings.namespace.slug,
-            detail: `Workspace settings were updated: ${summarizeUpdatedFields(settings as unknown as Record<string, unknown>)}.`,
-          },
-        ),
-      ).settings;
-
-      try {
-        await syncProfileFromSettings(nextSettings);
-      } catch (error) {
-        toast.error("Supabase profile sync skipped", error);
-      }
-
-      return nextSettings;
+      const nextSettings = await syncWorkspaceSettings(settings);
+      await createRemoteAuditLog({
+        action: "Settings updated",
+        entityType: "settings",
+        entityId: settings.namespace.slug,
+        detail: `Workspace settings were updated: ${summarizeUpdatedFields(settings as unknown as Record<string, unknown>)}.`,
+        actorName: settings.currentUser.displayName,
+      });
+      const [mergedSettings, workflows, reportTemplates, projectTemplates, auditLogs] = await Promise.all([
+        mergeSettingsWithRemoteContext(nextSettings),
+        fetchMergedWorkflows(),
+        fetchMergedReportTemplates(),
+        fetchMergedProjectTemplates(),
+        fetchMergedAuditLogs(),
+      ]);
+      writeWorkspacePatch({
+        settings: mergedSettings,
+        workflows,
+        reportTemplates,
+        projectTemplates,
+        auditLogs,
+      });
+      return mergedSettings;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1559,32 +1380,23 @@ export function useCreateStickyNote() {
   return useMutation({
     mutationFn: async (note: Omit<WorkspaceStickyNote, "id" | "createdAt">) => {
       const nextId = isSupabaseReady() ? generatePersistentEntityId("note") : makeId("note");
-      const created = updateWorkspaceData((current) => {
-        const record = {
-          id: nextId,
-          createdAt: new Date().toISOString(),
-          ...note,
-        };
+      const record: WorkspaceStickyNote = {
+        id: nextId,
+        createdAt: new Date().toISOString(),
+        ...note,
+      };
 
-        return appendAuditLog(
-          { ...current, stickyNotes: [record, ...current.stickyNotes] },
-          {
-            action: "Sticky note created",
-            entityType: "sticky-note",
-            entityId: record.id,
-            actorName: note.ownerName,
-            detail: `${record.title} was added to the personal workspace.`,
-          },
-        );
-      }).stickyNotes[0];
-
-      try {
-        await upsertRemoteStickyNote(created);
-      } catch (error) {
-        toast.error("Supabase sticky note sync skipped", error);
-      }
-
-      return created;
+      await upsertRemoteStickyNote(record);
+      await createRemoteAuditLog({
+        action: "Sticky note created",
+        entityType: "sticky-note",
+        entityId: record.id,
+        actorName: note.ownerName,
+        detail: `${record.title} was added to the personal workspace.`,
+      });
+      const [stickyNotes, auditLogs] = await Promise.all([fetchMergedStickyNotes(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ stickyNotes, auditLogs });
+      return stickyNotes.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1595,34 +1407,24 @@ export function useUpdateStickyNote() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<WorkspaceStickyNote> & { id: string }) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.stickyNotes.find((note) => note.id === id);
-        if (!existing) return current;
-
-        return appendAuditLog(
-          {
-            ...current,
-            stickyNotes: current.stickyNotes.map((note) => (note.id === id ? { ...note, ...updates } : note)),
-          },
-          {
-            action: "Sticky note updated",
-            entityType: "sticky-note",
-            entityId: id,
-            actorName: updates.ownerName ?? existing.ownerName,
-            detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
-          },
-        );
-      }).stickyNotes.find((note) => note.id === id);
-
-      if (updated) {
-        try {
-          await upsertRemoteStickyNote(updated);
-        } catch (error) {
-          toast.error("Supabase sticky note update skipped", error);
-        }
+      const stickyNotes = await fetchMergedStickyNotes();
+      const existing = stickyNotes.find((note) => note.id === id);
+      if (!existing) {
+        throw new Error("Sticky note not found");
       }
 
-      return updated;
+      const updated: WorkspaceStickyNote = { ...existing, ...updates };
+      await upsertRemoteStickyNote(updated);
+      await createRemoteAuditLog({
+        action: "Sticky note updated",
+        entityType: "sticky-note",
+        entityId: id,
+        actorName: updates.ownerName ?? existing.ownerName,
+        detail: `${updates.title ?? existing.title} was updated: ${summarizeUpdatedFields(updates)}.`,
+      });
+      const [nextStickyNotes, auditLogs] = await Promise.all([fetchMergedStickyNotes(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ stickyNotes: nextStickyNotes, auditLogs });
+      return nextStickyNotes.find((note) => note.id === id) ?? updated;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1633,31 +1435,23 @@ export function useDeleteStickyNote() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const updated = updateWorkspaceData((current) => {
-        const existing = current.stickyNotes.find((note) => note.id === id);
-        const next = {
-          ...current,
-          stickyNotes: current.stickyNotes.filter((note) => note.id !== id),
-        };
-
-        return existing
-          ? appendAuditLog(next, {
-              action: "Sticky note deleted",
-              entityType: "sticky-note",
-              entityId: id,
-              actorName: existing.ownerName,
-              detail: `${existing.title} was removed from the personal workspace.`,
-            })
-          : next;
-      });
-
-      try {
-        await deleteRemoteStickyNote(id);
-      } catch (error) {
-        toast.error("Supabase sticky note delete skipped", error);
+      const stickyNotes = await fetchMergedStickyNotes();
+      const existing = stickyNotes.find((note) => note.id === id);
+      if (!existing) {
+        throw new Error("Sticky note not found");
       }
 
-      return updated;
+      await deleteRemoteStickyNote(id);
+      await createRemoteAuditLog({
+        action: "Sticky note deleted",
+        entityType: "sticky-note",
+        entityId: id,
+        actorName: existing.ownerName,
+        detail: `${existing.title} was removed from the personal workspace.`,
+      });
+      const [nextStickyNotes, auditLogs] = await Promise.all([fetchMergedStickyNotes(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ stickyNotes: nextStickyNotes, auditLogs });
+      return nextStickyNotes;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });

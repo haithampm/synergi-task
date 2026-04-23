@@ -67,12 +67,14 @@ const statusColor: Record<WorkspaceProject["status"], string> = {
   "on-hold": "bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300",
   completed: "bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300",
   "at-risk": "bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300",
+  archived: "bg-zinc-500/10 text-zinc-700 border-zinc-500/20 dark:text-zinc-300",
 };
 const statusChartColor: Record<WorkspaceProject["status"], string> = {
   active: "#10b981",
   "on-hold": "#f59e0b",
   completed: "#64748b",
   "at-risk": "#f43f5e",
+  archived: "#71717a",
 };
 
 const parseTags = (value: string) => value.split(",").map((tag) => tag.trim()).filter(Boolean);
@@ -233,7 +235,9 @@ const Projects = () => {
   const filtered = useMemo(() => projects.filter((project) => {
     const q = search.trim().toLowerCase();
     const matchesSearch = !q || [project.name, project.description, project.department, ...(project.tags ?? [])].filter(Boolean).some((value) => String(value).toLowerCase().includes(q));
-    return matchesSearch && (statusFilter === "all" || project.status === statusFilter) && (departmentFilter === "all" || project.department === departmentFilter) && (tagFilter === "all" || (project.tags ?? []).includes(tagFilter));
+    const matchesStatus =
+      statusFilter === "all" ? project.status !== "archived" : project.status === statusFilter;
+    return matchesSearch && matchesStatus && (departmentFilter === "all" || project.department === departmentFilter) && (tagFilter === "all" || (project.tags ?? []).includes(tagFilter));
   }), [departmentFilter, projects, search, statusFilter, tagFilter]);
   const groups = useMemo(() => filtered.reduce<Record<string, WorkspaceProject[]>>((acc, project) => {
     acc[project.status] = acc[project.status] ?? [];
@@ -263,7 +267,7 @@ const Projects = () => {
   );
   const portfolioStatusData = useMemo(
     () =>
-      (["active", "on-hold", "completed", "at-risk"] as WorkspaceProject["status"][]).map((status) => ({
+      (["active", "on-hold", "completed", "at-risk", "archived"] as WorkspaceProject["status"][]).map((status) => ({
         name: status.replace("-", " "),
         value: projects.filter((project) => project.status === status).length,
         color: statusChartColor[status],
@@ -526,7 +530,7 @@ const Projects = () => {
   const removeProject = async () => {
     if (!editingProjectId) return;
     await deleteProject.mutateAsync(editingProjectId);
-    toast.success("Project deleted.");
+    toast.success("Project archived.");
     setDialogOpen(false);
   };
   const addUploads = (files: File[]) => {
@@ -803,6 +807,7 @@ const Projects = () => {
                   <SelectItem value="on-hold">On hold</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="at-risk">At risk</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
@@ -890,6 +895,7 @@ const Projects = () => {
                                 <SelectItem value="on-hold">On hold</SelectItem>
                                 <SelectItem value="completed">Completed</SelectItem>
                                 <SelectItem value="at-risk">At risk</SelectItem>
+                                <SelectItem value="archived">Archived</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -1235,7 +1241,7 @@ const Projects = () => {
             {filtered.map((project) => <Card key={project.id} className="cursor-pointer rounded-3xl transition-all hover:-translate-y-1 hover:shadow-lg" onClick={() => openProject(project)}><CardHeader className="space-y-4"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-xl">{project.name}</CardTitle><CardDescription className="mt-2">{project.department || "No department assigned"}</CardDescription></div><Badge variant="outline" className={statusColor[project.status]}>{project.status}</Badge></div><p className="line-clamp-3 text-sm text-muted-foreground">{project.description || "No description entered yet."}</p></CardHeader><CardContent className="space-y-5"><div className="space-y-2"><div className="flex items-center justify-between text-xs font-medium text-muted-foreground"><span>Delivery progress</span><span>{project.progress}%</span></div><Progress value={project.progress} /></div><div className="grid grid-cols-2 gap-3 text-sm"><button type="button" className="rounded-2xl bg-muted/40 p-3 text-left transition-colors hover:bg-primary/10" onClick={(event) => { event.stopPropagation(); openProjectTasks(project.id); }}><p className="text-xs text-muted-foreground">Tasks</p><p className="mt-1 font-semibold">{taskCountByProject[project.id] ?? 0}</p></button><button type="button" className="rounded-2xl bg-muted/40 p-3 text-left transition-colors hover:bg-primary/10" onClick={(event) => { event.stopPropagation(); openProjectTickets(project.id); }}><p className="text-xs text-muted-foreground">Tickets</p><p className="mt-1 font-semibold">{ticketCountByProject[project.id] ?? 0}</p></button><div className="rounded-2xl bg-muted/40 p-3"><p className="text-xs text-muted-foreground">Resources</p><p className="mt-1 font-semibold">{(project.resources ?? []).length}</p></div><div className="rounded-2xl bg-muted/40 p-3"><p className="text-xs text-muted-foreground">Documents</p><p className="mt-1 font-semibold">{(project.documents ?? []).length}</p></div></div><div className="flex flex-wrap gap-2">{(project.tags ?? []).length ? (project.tags ?? []).slice(0, 3).map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>) : <Badge variant="secondary">No tags</Badge>}</div></CardContent></Card>)}
           </div>
         ) : viewMode === "table" ? (
-          <Card className="overflow-hidden rounded-3xl"><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3">Project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Progress</th><th className="px-4 py-3">Dates</th><th className="px-4 py-3">Tasks</th><th className="px-4 py-3">Tickets</th><th className="px-4 py-3">Resources</th><th className="px-4 py-3">Actions</th></tr></thead><tbody>{filtered.map((project) => <tr key={project.id} className="border-t"><td className="px-4 py-3"><div><p className="font-medium">{project.name}</p><p className="text-xs text-muted-foreground">{project.department || "No department"}</p></div></td><td className="px-4 py-3"><Select value={project.status} onValueChange={(value) => updateProject.mutate({ id: project.id, status: value as WorkspaceProject["status"] })}><SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="on-hold">On hold</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="at-risk">At risk</SelectItem></SelectContent></Select></td><td className="px-4 py-3"><Input type="number" min="0" max="100" defaultValue={project.progress} className="w-24" onBlur={(event) => updateProject.mutate({ id: project.id, progress: Number(event.target.value) || 0 })} /></td><td className="px-4 py-3 text-muted-foreground">{project.start_date ?? project.startDate ?? "TBD"} to {project.end_date ?? project.endDate ?? "TBD"}</td><td className="px-4 py-3"><Button variant="ghost" size="sm" onClick={() => openProjectTasks(project.id)}>{taskCountByProject[project.id] ?? 0}</Button></td><td className="px-4 py-3"><Button variant="ghost" size="sm" onClick={() => openProjectTickets(project.id)}>{ticketCountByProject[project.id] ?? 0}</Button></td><td className="px-4 py-3">{(project.resources ?? []).length}</td><td className="px-4 py-3"><Button variant="outline" size="sm" onClick={() => openProject(project)}>Open</Button></td></tr>)}</tbody></table></div></Card>
+          <Card className="overflow-hidden rounded-3xl"><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3">Project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Progress</th><th className="px-4 py-3">Dates</th><th className="px-4 py-3">Tasks</th><th className="px-4 py-3">Tickets</th><th className="px-4 py-3">Resources</th><th className="px-4 py-3">Actions</th></tr></thead><tbody>{filtered.map((project) => <tr key={project.id} className="border-t"><td className="px-4 py-3"><div><p className="font-medium">{project.name}</p><p className="text-xs text-muted-foreground">{project.department || "No department"}</p></div></td><td className="px-4 py-3"><Select value={project.status} onValueChange={(value) => updateProject.mutate({ id: project.id, status: value as WorkspaceProject["status"] })}><SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="on-hold">On hold</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="at-risk">At risk</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectContent></Select></td><td className="px-4 py-3"><Input type="number" min="0" max="100" defaultValue={project.progress} className="w-24" onBlur={(event) => updateProject.mutate({ id: project.id, progress: Number(event.target.value) || 0 })} /></td><td className="px-4 py-3 text-muted-foreground">{project.start_date ?? project.startDate ?? "TBD"} to {project.end_date ?? project.endDate ?? "TBD"}</td><td className="px-4 py-3"><Button variant="ghost" size="sm" onClick={() => openProjectTasks(project.id)}>{taskCountByProject[project.id] ?? 0}</Button></td><td className="px-4 py-3"><Button variant="ghost" size="sm" onClick={() => openProjectTickets(project.id)}>{ticketCountByProject[project.id] ?? 0}</Button></td><td className="px-4 py-3">{(project.resources ?? []).length}</td><td className="px-4 py-3"><Button variant="outline" size="sm" onClick={() => openProject(project)}>Open</Button></td></tr>)}</tbody></table></div></Card>
         ) : (
           <div className="space-y-4">{Object.entries(groups).map(([status, items]) => <Card key={status} className="rounded-3xl"><CardHeader><div className="flex items-center justify-between"><div><CardTitle className="capitalize">{status.replace("-", " ")}</CardTitle><CardDescription>{items.length} project(s) in this branch.</CardDescription></div><Badge variant="outline" className={statusColor[status as WorkspaceProject["status"]]}>{status}</Badge></div></CardHeader><CardContent className="space-y-3">{items.map((project) => <button key={project.id} type="button" className="flex w-full items-center justify-between rounded-2xl border p-4 text-left transition-colors hover:bg-muted/30" onClick={() => openProject(project)}><div><p className="font-medium">{project.name}</p><p className="text-sm text-muted-foreground">{(project.resources ?? []).length} resources, {(project.documents ?? []).length} documents, {(project.tags ?? []).length} tags</p></div><div className="text-right text-xs text-muted-foreground"><p>{project.start_date ?? project.startDate ?? "TBD"} to {project.end_date ?? project.endDate ?? "TBD"}</p><p>{project.progress}% progress</p></div></button>)}</CardContent></Card>)}</div>
         )}

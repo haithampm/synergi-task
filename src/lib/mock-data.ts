@@ -2,7 +2,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
-  status: 'active' | 'on-hold' | 'completed' | 'at-risk';
+  status: 'active' | 'on-hold' | 'completed' | 'at-risk' | 'archived';
   progress: number;
   team: string[];
   startDate: string;
