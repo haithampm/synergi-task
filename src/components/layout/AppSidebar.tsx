@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Shield, X
+  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Shield, Ticket, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -25,7 +25,7 @@ const navSections = [
       { icon: GanttChart, label: 'Schedule', path: '/schedule', permission: 'manage_schedule' },
       { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks' },
       { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents' },
-      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },
+      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },       { icon: Ticket, label: 'Tickets', path: '/tickets', permission: 'manage_tasks' },
     ],
   },
   {
