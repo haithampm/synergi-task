@@ -466,6 +466,8 @@ export interface WorkspaceData {
 }
 
 const STORAGE_KEY = "synergi-workspace-data";
+const STORAGE_META_KEY = "synergi-workspace-data-meta";
+const REMOTE_STORAGE_SCHEMA_VERSION = "remote-cache-v1";
 const fullCycleScenarioProjectId = "sample-full-cycle-program";
 const projectStatuses = new Set<WorkspaceProject["status"]>(["active", "on-hold", "completed", "at-risk", "archived"]);
 const teamMemberStatuses = new Set<WorkspaceTeamMember["status"]>(["online", "away", "offline"]);
@@ -1912,14 +1914,69 @@ export const initialWorkspaceData = (): WorkspaceData => {
   });
 };
 
+const cloneWorkspaceValue = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const isRemoteWorkspaceConfigured = () =>
+  typeof import.meta !== "undefined" &&
+  Boolean(import.meta.env.VITE_SUPABASE_URL) &&
+  Boolean(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+
+const initialConnectedWorkspaceData = (): WorkspaceData => ({
+  projects: [],
+  tasks: [],
+  teamMembers: [],
+  userAccounts: [],
+  stickyNotes: [],
+  meetings: [],
+  personalEvents: [],
+  tickets: [],
+  chatChannels: [],
+  workflows: cloneWorkspaceValue(defaultWorkflows),
+  dashboards: cloneWorkspaceValue(defaultDashboards),
+  reportTemplates: cloneWorkspaceValue(defaultReportTemplates),
+  projectTemplates: cloneWorkspaceValue(createDefaultProjectTemplates()),
+  auditLogs: [],
+  settings: cloneWorkspaceValue(defaultSettings),
+});
+
 const canUseStorage = () => typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 
-export const readWorkspaceData = (): WorkspaceData => {
-  if (!canUseStorage()) {
-    return initialWorkspaceData();
+const readWorkspaceStorageMeta = () => {
+  if (!canUseStorage()) return null;
+  const raw = window.localStorage.getItem(STORAGE_META_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as { remoteSchemaVersion?: string } | null;
+  } catch {
+    return null;
+  }
+};
+
+const writeWorkspaceStorageMeta = (connectedMode: boolean) => {
+  if (!canUseStorage()) return;
+
+  if (connectedMode) {
+    window.localStorage.setItem(
+      STORAGE_META_KEY,
+      JSON.stringify({ remoteSchemaVersion: REMOTE_STORAGE_SCHEMA_VERSION }),
+    );
+    return;
   }
 
-  const baseline = initialWorkspaceData();
+  window.localStorage.removeItem(STORAGE_META_KEY);
+};
+
+const getCollectionSeed = <T extends Record<string, unknown>>(records: T[], index: number): Partial<T> =>
+  records.length ? records[index % records.length] : {};
+
+export const readWorkspaceData = (): WorkspaceData => {
+  const connectedMode = isRemoteWorkspaceConfigured();
+  if (!canUseStorage()) {
+    return connectedMode ? initialConnectedWorkspaceData() : initialWorkspaceData();
+  }
+
+  const baseline = connectedMode ? initialConnectedWorkspaceData() : initialWorkspaceData();
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) {
     writeWorkspaceData(baseline);
@@ -1928,36 +1985,57 @@ export const readWorkspaceData = (): WorkspaceData => {
 
   try {
     const parsed = JSON.parse(raw) as Partial<WorkspaceData>;
-    const sanitizedCollections = sanitizeWorkspaceCollections(parsed, baseline);
-    const repairedProjects = withMissingSeedProjects(sanitizedCollections.projects, baseline.projects);
-    const shouldSyncSeedProjects = repairedProjects.length !== sanitizedCollections.projects.length;
+    const storageMeta = readWorkspaceStorageMeta();
+    const useStoredCollections =
+      !connectedMode || storageMeta?.remoteSchemaVersion === REMOTE_STORAGE_SCHEMA_VERSION;
+    const cachedParsed = useStoredCollections ? parsed : {};
+    const sanitizedCollections = sanitizeWorkspaceCollections(cachedParsed, baseline);
+    const repairedProjects = connectedMode
+      ? sanitizedCollections.projects
+      : withMissingSeedProjects(sanitizedCollections.projects, baseline.projects);
+    const shouldSyncSeedProjects = !connectedMode && repairedProjects.length !== sanitizedCollections.projects.length;
     const sampleScenarioTasks = baseline.tasks.filter((task) => (task.project_id ?? task.projectId) === fullCycleScenarioProjectId);
-    const repairedTasks = mergeMissingRecordsById(parsed.tasks ?? baseline.tasks, sampleScenarioTasks);
+    const repairedTasks = connectedMode
+      ? (cachedParsed.tasks ?? baseline.tasks)
+      : mergeMissingRecordsById(cachedParsed.tasks ?? baseline.tasks, sampleScenarioTasks);
     const sampleScenarioTickets = baseline.tickets.filter((ticket) => ticket.projectId === fullCycleScenarioProjectId);
-    const repairedTickets = mergeMissingRecordsById(parsed.tickets ?? baseline.tickets, sampleScenarioTickets);
+    const repairedTickets = connectedMode
+      ? (cachedParsed.tickets ?? baseline.tickets)
+      : mergeMissingRecordsById(cachedParsed.tickets ?? baseline.tickets, sampleScenarioTickets);
     const sampleScenarioMeetings = baseline.meetings.filter((meeting) => meeting.projectId === fullCycleScenarioProjectId);
-    const repairedMeetings = mergeMissingRecordsById(parsed.meetings ?? baseline.meetings, sampleScenarioMeetings);
+    const repairedMeetings = connectedMode
+      ? (cachedParsed.meetings ?? baseline.meetings)
+      : mergeMissingRecordsById(cachedParsed.meetings ?? baseline.meetings, sampleScenarioMeetings);
     const sampleScenarioChannels = baseline.chatChannels.filter((channel) => channel.projectId === fullCycleScenarioProjectId);
-    const repairedChatChannels = mergeMissingRecordsById(parsed.chatChannels ?? baseline.chatChannels, sampleScenarioChannels);
+    const repairedChatChannels = connectedMode
+      ? (cachedParsed.chatChannels ?? baseline.chatChannels)
+      : mergeMissingRecordsById(cachedParsed.chatChannels ?? baseline.chatChannels, sampleScenarioChannels);
     const sampleScenarioStickyNotes = baseline.stickyNotes.filter((note) => note.id === "note-sample-full-cycle");
-    const repairedStickyNotes = mergeMissingRecordsById(parsed.stickyNotes ?? baseline.stickyNotes, sampleScenarioStickyNotes);
+    const repairedStickyNotes = connectedMode
+      ? (cachedParsed.stickyNotes ?? baseline.stickyNotes)
+      : mergeMissingRecordsById(cachedParsed.stickyNotes ?? baseline.stickyNotes, sampleScenarioStickyNotes);
     const sampleScenarioEvents = baseline.personalEvents.filter((event) => event.id === "event-sample-full-cycle-focus");
-    const repairedPersonalEvents = mergeMissingRecordsById(parsed.personalEvents ?? baseline.personalEvents, sampleScenarioEvents);
+    const repairedPersonalEvents = connectedMode
+      ? (cachedParsed.personalEvents ?? baseline.personalEvents)
+      : mergeMissingRecordsById(cachedParsed.personalEvents ?? baseline.personalEvents, sampleScenarioEvents);
     const sampleScenarioAuditLogs = baseline.auditLogs.filter((log) => log.entityId === fullCycleScenarioProjectId);
-    const repairedAuditLogs = mergeMissingRecordsById(parsed.auditLogs ?? baseline.auditLogs, sampleScenarioAuditLogs);
+    const repairedAuditLogs = connectedMode
+      ? (cachedParsed.auditLogs ?? baseline.auditLogs)
+      : mergeMissingRecordsById(cachedParsed.auditLogs ?? baseline.auditLogs, sampleScenarioAuditLogs);
     const shouldSyncSampleScenario =
-      repairedTasks.length !== (parsed.tasks ?? baseline.tasks).length ||
-      repairedTickets.length !== (parsed.tickets ?? baseline.tickets).length ||
-      repairedMeetings.length !== (parsed.meetings ?? baseline.meetings).length ||
-      repairedChatChannels.length !== (parsed.chatChannels ?? baseline.chatChannels).length ||
-      repairedStickyNotes.length !== (parsed.stickyNotes ?? baseline.stickyNotes).length ||
-      repairedPersonalEvents.length !== (parsed.personalEvents ?? baseline.personalEvents).length ||
-      repairedAuditLogs.length !== (parsed.auditLogs ?? baseline.auditLogs).length;
+      !connectedMode &&
+      (repairedTasks.length !== (cachedParsed.tasks ?? baseline.tasks).length ||
+        repairedTickets.length !== (cachedParsed.tickets ?? baseline.tickets).length ||
+        repairedMeetings.length !== (cachedParsed.meetings ?? baseline.meetings).length ||
+        repairedChatChannels.length !== (cachedParsed.chatChannels ?? baseline.chatChannels).length ||
+        repairedStickyNotes.length !== (cachedParsed.stickyNotes ?? baseline.stickyNotes).length ||
+        repairedPersonalEvents.length !== (cachedParsed.personalEvents ?? baseline.personalEvents).length ||
+        repairedAuditLogs.length !== (cachedParsed.auditLogs ?? baseline.auditLogs).length);
     const hydrated: WorkspaceData = {
       ...baseline,
       ...parsed,
       projects: repairedProjects.map((project, index) => ({
-        ...baseline.projects[index % baseline.projects.length],
+        ...getCollectionSeed(baseline.projects, index),
         ...project,
         projectNature: project.projectNature ?? "",
         tags: project.tags ?? [],
@@ -1991,7 +2069,11 @@ export const readWorkspaceData = (): WorkspaceData => {
             }
           : undefined,
         documents: (project.documents ?? []).map((document, docIndex) => ({
-          ...(baseline.projects[index % baseline.projects.length]?.documents?.[docIndex % Math.max(1, baseline.projects[index % baseline.projects.length]?.documents?.length ?? 1)] ?? {}),
+          ...(baseline.projects.length
+            ? baseline.projects[index % baseline.projects.length]?.documents?.[
+                docIndex % Math.max(1, baseline.projects[index % baseline.projects.length]?.documents?.length ?? 1)
+              ] ?? {}
+            : {}),
           ...document,
           standardTemplate: document.standardTemplate ?? "PMI",
           reviewStatus: document.reviewStatus ?? "draft",
@@ -2012,25 +2094,25 @@ export const readWorkspaceData = (): WorkspaceData => {
         timesheetEntries: task.timesheetEntries ?? [],
       })),
       teamMembers: sanitizedCollections.teamMembers.map((member, index) => ({
-        ...baseline.teamMembers[index % baseline.teamMembers.length],
+        ...getCollectionSeed(baseline.teamMembers, index),
         ...member,
         assignedProjectIds: member.assignedProjectIds ?? [],
         customFieldValues: member.customFieldValues ?? {},
       })),
-      userAccounts: (parsed.userAccounts ?? baseline.userAccounts).map((account, index) => ({
-        ...baseline.userAccounts[index % baseline.userAccounts.length],
+      userAccounts: (cachedParsed.userAccounts ?? baseline.userAccounts).map((account, index) => ({
+        ...getCollectionSeed(baseline.userAccounts, index),
         ...account,
       })),
       stickyNotes: repairedStickyNotes.map((note, index) => ({
-        ...baseline.stickyNotes[index % baseline.stickyNotes.length],
+        ...getCollectionSeed(baseline.stickyNotes, index),
         ...note,
       })),
       meetings: repairedMeetings.map((meeting, index) => ({
-        ...baseline.meetings[index % baseline.meetings.length],
+        ...getCollectionSeed(baseline.meetings, index),
         ...meeting,
       })),
       personalEvents: repairedPersonalEvents.map((event, index) => ({
-        ...baseline.personalEvents[index % baseline.personalEvents.length],
+        ...getCollectionSeed(baseline.personalEvents, index),
         ...event,
       })),
       tickets: repairedTickets.map((ticket) => ({
@@ -2049,10 +2131,10 @@ export const readWorkspaceData = (): WorkspaceData => {
         })),
         quickLinks: channel.quickLinks ?? [],
       })),
-      workflows: parsed.workflows ?? baseline.workflows,
-      dashboards: parsed.dashboards ?? baseline.dashboards,
-      reportTemplates: parsed.reportTemplates ?? baseline.reportTemplates,
-      projectTemplates: parsed.projectTemplates ?? baseline.projectTemplates,
+      workflows: cachedParsed.workflows ?? baseline.workflows,
+      dashboards: cachedParsed.dashboards ?? baseline.dashboards,
+      reportTemplates: cachedParsed.reportTemplates ?? baseline.reportTemplates,
+      projectTemplates: cachedParsed.projectTemplates ?? baseline.projectTemplates,
       auditLogs: repairedAuditLogs,
       settings: parsed.settings
         ? {
@@ -2083,7 +2165,12 @@ export const readWorkspaceData = (): WorkspaceData => {
         : baseline.settings,
     };
 
-    if (sanitizedCollections.shouldRepair || shouldSyncSeedProjects || shouldSyncSampleScenario) {
+    if (
+      sanitizedCollections.shouldRepair ||
+      shouldSyncSeedProjects ||
+      shouldSyncSampleScenario ||
+      (connectedMode && !useStoredCollections)
+    ) {
       writeWorkspaceData(hydrated);
     }
 
@@ -2097,6 +2184,7 @@ export const readWorkspaceData = (): WorkspaceData => {
 export const writeWorkspaceData = (data: WorkspaceData) => {
   if (!canUseStorage()) return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  writeWorkspaceStorageMeta(isRemoteWorkspaceConfigured());
 };
 
 export const updateWorkspaceData = (updater: (current: WorkspaceData) => WorkspaceData) => {
