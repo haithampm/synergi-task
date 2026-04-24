@@ -2160,7 +2160,7 @@ export const readWorkspaceData = (): WorkspaceData => {
             branding: { ...baseline.settings.branding, ...parsed.settings.branding },
             metadata: parsed.settings.metadata ?? baseline.settings.metadata,
             customFields: parsed.settings.customFields ?? baseline.settings.customFields,
-            privilegeRoles: parsed.settings.privilegeRoles ?? baseline.settings.privilegeRoles,
+            privilegeRoles: (parsed.settings.privilegeRoles ?? baseline.settings.privilegeRoles).map((r) => { const def = baseline.settings.privilegeRoles.find((d) => d.id === r.id); if (!def) return r; const missing = def.permissions.filter((p) => !r.permissions.includes(p)); return missing.length > 0 ? { ...r, permissions: [...r.permissions, ...missing] } : r; }),
           }
         : baseline.settings,
     };
