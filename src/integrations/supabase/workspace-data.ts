@@ -577,7 +577,7 @@ export const mergeSettingsWithRemoteContext = async (
     currentUser: {
       ...localSettings.currentUser,
       displayName: context.profile?.display_name ?? localSettings.currentUser.displayName,
-      roleId: context.membership?.role ?? localSettings.currentUser.roleId,
+      roleId: normalizeWorkspaceRoleId(context.membership?.role ?? localSettings.currentUser.roleId),
       authUserId: context.profile?.user_id ?? localSettings.currentUser.authUserId,
     },
     notifications: {
@@ -889,16 +889,63 @@ const mapRemoteTeamMemberToWorkspace = (
     phone: String(metadata.phone ?? existing?.phone ?? ""),
     department: remote.department ?? existing?.department ?? "",
     avatarColor: String(metadata.avatarColor ?? existing?.avatarColor ?? "gradient-primary"),
-    assignedProjectIds: Array.isArray(metadata.assignedProjectIds)
-      ? (metadata.assignedProjectIds as string[])
-      : (existing?.assignedProjectIds ?? []),
-    capacityHours: remote.capacity_hours ?? existing?.capacityHours ?? 40,
-    utilizationTarget: remote.utilization_target ?? existing?.utilizationTarget ?? 85,
-    privilegeRole: remote.privilege_role ?? existing?.privilegeRole ?? "team_member",
-    customFieldValues:
-      (metadata.customFieldValues as Record<string, string | number | boolean> | undefined) ??
-      existing?.customFieldValues ??
-      {},
+      assignedProjectIds: Array.isArray(metadata.assignedProjectIds)
+        ? (metadata.assignedProjectIds as string[])
+        : (existing?.assignedProjectIds ?? []),
+      capacityHours: remote.capacity_hours ?? existing?.capacityHours ?? 40,
+      utilizationTarget: remote.utilization_target ?? existing?.utilizationTarget ?? 85,
+      privilegeRole: normalizeWorkspaceRoleId(remote.privilege_role ?? existing?.privilegeRole ?? "team_member"),
+      customFieldValues:
+        (metadata.customFieldValues as Record<string, string | number | boolean> | undefined) ??
+        existing?.customFieldValues ??
+        {},
+    };
+};
+
+export const ensureRemoteWorkspaceMembership = async (): Promise<{
+  message?: string;
+  role?: string;
+  status: "created" | "existing" | "linked" | "missing";
+  workspaceId?: string;
+}> => {
+  const userId = await getAuthenticatedUserId();
+  if (!userId) {
+    return {
+      status: "missing",
+      message: "A signed-in user session is required before the workspace can be linked.",
+    };
+  }
+
+  const existingContext = await fetchRemoteWorkspaceContext();
+  if (existingContext?.membership?.workspace_id) {
+    return {
+      status: "existing",
+      workspaceId: existingContext.membership.workspace_id,
+      role: existingContext.membership.role,
+    };
+  }
+
+  const { data, error } = await supabase.rpc("bootstrap_workspace_membership");
+  assertNoSupabaseError(error, "Failed to bootstrap workspace membership");
+
+  const result = asObjectRecord(data);
+  const refreshedContext = await fetchRemoteWorkspaceContext();
+  if (refreshedContext?.membership?.workspace_id) {
+    return {
+      status:
+        result.status === "linked" || result.status === "created" ? (result.status as "linked" | "created") : "existing",
+      workspaceId: refreshedContext.membership.workspace_id,
+      role: refreshedContext.membership.role,
+      message: typeof result.message === "string" ? result.message : undefined,
+    };
+  }
+
+  return {
+    status: "missing",
+    message:
+      typeof result.message === "string"
+        ? result.message
+        : "This account is signed in, but it is not linked to a workspace yet.",
   };
 };
 

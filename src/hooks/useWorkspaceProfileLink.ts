@@ -7,6 +7,7 @@ import {
   useUserAccounts,
   useWorkspaceSettings,
 } from '@/hooks/useProjects';
+import { normalizeWorkspaceRoleId } from '@/lib/workspace-access';
 
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 
@@ -81,7 +82,7 @@ export function useWorkspaceProfileLink(user: User | null) {
         ...settings.currentUser,
         authUserId: user.id,
         displayName,
-        roleId: linkedAccount?.roleId ?? linkedMember?.privilegeRole ?? settings.currentUser.roleId,
+        roleId: normalizeWorkspaceRoleId(linkedAccount?.roleId ?? linkedMember?.privilegeRole ?? settings.currentUser.roleId),
         teamMemberId: linkedMember?.id ?? linkedAccount?.teamMemberId ?? settings.currentUser.teamMemberId ?? '',
         userAccountId: linkedAccount?.id ?? settings.currentUser.userAccountId ?? '',
       },
