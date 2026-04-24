@@ -149,21 +149,21 @@ const datasetFieldCatalog: Record<Exclude<WorkspaceDatasetKey, 'workspace'>, Dat
     { key: 'title', label: 'Meeting Title', importRequired: true },
     { key: 'projectId', label: 'Project ID' },
     { key: 'type', label: 'Meeting Type' },
-    { key: 'start', label: 'Start' },
-    { key: 'end', label: 'End' },
-    { key: 'location', label: 'Location' },
+    { key: 'startsAt', label: 'Start' },
+    { key: 'endsAt', label: 'End' },
+    { key: 'organizerId', label: 'Organizer ID' },
     { key: 'provider', label: 'Provider' },
-    { key: 'meetingUrl', label: 'Meeting URL' },
+    { key: 'joinUrl', label: 'Meeting URL' },
     { key: 'attendeeIds', label: 'Attendees' },
     { key: 'notes', label: 'Notes' },
   ],
   personalEvents: [
     { key: 'id', label: 'ID', importRequired: true },
     { key: 'title', label: 'Event Title', importRequired: true },
-    { key: 'date', label: 'Date' },
     { key: 'type', label: 'Event Type' },
-    { key: 'status', label: 'Status' },
-    { key: 'ownerId', label: 'Owner ID' },
+    { key: 'memberId', label: 'Owner ID' },
+    { key: 'startsAt', label: 'Start' },
+    { key: 'endsAt', label: 'End' },
     { key: 'projectId', label: 'Project ID' },
     { key: 'notes', label: 'Notes' },
   ],
@@ -181,13 +181,14 @@ const datasetFieldCatalog: Record<Exclude<WorkspaceDatasetKey, 'workspace'>, Dat
   ],
   stickyNotes: [
     { key: 'id', label: 'ID', importRequired: true },
+    { key: 'title', label: 'Title' },
     { key: 'content', label: 'Note Content', importRequired: true },
     { key: 'done', label: 'Done' },
     { key: 'color', label: 'Color' },
     { key: 'createdAt', label: 'Created At' },
-    { key: 'updatedAt', label: 'Updated At' },
-    { key: 'userAccountId', label: 'User Account ID' },
-    { key: 'teamMemberId', label: 'Team Member ID' },
+    { key: 'ownerName', label: 'Owner Name' },
+    { key: 'ownerUserAccountId', label: 'User Account ID' },
+    { key: 'ownerTeamMemberId', label: 'Team Member ID' },
   ],
 };
 
@@ -297,8 +298,31 @@ const parseMaybeJson = (value: string) => {
 
 const normalizeImportedRecords = (entity: WorkspaceDatasetKey, records: Array<Record<string, unknown>>) =>
   records.map((record) => {
+    const normalizedRecord =
+      entity === 'meetings'
+        ? {
+            ...record,
+            startsAt: record.startsAt ?? record.start,
+            endsAt: record.endsAt ?? record.end,
+            joinUrl: record.joinUrl ?? record.meetingUrl,
+          }
+        : entity === 'personalEvents'
+          ? {
+              ...record,
+              memberId: record.memberId ?? record.ownerId,
+              startsAt: record.startsAt ?? record.date,
+              endsAt: record.endsAt ?? record.date,
+            }
+          : entity === 'stickyNotes'
+            ? {
+                ...record,
+                ownerUserAccountId: record.ownerUserAccountId ?? record.userAccountId,
+                ownerTeamMemberId: record.ownerTeamMemberId ?? record.teamMemberId,
+              }
+            : record;
+
     const next = Object.fromEntries(
-      Object.entries(record).map(([key, value]) => {
+      Object.entries(normalizedRecord).map(([key, value]) => {
         if (typeof value !== 'string') return [key, value];
         const trimmed = value.trim();
 
@@ -845,7 +869,7 @@ const ImportExport = () => {
       }
     } catch (error) {
       console.error(error);
-      toast.error('Dataset import failed. Please check the file structure.');
+      toast.error(error instanceof Error ? error.message : 'Dataset import failed. Please check the file structure.');
     } finally {
       if (dataFileInputRef.current) dataFileInputRef.current.value = '';
     }

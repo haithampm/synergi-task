@@ -1046,31 +1046,16 @@ export function useCreateChatMessage() {
       };
 
       await upsertRemoteChatMessage(record);
-      return updateWorkspaceData((current) => {
-        const channel = current.chatChannels.find((item) => item.id === channelId);
-        const next = {
-          ...current,
-          chatChannels: current.chatChannels.map((item) =>
-            item.id === channelId
-              ? {
-                  ...item,
-                  messages: [
-                    ...item.messages,
-                    { id: record.id, authorName, authorId, message, createdAt: record.createdAt },
-                  ],
-                }
-              : item,
-          ),
-        };
-
-        return appendAuditLog(next, {
-          action: "Chat message posted",
-          entityType: "chat",
-          entityId: channelId,
-          actorName: authorName,
-          detail: `A new message was posted in ${channel?.name ?? "team chat"}.`,
-        });
-      }).chatChannels.find((channel) => channel.id === channelId);
+      await createRemoteAuditLog({
+        action: "Chat message posted",
+        entityType: "chat",
+        entityId: channelId,
+        actorName: authorName,
+        detail: "A new message was posted in team chat.",
+      });
+      const [chatChannels, auditLogs] = await Promise.all([fetchMergedChatChannels(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ chatChannels, auditLogs });
+      return chatChannels.find((channel) => channel.id === channelId);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1095,17 +1080,16 @@ export function useCreateChatChannel() {
       };
 
       await upsertRemoteChatChannel(remoteRecord);
-      return updateWorkspaceData((current) => {
-        return appendAuditLog(
-          { ...current, chatChannels: [...current.chatChannels, remoteRecord] },
-          {
-            action: "Chat channel created",
-            entityType: "chat",
-            entityId: remoteRecord.id,
-            detail: `${remoteRecord.name} was created for collaboration.`,
-          },
-        );
-      }).chatChannels.at(-1);
+      await createRemoteAuditLog({
+        action: "Chat channel created",
+        entityType: "chat",
+        entityId: remoteRecord.id,
+        detail: `${remoteRecord.name} was created for collaboration.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [chatChannels, auditLogs] = await Promise.all([fetchMergedChatChannels(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ chatChannels, auditLogs });
+      return chatChannels.find((channel) => channel.id === remoteRecord.id) ?? remoteRecord;
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1121,10 +1105,16 @@ export function useUpdateChatChannel() {
       if (!existingRemote) throw new Error("Chat channel not found");
 
       await upsertRemoteChatChannel({ ...existingRemote, ...updates, id });
-      return updateWorkspaceData((current) => ({
-        ...current,
-        chatChannels: current.chatChannels.map((channel) => (channel.id === id ? { ...channel, ...updates } : channel)),
-      })).chatChannels.find((channel) => channel.id === id);
+      await createRemoteAuditLog({
+        action: "Chat channel updated",
+        entityType: "chat",
+        entityId: id,
+        detail: `${updates.name ?? existingRemote.name} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [chatChannels, auditLogs] = await Promise.all([fetchMergedChatChannels(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ chatChannels, auditLogs });
+      return chatChannels.find((channel) => channel.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1138,8 +1128,16 @@ export function useUpdateWorkflow() {
       const workflows = await fetchMergedWorkflows();
       const nextWorkflows = workflows.map((workflow) => (workflow.id === id ? { ...workflow, ...updates } : workflow));
       await syncRemoteWorkspaceState({ workflows: nextWorkflows });
-      writeWorkspacePatch({ workflows: nextWorkflows });
-      return nextWorkflows.find((workflow) => workflow.id === id);
+      await createRemoteAuditLog({
+        action: "Workflow updated",
+        entityType: "settings",
+        entityId: id,
+        detail: `${updates.name ?? workflows.find((workflow) => workflow.id === id)?.name ?? "Workflow"} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [mergedWorkflows, auditLogs] = await Promise.all([fetchMergedWorkflows(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ workflows: mergedWorkflows, auditLogs });
+      return mergedWorkflows.find((workflow) => workflow.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1207,8 +1205,16 @@ export function useUpdateReportTemplate() {
         template.id === id ? { ...template, ...updates } : template,
       );
       await syncRemoteWorkspaceState({ reportTemplates: nextTemplates });
-      writeWorkspacePatch({ reportTemplates: nextTemplates });
-      return nextTemplates.find((template) => template.id === id);
+      await createRemoteAuditLog({
+        action: "Report template updated",
+        entityType: "settings",
+        entityId: id,
+        detail: `${updates.name ?? reportTemplates.find((template) => template.id === id)?.name ?? "Report template"} was updated: ${summarizeUpdatedFields(updates)}.`,
+        actorName: readWorkspaceData().settings.currentUser.displayName,
+      });
+      const [mergedTemplates, auditLogs] = await Promise.all([fetchMergedReportTemplates(), fetchMergedAuditLogs()]);
+      writeWorkspacePatch({ reportTemplates: mergedTemplates, auditLogs });
+      return mergedTemplates.find((template) => template.id === id);
     },
     onSuccess: async () => invalidateWorkspace(qc),
   });
@@ -1501,59 +1507,293 @@ const mergeByIdentity = <T extends Record<string, any>>(current: T[], incoming: 
   return next;
 };
 
+const ensureRemoteImportMode = (mode: "merge" | "replace" | undefined) => {
+  if (isSupabaseReady() && mode === "replace") {
+    throw new Error(
+      "Replace import is disabled in the connected production workspace until every destructive import path has a server-side archive or delete implementation.",
+    );
+  }
+};
+
+const importProjectsToRemote = async (projects: WorkspaceProject[]) => {
+  for (const project of projects) {
+    await upsertRemoteProject(project);
+    await upsertRemoteProjectDocuments(project.id, project.documents ?? []);
+  }
+
+  return fetchMergedProjects();
+};
+
+const importTasksToRemote = async (tasks: WorkspaceTask[]) => {
+  for (const task of tasks) {
+    await upsertRemoteTask(task);
+  }
+
+  return fetchMergedTasks();
+};
+
+const importTeamMembersToRemote = async (teamMembers: WorkspaceTeamMember[]) => {
+  for (const member of teamMembers) {
+    await upsertRemoteTeamMember(member);
+  }
+
+  return fetchMergedTeamMembers();
+};
+
+const importTicketsToRemote = async (tickets: WorkspaceTicket[]) => {
+  for (const ticket of tickets) {
+    await upsertRemoteTicket(ticket);
+  }
+
+  return fetchMergedTickets();
+};
+
+const importUserAccountsToRemote = async (userAccounts: WorkspaceUserAccount[]) => {
+  const existingAccounts = await fetchMergedUserAccounts();
+  const existingIds = new Set(existingAccounts.map((account) => account.id));
+
+  for (const account of userAccounts) {
+    if (!existingIds.has(account.id)) {
+      throw new Error(
+        `Workspace account ${account.email} is not linked to a persisted membership yet. Create the membership through the server-side invitation flow first.`,
+      );
+    }
+    await syncWorkspaceUserAccount(account);
+  }
+
+  return fetchMergedUserAccounts();
+};
+
+const importMeetingsToRemote = async (meetings: WorkspaceMeeting[]) => {
+  for (const meeting of meetings) {
+    await upsertRemoteMeeting(meeting);
+  }
+
+  return fetchMergedMeetings();
+};
+
+const importPersonalEventsToRemote = async (personalEvents: WorkspacePersonalEvent[]) => {
+  for (const event of personalEvents) {
+    await upsertRemotePersonalEvent(event);
+  }
+
+  return fetchMergedPersonalEvents();
+};
+
+const importChatChannelsToRemote = async (chatChannels: WorkspaceChatChannel[]) => {
+  for (const channel of chatChannels) {
+    await upsertRemoteChatChannel(channel);
+    for (const message of channel.messages ?? []) {
+      await upsertRemoteChatMessage({
+        ...message,
+        channelId: channel.id,
+      });
+    }
+  }
+
+  return fetchMergedChatChannels();
+};
+
+const importStickyNotesToRemote = async (stickyNotes: WorkspaceStickyNote[]) => {
+  for (const note of stickyNotes) {
+    await upsertRemoteStickyNote(note);
+  }
+
+  return fetchMergedStickyNotes();
+};
+
+const hasChangedRecord = <T extends { id: string }>(currentRecords: T[], nextRecord: T) => {
+  const previous = currentRecords.find((record) => record.id === nextRecord.id);
+  return !previous || JSON.stringify(previous) !== JSON.stringify(nextRecord);
+};
+
 export function useImportWorkspaceData() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (payload: ImportWorkspacePayload) =>
-      updateWorkspaceData((current) => {
-        if (payload.entity === "workspace") {
-          if (payload.mode === "replace") {
+    mutationFn: async (payload: ImportWorkspacePayload) => {
+      if (!isSupabaseReady()) {
+        return updateWorkspaceData((current) => {
+          if (payload.entity === "workspace") {
+            if (payload.mode === "replace") {
+              return {
+                ...current,
+                ...payload.records,
+              };
+            }
+
             return {
               ...current,
               ...payload.records,
+              projects: payload.records.projects ? mergeByIdentity(current.projects, payload.records.projects, ["id", "name"]) : current.projects,
+              tasks: payload.records.tasks ? mergeByIdentity(current.tasks, payload.records.tasks, ["id", "title"]) : current.tasks,
+              teamMembers: payload.records.teamMembers ? mergeByIdentity(current.teamMembers, payload.records.teamMembers, ["id", "email", "name"]) : current.teamMembers,
+              tickets: payload.records.tickets ? mergeByIdentity(current.tickets, payload.records.tickets, ["id", "title"]) : current.tickets,
+              userAccounts: payload.records.userAccounts ? mergeByIdentity(current.userAccounts, payload.records.userAccounts, ["id", "email", "fullName"]) : current.userAccounts,
+              meetings: payload.records.meetings ? mergeByIdentity(current.meetings, payload.records.meetings, ["id", "title"]) : current.meetings,
+              personalEvents: payload.records.personalEvents ? mergeByIdentity(current.personalEvents, payload.records.personalEvents, ["id", "title"]) : current.personalEvents,
+              chatChannels: payload.records.chatChannels ? mergeByIdentity(current.chatChannels, payload.records.chatChannels, ["id", "name"]) : current.chatChannels,
+              stickyNotes: payload.records.stickyNotes ? mergeByIdentity(current.stickyNotes, payload.records.stickyNotes, ["id", "title"]) : current.stickyNotes,
             };
           }
 
+          const key = payload.entity;
+          const incomingRecords = payload.records as Array<Record<string, any>>;
+          const currentRecords = current[key] as Array<Record<string, any>>;
+
+          const identityMap: Record<ImportableEntityKey, string[]> = {
+            projects: ["id", "name"],
+            tasks: ["id", "title"],
+            teamMembers: ["id", "email", "name"],
+            tickets: ["id", "title"],
+            userAccounts: ["id", "email", "fullName"],
+            meetings: ["id", "title"],
+            personalEvents: ["id", "title"],
+            chatChannels: ["id", "name"],
+            stickyNotes: ["id", "title"],
+          };
+
           return {
             ...current,
-            ...payload.records,
-            projects: payload.records.projects ? mergeByIdentity(current.projects, payload.records.projects, ["id", "name"]) : current.projects,
-            tasks: payload.records.tasks ? mergeByIdentity(current.tasks, payload.records.tasks, ["id", "title"]) : current.tasks,
-            teamMembers: payload.records.teamMembers ? mergeByIdentity(current.teamMembers, payload.records.teamMembers, ["id", "email", "name"]) : current.teamMembers,
-            tickets: payload.records.tickets ? mergeByIdentity(current.tickets, payload.records.tickets, ["id", "title"]) : current.tickets,
-            userAccounts: payload.records.userAccounts ? mergeByIdentity(current.userAccounts, payload.records.userAccounts, ["id", "email", "fullName"]) : current.userAccounts,
-            meetings: payload.records.meetings ? mergeByIdentity(current.meetings, payload.records.meetings, ["id", "title"]) : current.meetings,
-            personalEvents: payload.records.personalEvents ? mergeByIdentity(current.personalEvents, payload.records.personalEvents, ["id", "title"]) : current.personalEvents,
-            chatChannels: payload.records.chatChannels ? mergeByIdentity(current.chatChannels, payload.records.chatChannels, ["id", "name"]) : current.chatChannels,
-            stickyNotes: payload.records.stickyNotes ? mergeByIdentity(current.stickyNotes, payload.records.stickyNotes, ["id", "title"]) : current.stickyNotes,
+            [key]:
+              payload.mode === "replace"
+                ? incomingRecords
+                : mergeByIdentity(currentRecords, incomingRecords, identityMap[key] as Array<string>),
           };
+        });
+      }
+
+      ensureRemoteImportMode(payload.mode);
+      const current = readWorkspaceData();
+      const patch: Partial<WorkspaceData> = {};
+
+      if (payload.entity === "workspace") {
+        const records = payload.records;
+
+        if (records.teamMembers?.length) {
+          patch.teamMembers = await importTeamMembersToRemote(records.teamMembers);
+        }
+        if (records.projects?.length) {
+          patch.projects = await importProjectsToRemote(records.projects);
+        }
+        if (records.tasks?.length) {
+          patch.tasks = await importTasksToRemote(records.tasks);
+        }
+        if (records.tickets?.length) {
+          patch.tickets = await importTicketsToRemote(records.tickets);
+        }
+        if (records.meetings?.length) {
+          patch.meetings = await importMeetingsToRemote(records.meetings);
+        }
+        if (records.personalEvents?.length) {
+          patch.personalEvents = await importPersonalEventsToRemote(records.personalEvents);
+        }
+        if (records.chatChannels?.length) {
+          patch.chatChannels = await importChatChannelsToRemote(records.chatChannels);
+        }
+        if (records.stickyNotes?.length) {
+          patch.stickyNotes = await importStickyNotesToRemote(records.stickyNotes);
+        }
+        if (records.userAccounts?.length) {
+          patch.userAccounts = await importUserAccountsToRemote(records.userAccounts);
+        }
+        if (records.dashboards?.length) {
+          for (const dashboard of records.dashboards) {
+            await upsertRemoteDashboard(dashboard);
+          }
+          patch.dashboards = await fetchMergedDashboards();
         }
 
-        const key = payload.entity;
-        const incomingRecords = payload.records as Array<Record<string, any>>;
-        const currentRecords = current[key] as Array<Record<string, any>>;
+        const presentationPatch: Record<string, unknown> = {};
+        if (records.workflows?.length) presentationPatch.workflows = records.workflows;
+        if (records.reportTemplates?.length) presentationPatch.reportTemplates = records.reportTemplates;
+        if (records.projectTemplates?.length) presentationPatch.projectTemplates = records.projectTemplates;
+        if (Object.keys(presentationPatch).length) {
+          await syncRemoteWorkspaceState(presentationPatch);
+          if (presentationPatch.workflows) patch.workflows = await fetchMergedWorkflows();
+          if (presentationPatch.reportTemplates) patch.reportTemplates = await fetchMergedReportTemplates();
+          if (presentationPatch.projectTemplates) patch.projectTemplates = await fetchMergedProjectTemplates();
+        }
 
-        const identityMap: Record<ImportableEntityKey, string[]> = {
-          projects: ["id", "name"],
-          tasks: ["id", "title"],
-          teamMembers: ["id", "email", "name"],
-          tickets: ["id", "title"],
-          userAccounts: ["id", "email", "fullName"],
-          meetings: ["id", "title"],
-          personalEvents: ["id", "title"],
-          chatChannels: ["id", "name"],
-          stickyNotes: ["id", "title"],
-        };
+        if (records.settings) {
+          const nextSettings = await syncWorkspaceSettings(records.settings);
+          patch.settings = await mergeSettingsWithRemoteContext(nextSettings);
+        } else if (Object.keys(presentationPatch).length) {
+          patch.settings = await mergeSettingsWithRemoteContext(current.settings);
+        }
 
-        return {
-          ...current,
-          [key]:
-            payload.mode === "replace"
-              ? incomingRecords
-              : mergeByIdentity(currentRecords, incomingRecords, identityMap[key] as Array<string>),
-        };
-      }),
+        await createRemoteAuditLog({
+          action: "Workspace import completed",
+          entityType: "settings",
+          entityId: current.settings.namespace.slug,
+          detail: `Imported workspace package datasets: ${Object.keys(records)
+            .filter((key) => key !== "auditLogs")
+            .join(", ")}.`,
+          actorName: current.settings.currentUser.displayName,
+        });
+        patch.auditLogs = await fetchMergedAuditLogs();
+        writeWorkspacePatch(patch);
+        return patch;
+      }
+
+      switch (payload.entity) {
+        case "projects":
+          patch.projects = await importProjectsToRemote(payload.records as WorkspaceProject[]);
+          break;
+        case "tasks":
+          patch.tasks = await importTasksToRemote(payload.records as WorkspaceTask[]);
+          break;
+        case "teamMembers":
+          patch.teamMembers = await importTeamMembersToRemote(payload.records as WorkspaceTeamMember[]);
+          break;
+        case "tickets":
+          patch.tickets = await importTicketsToRemote(payload.records as WorkspaceTicket[]);
+          break;
+        case "userAccounts":
+          patch.userAccounts = await importUserAccountsToRemote(payload.records as WorkspaceUserAccount[]);
+          break;
+        case "meetings":
+          patch.meetings = await importMeetingsToRemote(payload.records as WorkspaceMeeting[]);
+          break;
+        case "personalEvents":
+          patch.personalEvents = await importPersonalEventsToRemote(payload.records as WorkspacePersonalEvent[]);
+          break;
+        case "chatChannels":
+          patch.chatChannels = await importChatChannelsToRemote(payload.records as WorkspaceChatChannel[]);
+          break;
+        case "stickyNotes":
+          patch.stickyNotes = await importStickyNotesToRemote(payload.records as WorkspaceStickyNote[]);
+          break;
+      }
+
+      await createRemoteAuditLog({
+        action: "Dataset import completed",
+        entityType:
+          payload.entity === "teamMembers"
+            ? "team"
+            : payload.entity === "chatChannels"
+              ? "chat"
+              : payload.entity === "stickyNotes"
+                ? "sticky-note"
+                : payload.entity === "personalEvents"
+                  ? "event"
+                  : payload.entity === "userAccounts"
+                    ? "user"
+                    : payload.entity === "meetings"
+                      ? "meeting"
+                      : payload.entity === "tickets"
+                        ? "ticket"
+                        : payload.entity === "tasks"
+                          ? "task"
+                          : "project",
+        entityId: payload.entity,
+        detail: `Imported ${(payload.records as Array<unknown>).length} ${payload.entity} record(s) into the database-backed workspace.`,
+        actorName: current.settings.currentUser.displayName,
+      });
+      patch.auditLogs = await fetchMergedAuditLogs();
+      writeWorkspacePatch(patch);
+      return patch;
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
@@ -1568,8 +1808,49 @@ export function useImportRadarMatrix() {
     }: {
       rows: RadarImportRow[];
       sourceFileName?: string;
-    }) =>
-      updateWorkspaceData((current) => applyRadarRowsToWorkspace(current, rows, sourceFileName)),
+    }) => {
+      if (!isSupabaseReady()) {
+        return updateWorkspaceData((current) => applyRadarRowsToWorkspace(current, rows, sourceFileName));
+      }
+
+      const current = readWorkspaceData();
+      const next = applyRadarRowsToWorkspace(current, rows, sourceFileName);
+      const changedTeamMembers = next.teamMembers.filter((member) => hasChangedRecord(current.teamMembers, member));
+      const changedProjects = next.projects.filter((project) => hasChangedRecord(current.projects, project));
+
+      if (changedTeamMembers.length) {
+        await importTeamMembersToRemote(changedTeamMembers);
+      }
+      if (changedProjects.length) {
+        await importProjectsToRemote(changedProjects);
+      }
+
+      await createRemoteAuditLog({
+        action: "Radar matrix import completed",
+        entityType: "project",
+        entityId: sourceFileName ?? "radar-import",
+        detail: `Imported implementation radar metrics for ${rows.length} project(s).`,
+        actorName: current.settings.currentUser.displayName,
+      });
+
+      const [projects, teamMembers, auditLogs] = await Promise.all([
+        fetchMergedProjects(),
+        fetchMergedTeamMembers(),
+        fetchMergedAuditLogs(),
+      ]);
+
+      writeWorkspacePatch({
+        projects,
+        teamMembers,
+        auditLogs,
+      });
+
+      return {
+        projects,
+        teamMembers,
+        auditLogs,
+      };
+    },
     onSuccess: async () => invalidateWorkspace(qc),
   });
 }
