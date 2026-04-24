@@ -679,7 +679,7 @@ const defaultRoles: WorkspacePermissionRole[] = [
   {
     id: "admin",
     name: "Portfolio Admin",
-    permissions: ["manage_projects", "manage_workflows", "manage_privileges", "view_reports", "manage_team", "manage_users", "manage_documents", "manage_integrations", "moderate_channels", "export"],
+    permissions: ["manage_projects", "manage_workflows", "manage_privileges", "view_reports", "manage_team", "manage_users", "manage_documents", "manage_integrations", "moderate_channels", "export", "view_dashboard", "manage_schedule", "manage_tasks", "manage_resources", "team_chat"],
   },
   {
     id: "pm",
