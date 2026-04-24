@@ -1728,6 +1728,8 @@ export const createRemoteAuditLog = async ({
   const workspaceId = await getRemoteWorkspaceId();
   const userId = await getAuthenticatedUserId();
   if (!workspaceId) return null;
+  const canonicalEntityId = isUuid(entityId) ? entityId : null;
+  const rawEntityId = entityId && !canonicalEntityId ? entityId : null;
 
   const { data, error } = await supabase
     .from("audit_events")
@@ -1735,13 +1737,14 @@ export const createRemoteAuditLog = async ({
       workspace_id: workspaceId,
       actor_user_id: userId,
       entity_type: entityType,
-      entity_id: entityId,
+      entity_id: canonicalEntityId,
       action,
       detail,
       payload: {
         ...payload,
         actorName,
-        userAccountId: payload.userAccountId ?? entityId ?? null,
+        userAccountId: payload.userAccountId ?? canonicalEntityId ?? null,
+        rawEntityId,
       },
     })
     .select()
