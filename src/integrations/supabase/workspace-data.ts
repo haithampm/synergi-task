@@ -497,9 +497,9 @@ export const checkSupabaseConnection = async (): Promise<SupabaseConnectionHealt
 
 const getAuthenticatedUserId = async () => {
   if (!supabaseConfigured) return null;
-  const { data, error } = await supabase.auth.getSession();
+  const { data: userData, error } = await supabase.auth.getUser();
   if (error) return null;
-  return data.session?.user.id ?? null;
+  return userData.user?.id ?? null;
 };
 
 const getRemoteWorkspaceId = async () => {
@@ -1756,7 +1756,7 @@ export const createRemoteAuditLog = async ({
 export const upsertRemoteProject = async (project: WorkspaceProject) => {
   const userId = await getAuthenticatedUserId();
   const workspaceId = await getRemoteWorkspaceId();
-  if (!userId) return;
+    if (!userId) throw new Error("You must be signed in to create a project. Please sign out and sign back in.");
 
   const { data, error } = await supabase
     .from("projects")
