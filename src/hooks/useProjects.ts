@@ -475,6 +475,7 @@ export function useCreateProject() {
       return projects.find((item) => item.id === record.id) ?? record;
     },
     onSuccess: async () => invalidateWorkspace(qc),
+        onError: (error: Error) => { toast.error(error.message || "Failed to save project. Please try again."); },
   });
 }
 
