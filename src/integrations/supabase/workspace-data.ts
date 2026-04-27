@@ -496,7 +496,7 @@ export const checkSupabaseConnection = async (): Promise<SupabaseConnectionHealt
 };
 
 const getAuthenticatedUserId = async () => {
-  if (!supabaseConfigured) return null;
+  
   const { data: userData, error } = await supabase.auth.getUser();
   if (error) return null;
   return userData.user?.id ?? null;
