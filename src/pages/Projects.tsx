@@ -197,7 +197,7 @@ const Projects = () => {
       setDialogOpen(true);
       setSearchParams({}, { replace: true });
     }
-  }, [projectCustomFields, searchParams, setSearchParams, settings?.namespace.slug, workflows]);
+  }, [projectCustomFields, searchParams, setSearchParams, settings?.namespace.slug, workflows]);    useEffect(() => {     const handler = () => {       setEditingProjectId(null);       setDraft({         ...createDraft(settings?.namespace.slug ?? "synergi-main", workflows[0]?.id ?? ""),         customFieldValues: normalizeCustomFieldValues(projectCustomFields, {}),       });       setDialogOpen(true);     };     window.addEventListener('open-create-project', handler);     return () => window.removeEventListener('open-create-project', handler);   }, [projectCustomFields, settings?.namespace.slug, workflows]);
 
   useEffect(() => {
     const requestedProjectId = searchParams.get("projectId");
