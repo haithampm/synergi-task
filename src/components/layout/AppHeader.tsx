@@ -179,7 +179,7 @@ const AppHeader = ({ title, subtitle }: AppHeaderProps) => {
         <Button
           size="sm"
           className="gradient-primary text-primary-foreground shadow-glow gap-1.5"
-          onClick={() => navigate(`/projects?action=create&source=header&ts=${Date.now()}`)}
+          onClick={() => { if (window.location.pathname === '/projects') { window.dispatchEvent(new CustomEvent('open-create-project')); } else { navigate('/projects'); setTimeout(() => window.dispatchEvent(new CustomEvent('open-create-project')), 500); } }&source=header&ts=${Date.now()}`)}
         >
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">{translateText(language, 'New Project')}</span>
