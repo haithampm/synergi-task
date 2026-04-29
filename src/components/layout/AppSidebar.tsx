@@ -7,10 +7,11 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
-import { useMeetings, useProjects, useStickyNotes, useTasks, useTickets, useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
+import { useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
 import { hasWorkspacePermission } from '@/lib/workspace-access';
 
 const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
+const workspaceStorageKey = 'synergi-workspace-data';
 
 const navSections = [
   {
@@ -54,31 +55,66 @@ const navSections = [
 
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 
+const getLocalCounts = () => {
+  try {
+    const raw = window.localStorage.getItem(workspaceStorageKey);
+    if (!raw) throw new Error('No local workspace cache');
+    const data = JSON.parse(raw) as {
+      projects?: Array<{ documents?: unknown[]; files?: unknown[] }>;
+      tasks?: unknown[];
+      tickets?: unknown[];
+      meetings?: unknown[];
+      stickyNotes?: unknown[];
+      userAccounts?: unknown[];
+    };
+    const projects = data.projects ?? [];
+    const tasks = data.tasks ?? [];
+    const tickets = data.tickets ?? [];
+    return {
+      dashboard: projects.length + tasks.length + tickets.length,
+      projects: projects.length,
+      schedule: data.meetings?.length ?? 0,
+      tasks: tasks.length,
+      documents: projects.reduce((sum, project) => sum + (project.documents?.length ?? 0) + (project.files?.length ?? 0), 0),
+      tickets: tickets.length,
+      notes: data.stickyNotes?.length ?? 0,
+      users: data.userAccounts?.length ?? 0,
+    };
+  } catch {
+    return {
+      dashboard: 0,
+      projects: 0,
+      schedule: 0,
+      tasks: 0,
+      documents: 0,
+      tickets: 0,
+      notes: 0,
+      users: 0,
+    };
+  }
+};
+
 const AppSidebar = () => {
   const location = useLocation();
   const { signOut, user } = useAuth();
   const { data: settings } = useWorkspaceSettings();
   const { data: userAccounts = [] } = useUserAccounts();
   const updateSettings = useUpdateWorkspaceSettings();
-  const { data: projects = [] } = useProjects();
-  const { data: tasks = [] } = useTasks();
-  const { data: tickets = [] } = useTickets();
-  const { data: meetings = [] } = useMeetings();
-  const { data: stickyNotes = [] } = useStickyNotes();
+  const [counts, setCounts] = useState<Record<string, number>>(() => getLocalCounts());
   const [collapsed, setCollapsed] = useState(settings?.appearance.sidebarCollapsed ?? false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isArabic = settings?.appearance.language === 'ar';
 
-  const counts: Record<string, number> = {
-    dashboard: projects.length + tasks.length + tickets.length,
-    projects: projects.length,
-    schedule: meetings.length,
-    tasks: tasks.length,
-    documents: projects.reduce((sum, project) => sum + (project.documents?.length ?? 0) + (project.files?.length ?? 0), 0),
-    tickets: tickets.length,
-    notes: stickyNotes.length,
-    users: userAccounts.length,
-  };
+  useEffect(() => {
+    const refreshCounts = () => setCounts(getLocalCounts());
+    refreshCounts();
+    window.addEventListener('storage', refreshCounts);
+    window.addEventListener('workspace-import-progress', refreshCounts);
+    return () => {
+      window.removeEventListener('storage', refreshCounts);
+      window.removeEventListener('workspace-import-progress', refreshCounts);
+    };
+  }, [location.pathname]);
 
   const currentUserAccount = useMemo(
     () =>
@@ -136,9 +172,7 @@ const AppSidebar = () => {
   }, [settings]);
 
   useEffect(() => {
-    const handleSidebarToggle = () => {
-      setMobileOpen((current) => !current);
-    };
+    const handleSidebarToggle = () => setMobileOpen((current) => !current);
     window.addEventListener('workspace-sidebar-toggle', handleSidebarToggle);
     return () => window.removeEventListener('workspace-sidebar-toggle', handleSidebarToggle);
   }, []);
@@ -163,16 +197,9 @@ const AppSidebar = () => {
 
   return (
     <>
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+      {mobileOpen && <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />}
       <aside
-        className={`fixed top-0 bottom-0 z-50 flex flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-2xl shadow-black/10 backdrop-blur-xl transition-all duration-300 ${
-          sideClasses
-        } ${mobileOpen ? 'translate-x-0' : isArabic ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`fixed top-0 bottom-0 z-50 flex flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-2xl shadow-black/10 backdrop-blur-xl transition-all duration-300 ${sideClasses} ${mobileOpen ? 'translate-x-0' : isArabic ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         <div className="flex items-center justify-between border-b border-sidebar-border/80 bg-gradient-to-r from-primary/15 via-sidebar to-sidebar px-4 py-3 min-h-[64px]">
           {!collapsed && (
@@ -191,21 +218,14 @@ const AppSidebar = () => {
           </Button>
         </div>
 
-        <button
-          className="absolute top-3 right-3 lg:hidden text-sidebar-foreground/60 hover:text-sidebar-foreground"
-          onClick={() => setMobileOpen(false)}
-        >
+        <button className="absolute top-3 right-3 lg:hidden text-sidebar-foreground/60 hover:text-sidebar-foreground" onClick={() => setMobileOpen(false)}>
           <X className="h-4 w-4" />
         </button>
 
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-3">
           {filteredSections.map((section) => (
             <div key={section.title} className="rounded-2xl border border-sidebar-border/40 bg-sidebar-foreground/[0.025] px-2 py-2">
-              {!collapsed && (
-                <p className="px-2 pb-2 pt-1 text-[11px] font-black uppercase tracking-[0.2em] text-sidebar-foreground/45">
-                  {section.title}
-                </p>
-              )}
+              {!collapsed && <p className="px-2 pb-2 pt-1 text-[11px] font-black uppercase tracking-[0.2em] text-sidebar-foreground/45">{section.title}</p>}
               {section.items.map((item) => {
                 const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
                 const count = item.countKey ? counts[item.countKey] : undefined;
@@ -224,24 +244,14 @@ const AppSidebar = () => {
                             : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                     }`}
                   >
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                      isActive
-                        ? 'bg-primary/15 text-primary'
-                        : item.important
-                          ? 'bg-primary/10 text-primary'
-                          : 'bg-sidebar-foreground/5 text-sidebar-foreground/70 group-hover:bg-sidebar-foreground/10'
-                    }`}>
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors ${isActive ? 'bg-primary/15 text-primary' : item.important ? 'bg-primary/10 text-primary' : 'bg-sidebar-foreground/5 text-sidebar-foreground/70 group-hover:bg-sidebar-foreground/10'}`}>
                       <item.icon className="h-4 w-4" />
                     </span>
                     {!collapsed && (
                       <>
                         <span className="flex-1 truncate tracking-tight">{item.label}</span>
                         {count !== undefined && (
-                          <span className={`ml-auto flex h-6 min-w-[28px] items-center justify-center rounded-full px-2 text-[11px] font-black ${
-                            item.important
-                              ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/30'
-                              : 'bg-primary/15 text-primary'
-                          }`}>
+                          <span className={`ml-auto flex h-6 min-w-[28px] items-center justify-center rounded-full px-2 text-[11px] font-black ${item.important ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/30' : 'bg-primary/15 text-primary'}`}>
                             {count > 99 ? '99+' : count}
                           </span>
                         )}
