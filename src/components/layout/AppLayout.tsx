@@ -15,6 +15,7 @@ const importActionPattern = /\b(import|upload|parse|load|sync)\b/i;
 const legacyAdminMailbox = 'Admin mailbox: admin@company.com';
 const currentAdminMailbox = 'Admin mailbox: haitham.pm@gmail.com';
 const workspaceStorageKey = 'synergi-workspace-data';
+const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 const fullAdminPermissions = [
   'view_dashboard',
   'view_reports',
@@ -34,6 +35,9 @@ const fullAdminPermissions = [
   'export',
 ];
 
+const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+const isKnownAdminEmail = (email?: string | null) => adminEmails.includes(normalizeEmail(email));
+
 const normalizeAdminRolesInStorage = () => {
   if (typeof window === 'undefined') return;
 
@@ -47,6 +51,8 @@ const normalizeAdminRolesInStorage = () => {
         currentUser?: { roleId?: string };
         profile?: { email?: string };
       };
+      userAccounts?: Array<{ email?: string; roleId?: string; status?: string }>;
+      teamMembers?: Array<{ email?: string; privilegeRole?: string }>;
     };
     if (!data.settings) return;
 
@@ -65,15 +71,35 @@ const normalizeAdminRolesInStorage = () => {
       permissions: Array.from(new Set([...(roleMap.get('super_admin')?.permissions ?? []), ...fullAdminPermissions])),
     });
 
+    const profileEmail = normalizeEmail(data.settings.profile?.email);
+    const shouldForceAdmin = profileEmail === 'admin@company.com' || isKnownAdminEmail(profileEmail);
+
     data.settings.privilegeRoles = Array.from(roleMap.values());
     data.settings.currentUser = {
       ...(data.settings.currentUser ?? {}),
-      roleId: data.settings.currentUser?.roleId || 'admin',
+      roleId: shouldForceAdmin ? 'admin' : data.settings.currentUser?.roleId || 'admin',
     };
     data.settings.profile = {
       ...(data.settings.profile ?? {}),
-      email: data.settings.profile?.email === 'admin@company.com' ? 'haitham.pm@gmail.com' : data.settings.profile?.email,
+      email: profileEmail === 'admin@company.com' ? 'haitham.pm@gmail.com' : data.settings.profile?.email,
     };
+
+    if (Array.isArray(data.userAccounts)) {
+      data.userAccounts = data.userAccounts.map((account) =>
+        isKnownAdminEmail(account.email)
+          ? { ...account, roleId: 'admin', status: 'active' }
+          : account,
+      );
+    }
+
+    if (Array.isArray(data.teamMembers)) {
+      data.teamMembers = data.teamMembers.map((member) =>
+        isKnownAdminEmail(member.email)
+          ? { ...member, privilegeRole: 'admin' }
+          : member,
+      );
+    }
+
     window.localStorage.setItem(workspaceStorageKey, JSON.stringify(data));
   } catch (error) {
     console.warn('Could not normalize admin roles in workspace settings', error);
