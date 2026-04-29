@@ -34,6 +34,14 @@ import { useUserAccounts, useCreateUserAccount, useUpdateUserAccount, useDeleteU
 import { toast } from "sonner";
 import { WorkspaceUserAccount } from "@/lib/workspace-store";
 
+const fallbackRoles = [
+  { id: "admin", name: "Admin" },
+  { id: "super_admin", name: "Super Admin" },
+  { id: "pm", name: "Project Manager" },
+  { id: "lead", name: "Team Lead" },
+  { id: "viewer", name: "Executive Viewer" },
+];
+
 const UserAccounts = () => {
   const { data: userAccounts = [], isLoading } = useUserAccounts();
   const { data: settings } = useWorkspaceSettings();
@@ -44,7 +52,7 @@ const UserAccounts = () => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Partial<WorkspaceUserAccount> | null>(null);
 
-  const roles = settings?.privilegeRoles || [];
+  const roles = settings?.privilegeRoles?.length ? settings.privilegeRoles : fallbackRoles;
 
   const handleOpenForm = (account?: WorkspaceUserAccount) => {
     setSelectedAccount(account || {
@@ -98,17 +106,44 @@ const UserAccounts = () => {
       <AppHeader title="User Accounts" />
       <PageSection
         title="Workspace Access Control"
-        description="Review persisted workspace accounts, adjust permissions, and suspend access using database-backed workspace memberships."
+        description="Manage mail users, admin access, linked team profiles, and workspace permissions from one directory."
         action={
-          <Button onClick={() => handleOpenForm()} className="gap-2" disabled>
+          <Button onClick={() => handleOpenForm()} className="gap-2">
             <Plus className="h-4 w-4" /> Add User
           </Button>
         }
       >
+        <div className="grid gap-3 md:grid-cols-4">
+          <Card className="glass">
+            <CardContent className="p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Users</p>
+              <p className="mt-2 text-2xl font-black">{userAccounts.length}</p>
+            </CardContent>
+          </Card>
+          <Card className="glass">
+            <CardContent className="p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active</p>
+              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => account.status === "active").length}</p>
+            </CardContent>
+          </Card>
+          <Card className="glass">
+            <CardContent className="p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Admins</p>
+              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => ["admin", "super_admin"].includes(account.roleId)).length}</p>
+            </CardContent>
+          </Card>
+          <Card className="glass">
+            <CardContent className="p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Invited</p>
+              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => account.status === "invited").length}</p>
+            </CardContent>
+          </Card>
+        </div>
+
         <p className="text-sm text-muted-foreground">
-          New-user invitations still need the backend admin invite flow. Existing linked accounts below can be edited and suspended safely.
+          Add or edit app-level user access here. Production login access still requires the user to exist in Supabase Auth and have an active workspace membership.
         </p>
-        <Card className="glass">
+        <Card className="glass overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>
@@ -129,7 +164,7 @@ const UserAccounts = () => {
               ) : userAccounts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    No user accounts found.
+                    No user accounts found. Use Add User to create the first account record.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -157,7 +192,7 @@ const UserAccounts = () => {
                     <TableCell>{account.department || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleOpenForm(account)}>
+                        <Button variant="ghost" size="icon" onClick={() => handleOpenForm(account)} title="Edit user">
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button 
@@ -165,6 +200,7 @@ const UserAccounts = () => {
                           size="icon" 
                           className="text-destructive hover:text-destructive"
                           onClick={() => handleDelete(account.id)}
+                          title="Suspend user"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -258,7 +294,9 @@ const UserAccounts = () => {
           </div>
           <SheetFooter>
             <Button variant="outline" onClick={() => setIsSheetOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>Save Changes</Button>
+            <Button onClick={handleSave} disabled={createAccount.isPending || updateAccount.isPending}>
+              {createAccount.isPending || updateAccount.isPending ? "Saving..." : "Save Changes"}
+            </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
