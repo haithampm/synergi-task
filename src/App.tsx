@@ -32,7 +32,7 @@ const Permissions = lazy(() => import("./pages/Permissions"));
 const UserAccounts = lazy(() => import("./pages/UserAccounts"));
 const Profile = lazy(() => import("./pages/Profile"));
 const StickyNotesPage = lazy(() => import("./pages/StickyNotes"));
-const ImportExport = lazy(() => import("./pages/ImportExportReliable"));
+const ImportExport = lazy(() => import("./pages/ImportExportProgress"));
 const Schedule = lazy(() => import("./pages/Schedule"));
 const AppMonitor = lazy(() => import("./pages/AppMonitor"));
 const Auth = lazy(() => import("./pages/Auth"));
