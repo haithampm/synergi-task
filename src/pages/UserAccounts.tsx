@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Shield, User, Mail, Building2, Briefcase } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import AppLayout from "@/components/layout/AppLayout";
 import AppHeader from "@/components/layout/AppHeader";
 import PageSection from "@/components/layout/PageSection";
@@ -30,9 +30,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useUserAccounts, useCreateUserAccount, useUpdateUserAccount, useDeleteUserAccount, useWorkspaceSettings } from "@/hooks/useProjects";
+import { useQueryClient } from "@tanstack/react-query";
+import { workspaceKeys, useUserAccounts, useUpdateUserAccount, useDeleteUserAccount, useWorkspaceSettings } from "@/hooks/useProjects";
 import { toast } from "sonner";
-import { WorkspaceUserAccount } from "@/lib/workspace-store";
+import { makeId, readWorkspaceData, updateWorkspaceData, WorkspaceUserAccount } from "@/lib/workspace-store";
 
 const fallbackRoles = [
   { id: "admin", name: "Admin" },
@@ -42,29 +43,78 @@ const fallbackRoles = [
   { id: "viewer", name: "Executive Viewer" },
 ];
 
+const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+
 const UserAccounts = () => {
+  const queryClient = useQueryClient();
   const { data: userAccounts = [], isLoading } = useUserAccounts();
   const { data: settings } = useWorkspaceSettings();
-  const createAccount = useCreateUserAccount();
   const updateAccount = useUpdateUserAccount();
   const deleteAccount = useDeleteUserAccount();
 
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Partial<WorkspaceUserAccount> | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const roles = settings?.privilegeRoles?.length ? settings.privilegeRoles : fallbackRoles;
+
+  const refreshUsers = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.users }),
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.team }),
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.settings }),
+    ]);
+  };
 
   const handleOpenForm = (account?: WorkspaceUserAccount) => {
     setSelectedAccount(account || {
       fullName: "",
       email: "",
       roleId: "viewer",
-      status: "invited",
+      status: "active",
       authProvider: "email",
       title: "",
       department: "",
+      notes: "",
     });
     setIsSheetOpen(true);
+  };
+
+  const saveLocalUserAccount = (account: WorkspaceUserAccount) => {
+    updateWorkspaceData((current) => {
+      const existingIndex = current.userAccounts.findIndex((item) =>
+        item.id === account.id || normalizeEmail(item.email) === normalizeEmail(account.email),
+      );
+      const nextUserAccounts = [...current.userAccounts];
+
+      if (existingIndex >= 0) {
+        nextUserAccounts[existingIndex] = {
+          ...nextUserAccounts[existingIndex],
+          ...account,
+          id: nextUserAccounts[existingIndex].id,
+          createdAt: nextUserAccounts[existingIndex].createdAt || account.createdAt,
+        };
+      } else {
+        nextUserAccounts.unshift(account);
+      }
+
+      return {
+        ...current,
+        userAccounts: nextUserAccounts,
+        auditLogs: [
+          {
+            id: makeId("audit"),
+            action: existingIndex >= 0 ? "User access updated" : "User access created",
+            entityType: "user",
+            entityId: account.id,
+            actorName: current.settings.currentUser.displayName || current.settings.profile.email || "Admin User",
+            detail: `${account.fullName} was ${existingIndex >= 0 ? "updated" : "added"} as ${account.roleId}.`,
+            createdAt: new Date().toISOString(),
+          },
+          ...current.auditLogs,
+        ].slice(0, 300),
+      };
+    });
   };
 
   const handleSave = async () => {
@@ -73,20 +123,48 @@ const UserAccounts = () => {
       return;
     }
 
+    setSaving(true);
     try {
-      if (selectedAccount.id) {
-        await updateAccount.mutateAsync({
-          id: selectedAccount.id,
-          ...selectedAccount,
-        });
-        toast.success("User account updated");
-      } else {
-        await createAccount.mutateAsync(selectedAccount as any);
-        toast.success("User account created");
+      const existingByEmail = userAccounts.find(
+        (account) => normalizeEmail(account.email) === normalizeEmail(selectedAccount.email),
+      );
+      const existing = selectedAccount.id
+        ? userAccounts.find((account) => account.id === selectedAccount.id) ?? existingByEmail
+        : existingByEmail;
+
+      const account: WorkspaceUserAccount = {
+        id: existing?.id ?? selectedAccount.id ?? makeId("user"),
+        fullName: selectedAccount.fullName.trim(),
+        email: selectedAccount.email.trim(),
+        roleId: selectedAccount.roleId ?? "viewer",
+        status: selectedAccount.status ?? "active",
+        authProvider: selectedAccount.authProvider ?? "email",
+        teamMemberId: selectedAccount.teamMemberId || existing?.teamMemberId,
+        title: selectedAccount.title ?? existing?.title ?? "",
+        department: selectedAccount.department ?? existing?.department ?? "",
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        lastAccessAt: existing?.lastAccessAt,
+        invitationSentAt: existing?.invitationSentAt,
+        passwordResetSentAt: existing?.passwordResetSentAt,
+        lastNotificationAt: existing?.lastNotificationAt,
+        notificationCount: existing?.notificationCount ?? 0,
+        invitedBy: existing?.invitedBy ?? readWorkspaceData().settings.currentUser.displayName,
+        notes: selectedAccount.notes ?? existing?.notes ?? "",
+      };
+
+      saveLocalUserAccount(account);
+
+      if (existing?.id) {
+        await updateAccount.mutateAsync(account);
       }
+
+      await refreshUsers();
+      toast.success(existing?.id ? "User account updated" : "User account created");
       setIsSheetOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save user account");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -294,8 +372,8 @@ const UserAccounts = () => {
           </div>
           <SheetFooter>
             <Button variant="outline" onClick={() => setIsSheetOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={createAccount.isPending || updateAccount.isPending}>
-              {createAccount.isPending || updateAccount.isPending ? "Saving..." : "Save Changes"}
+            <Button onClick={handleSave} disabled={saving || updateAccount.isPending}>
+              {saving || updateAccount.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </SheetFooter>
         </SheetContent>
