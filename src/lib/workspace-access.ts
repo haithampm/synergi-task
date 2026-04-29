@@ -26,6 +26,58 @@ const LOCAL_TO_REMOTE_ROLE: Record<string, string> = {
   viewer: "guest",
 };
 
+const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  admin: [
+    "view_dashboard",
+    "view_reports",
+    "manage_projects",
+    "manage_schedule",
+    "manage_tasks",
+    "manage_documents",
+    "manage_resources",
+    "manage_team",
+    "manage_users",
+    "team_chat",
+    "moderate_channels",
+    "share",
+    "manage_workflows",
+    "manage_privileges",
+    "manage_integrations",
+    "export",
+  ],
+  pm: [
+    "view_dashboard",
+    "view_reports",
+    "manage_projects",
+    "manage_schedule",
+    "manage_tasks",
+    "manage_documents",
+    "manage_resources",
+    "manage_team",
+    "team_chat",
+    "share",
+    "export",
+  ],
+  lead: [
+    "view_dashboard",
+    "manage_projects",
+    "manage_schedule",
+    "manage_tasks",
+    "manage_documents",
+    "manage_resources",
+    "manage_team",
+    "team_chat",
+    "share",
+  ],
+  viewer: [
+    "view_dashboard",
+    "view_reports",
+    "manage_schedule",
+    "manage_documents",
+    "team_chat",
+  ],
+};
+
 const LEADER_ROLE_MATCHERS = [
   "project manager",
   "service delivery manager",
@@ -49,7 +101,16 @@ export const toRemoteWorkspaceRoleId = (role?: string | null) => {
 export const getRolePermissions = (
   roleId: string | undefined,
   privilegeRoles: WorkspacePermissionRole[] = [],
-) => new Set(privilegeRoles.find((role) => role.id === roleId)?.permissions ?? []);
+) => {
+  const normalizedRoleId = normalizeWorkspaceRoleId(roleId);
+  const configuredRole = privilegeRoles.find(
+    (role) => role.id === normalizedRoleId || normalizeWorkspaceRoleId(role.id) === normalizedRoleId,
+  );
+  const configuredPermissions = configuredRole?.permissions ?? [];
+  const fallbackPermissions = DEFAULT_ROLE_PERMISSIONS[normalizedRoleId] ?? DEFAULT_ROLE_PERMISSIONS.viewer;
+
+  return new Set(configuredPermissions.length > 0 ? configuredPermissions : fallbackPermissions);
+};
 
 export const hasWorkspacePermission = (
   roleId: string | undefined,
