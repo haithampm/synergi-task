@@ -3,12 +3,14 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck
+  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck, UserCog
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { useMeetings, useProjects, useStickyNotes, useTasks, useTickets, useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } from '@/hooks/useProjects';
 import { hasWorkspacePermission } from '@/lib/workspace-access';
+
+const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 
 const navSections = [
   {
@@ -41,10 +43,11 @@ const navSections = [
   {
     title: 'Administration',
     items: [
-      { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations' },
+      { icon: UserCog, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users', countKey: 'users', important: true, adminOnly: true },
+      { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
+      { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
+      { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
       { icon: FileUp, label: 'Import/Export', path: '/import-export', permission: 'export' },
-      { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true },
-      { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges' },
     ],
   },
 ];
@@ -74,6 +77,7 @@ const AppSidebar = () => {
     documents: projects.reduce((sum, project) => sum + (project.documents?.length ?? 0) + (project.files?.length ?? 0), 0),
     tickets: tickets.length,
     notes: stickyNotes.length,
+    users: userAccounts.length,
   };
 
   const currentUserAccount = useMemo(
@@ -83,24 +87,29 @@ const AppSidebar = () => {
     [settings?.currentUser.userAccountId, settings?.profile.email, user?.email, userAccounts],
   );
 
+  const currentEmail = normalizeText(user?.email ?? currentUserAccount?.email ?? settings?.profile.email);
   const currentRoleId = currentUserAccount?.roleId ?? settings?.currentUser.roleId;
+  const isKnownAdmin = adminEmails.includes(currentEmail);
+  const isAdminRole = ['admin', 'super_admin', 'organization_admin', 'project_admin'].includes(normalizeText(currentRoleId));
+  const canSeeAdmin = isKnownAdmin || isAdminRole || hasWorkspacePermission(currentRoleId, settings?.privilegeRoles, 'manage_privileges');
 
   const filteredSections = useMemo(
     () =>
       navSections
         .map((section) => ({
           ...section,
-          items: section.items.filter((item) =>
-            hasWorkspacePermission(currentRoleId, settings?.privilegeRoles, item.permission),
-          ),
+          items: section.items.filter((item) => {
+            if (item.adminOnly && canSeeAdmin) return true;
+            return hasWorkspacePermission(currentRoleId, settings?.privilegeRoles, item.permission);
+          }),
         }))
         .filter((section) => section.items.length > 0),
-    [currentRoleId, settings?.privilegeRoles],
+    [canSeeAdmin, currentRoleId, settings?.privilegeRoles],
   );
 
   const activeProfileName = currentUserAccount?.fullName ?? settings?.currentUser.displayName ?? 'Workspace User';
   const activeProfileEmail = user?.email ?? currentUserAccount?.email ?? settings?.profile.email ?? '';
-  const activeRoleLabel = settings?.privilegeRoles.find((role) => role.id === currentRoleId)?.name ?? currentRoleId ?? 'Workspace User';
+  const activeRoleLabel = isKnownAdmin ? 'Admin' : settings?.privilegeRoles.find((role) => role.id === currentRoleId)?.name ?? currentRoleId ?? 'Workspace User';
   const initials = activeProfileName
     .split(' ')
     .map((part) => part[0] ?? '')
@@ -165,7 +174,6 @@ const AppSidebar = () => {
           sideClasses
         } ${mobileOpen ? 'translate-x-0' : isArabic ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-sidebar-border/80 bg-gradient-to-r from-primary/15 via-sidebar to-sidebar px-4 py-3 min-h-[64px]">
           {!collapsed && (
             <Link to="/dashboard" className="flex min-w-0 items-center gap-3 text-sidebar-foreground">
@@ -183,7 +191,6 @@ const AppSidebar = () => {
           </Button>
         </div>
 
-        {/* Mobile close */}
         <button
           className="absolute top-3 right-3 lg:hidden text-sidebar-foreground/60 hover:text-sidebar-foreground"
           onClick={() => setMobileOpen(false)}
@@ -191,7 +198,6 @@ const AppSidebar = () => {
           <X className="h-4 w-4" />
         </button>
 
-        {/* Nav sections */}
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-3">
           {filteredSections.map((section) => (
             <div key={section.title} className="rounded-2xl border border-sidebar-border/40 bg-sidebar-foreground/[0.025] px-2 py-2">
@@ -248,7 +254,6 @@ const AppSidebar = () => {
           ))}
         </nav>
 
-        {/* User profile */}
         <div className="border-t border-sidebar-border/80 bg-gradient-to-r from-sidebar to-sidebar-accent/20 px-3 py-3">
           <div className="flex items-center gap-3 mb-2 rounded-2xl border border-sidebar-border/50 bg-sidebar-foreground/[0.035] p-2">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent text-xs font-black text-primary-foreground shadow-md shadow-primary/20">
