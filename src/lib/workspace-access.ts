@@ -10,6 +10,7 @@ import type {
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 
 const REMOTE_TO_LOCAL_ROLE: Record<string, string> = {
+  super_admin: "super_admin",
   admin: "admin",
   organization_admin: "admin",
   project_admin: "admin",
@@ -20,31 +21,35 @@ const REMOTE_TO_LOCAL_ROLE: Record<string, string> = {
 };
 
 const LOCAL_TO_REMOTE_ROLE: Record<string, string> = {
+  super_admin: "super_admin",
   admin: "admin",
   pm: "project_manager",
   lead: "team_member",
   viewer: "guest",
 };
 
+const ADMIN_PERMISSIONS = [
+  "view_dashboard",
+  "view_reports",
+  "manage_projects",
+  "manage_schedule",
+  "manage_tasks",
+  "manage_documents",
+  "manage_resources",
+  "manage_team",
+  "manage_users",
+  "team_chat",
+  "moderate_channels",
+  "share",
+  "manage_workflows",
+  "manage_privileges",
+  "manage_integrations",
+  "export",
+];
+
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: [
-    "view_dashboard",
-    "view_reports",
-    "manage_projects",
-    "manage_schedule",
-    "manage_tasks",
-    "manage_documents",
-    "manage_resources",
-    "manage_team",
-    "manage_users",
-    "team_chat",
-    "moderate_channels",
-    "share",
-    "manage_workflows",
-    "manage_privileges",
-    "manage_integrations",
-    "export",
-  ],
+  super_admin: ADMIN_PERMISSIONS,
+  admin: ADMIN_PERMISSIONS,
   pm: [
     "view_dashboard",
     "view_reports",
