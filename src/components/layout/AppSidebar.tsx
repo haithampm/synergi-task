@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Shield, Ticket, X
+  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,7 +41,6 @@ const navSections = [
   {
     title: 'Administration',
     items: [
-      { icon: Shield, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users', countKey: 'users' },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations' },
       { icon: FileUp, label: 'Import/Export', path: '/import-export', permission: 'export' },
       { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges' },
@@ -74,7 +73,6 @@ const AppSidebar = () => {
     documents: projects.reduce((sum, project) => sum + (project.documents?.length ?? 0) + (project.files?.length ?? 0), 0),
     tickets: tickets.length,
     notes: stickyNotes.length,
-    users: userAccounts.length,
   };
 
   const currentUserAccount = useMemo(
