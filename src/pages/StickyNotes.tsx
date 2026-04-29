@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCreateStickyNote, useDeleteStickyNote, useStickyNotes, useUpdateStickyNote, useWorkspaceSettings } from "@/hooks/useProjects";
 import { toast } from "sonner";
 
+const normalizeOwner = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+
 const StickyNotesPage = () => {
   const { data: settings } = useWorkspaceSettings();
   const { data: stickyNotes = [] } = useStickyNotes();
@@ -19,39 +21,51 @@ const StickyNotesPage = () => {
   const [stickyTitle, setStickyTitle] = useState("");
   const [stickyContent, setStickyContent] = useState("");
 
-  const userStickyNotes = useMemo(
-    () =>
-      stickyNotes.filter((note) => {
-        if (settings?.currentUser.userAccountId && note.ownerUserAccountId === settings.currentUser.userAccountId) return true;
-        if (settings?.currentUser.teamMemberId && note.ownerTeamMemberId === settings.currentUser.teamMemberId) return true;
-        return note.ownerName === settings?.currentUser.displayName;
-      }),
-    [settings, stickyNotes],
-  );
+  const userStickyNotes = useMemo(() => {
+    const currentUserAccountId = settings?.currentUser.userAccountId;
+    const currentTeamMemberId = settings?.currentUser.teamMemberId;
+    const currentDisplayName = normalizeOwner(settings?.currentUser.displayName);
+    const currentProfileEmail = normalizeOwner(settings?.profile.email);
+
+    return [...stickyNotes]
+      .filter((note) => {
+        const hasOwner = Boolean(note.ownerUserAccountId || note.ownerTeamMemberId || note.ownerName);
+        if (!hasOwner) return true;
+        if (currentUserAccountId && note.ownerUserAccountId === currentUserAccountId) return true;
+        if (currentTeamMemberId && note.ownerTeamMemberId === currentTeamMemberId) return true;
+        const noteOwnerName = normalizeOwner(note.ownerName);
+        return Boolean(noteOwnerName && (noteOwnerName === currentDisplayName || noteOwnerName === currentProfileEmail));
+      })
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+  }, [settings, stickyNotes]);
 
   const addStickyNote = async () => {
     if (!stickyTitle.trim() && !stickyContent.trim()) return;
-    await createStickyNote.mutateAsync({
-      ownerUserAccountId: settings?.currentUser.userAccountId,
-      ownerTeamMemberId: settings?.currentUser.teamMemberId,
-      ownerName: settings?.currentUser.displayName ?? "Workspace User",
-      title: stickyTitle.trim() || "Quick note",
-      content: stickyContent.trim() || "New reminder",
-      color: "amber",
-      done: false,
-    });
-    setStickyTitle("");
-    setStickyContent("");
-    toast.success("Sticky note added");
+    try {
+      await createStickyNote.mutateAsync({
+        ownerUserAccountId: settings?.currentUser.userAccountId,
+        ownerTeamMemberId: settings?.currentUser.teamMemberId,
+        ownerName: settings?.currentUser.displayName || settings?.profile.email || "Workspace User",
+        title: stickyTitle.trim() || "Quick note",
+        content: stickyContent.trim() || "New reminder",
+        color: "amber",
+        done: false,
+      });
+      setStickyTitle("");
+      setStickyContent("");
+      toast.success("Sticky note added");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not add sticky note");
+    }
   };
 
   return (
     <AppLayout>
       <AppHeader title="Sticky Notes" subtitle="Personal reminders and quick notes in one dedicated workspace page." />
-      <div className="space-y-6 p-6 animate-fade-in">
+      <div className="space-y-6 p-4 animate-fade-in sm:p-6">
         <PageSection
           title="My Sticky Notes"
-          description="Create, complete, and manage your personal notes here only."
+          description="Create, complete, and manage your personal notes here. Notes without an owner are shown here so saved notes never disappear after sync."
         />
 
         <Card className="glass">
@@ -61,8 +75,8 @@ const StickyNotesPage = () => {
           <CardContent className="space-y-3">
             <Input value={stickyTitle} onChange={(event) => setStickyTitle(event.target.value)} placeholder="Title" />
             <Textarea value={stickyContent} onChange={(event) => setStickyContent(event.target.value)} placeholder="Reminder, action, or quick note" className="min-h-[110px]" />
-            <Button className="gap-2" onClick={addStickyNote}>
-              <Plus className="h-4 w-4" /> Add Sticky Note
+            <Button className="gap-2" onClick={addStickyNote} disabled={createStickyNote.isPending || (!stickyTitle.trim() && !stickyContent.trim())}>
+              <Plus className="h-4 w-4" /> {createStickyNote.isPending ? "Adding..." : "Add Sticky Note"}
             </Button>
           </CardContent>
         </Card>
@@ -81,11 +95,11 @@ const StickyNotesPage = () => {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className={`font-medium ${note.done ? "line-through text-muted-foreground" : ""}`}>{note.title}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{note.content}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{note.content}</p>
                     </div>
-                    <span className="text-[10px] text-muted-foreground">{new Date(note.createdAt).toLocaleDateString()}</span>
+                    <span className="text-[10px] text-muted-foreground">{note.createdAt ? new Date(note.createdAt).toLocaleDateString() : "Today"}</span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       variant={note.done ? "outline" : "default"}
