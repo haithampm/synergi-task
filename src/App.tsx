@@ -28,6 +28,7 @@ const AiChat = lazy(() => import("./pages/AiChat"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Tickets = lazy(() => import("./pages/Tickets"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Permissions = lazy(() => import("./pages/Permissions"));
 const UserAccounts = lazy(() => import("./pages/UserAccounts"));
 const Profile = lazy(() => import("./pages/Profile"));
 const StickyNotesPage = lazy(() => import("./pages/StickyNotes"));
@@ -127,6 +128,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
           <Route path="/reports" element={<Reports />} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/permissions" element={<Permissions />} />
           <Route path="/user-accounts" element={<UserAccounts />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/sticky-notes" element={<StickyNotesPage />} />
