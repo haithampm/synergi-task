@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck, UserCog
+  LogOut, FileUp, CalendarDays, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck, UserCog
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -11,25 +11,24 @@ import { useUpdateWorkspaceSettings, useUserAccounts, useWorkspaceSettings } fro
 import { hasWorkspacePermission } from '@/lib/workspace-access';
 
 const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
-const workspaceStorageKey = 'synergi-workspace-data';
 
 const navSections = [
   {
     title: 'Overview',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'view_dashboard', countKey: 'dashboard', important: true },
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'view_dashboard', important: true },
       { icon: BarChart3, label: 'Reports', path: '/reports', permission: 'view_reports' },
     ],
   },
   {
     title: 'Management',
     items: [
-      { icon: FolderKanban, label: 'Projects', path: '/projects', permission: 'manage_projects', countKey: 'projects' },
-      { icon: GanttChart, label: 'Schedule', path: '/schedule', permission: 'manage_schedule', countKey: 'schedule', important: true },
-      { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks', countKey: 'tasks' },
-      { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents', countKey: 'documents' },
+      { icon: FolderKanban, label: 'Projects', path: '/projects', permission: 'manage_projects' },
+      { icon: CalendarDays, label: 'Calendar', path: '/calendar', permission: 'manage_schedule', important: true },
+      { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks' },
+      { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents' },
       { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },
-      { icon: Ticket, label: 'Tickets', path: '/tickets', permission: 'manage_tasks', countKey: 'tickets', important: true },
+      { icon: Ticket, label: 'Tickets', path: '/tickets', permission: 'manage_tasks', important: true },
     ],
   },
   {
@@ -38,13 +37,13 @@ const navSections = [
       { icon: Users, label: 'Team', path: '/team', permission: 'manage_team' },
       { icon: MessageSquare, label: 'Team Chat', path: '/team-chat', permission: 'team_chat' },
       { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
-      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', countKey: 'notes', important: true },
+      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', important: true },
     ],
   },
   {
     title: 'Administration',
     items: [
-      { icon: UserCog, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users', countKey: 'users', important: true, adminOnly: true },
+      { icon: UserCog, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users', important: true, adminOnly: true },
       { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
@@ -55,66 +54,15 @@ const navSections = [
 
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 
-const getLocalCounts = () => {
-  try {
-    const raw = window.localStorage.getItem(workspaceStorageKey);
-    if (!raw) throw new Error('No local workspace cache');
-    const data = JSON.parse(raw) as {
-      projects?: Array<{ documents?: unknown[]; files?: unknown[] }>;
-      tasks?: unknown[];
-      tickets?: unknown[];
-      meetings?: unknown[];
-      stickyNotes?: unknown[];
-      userAccounts?: unknown[];
-    };
-    const projects = data.projects ?? [];
-    const tasks = data.tasks ?? [];
-    const tickets = data.tickets ?? [];
-    return {
-      dashboard: projects.length + tasks.length + tickets.length,
-      projects: projects.length,
-      schedule: data.meetings?.length ?? 0,
-      tasks: tasks.length,
-      documents: projects.reduce((sum, project) => sum + (project.documents?.length ?? 0) + (project.files?.length ?? 0), 0),
-      tickets: tickets.length,
-      notes: data.stickyNotes?.length ?? 0,
-      users: data.userAccounts?.length ?? 0,
-    };
-  } catch {
-    return {
-      dashboard: 0,
-      projects: 0,
-      schedule: 0,
-      tasks: 0,
-      documents: 0,
-      tickets: 0,
-      notes: 0,
-      users: 0,
-    };
-  }
-};
-
 const AppSidebar = () => {
   const location = useLocation();
   const { signOut, user } = useAuth();
   const { data: settings } = useWorkspaceSettings();
   const { data: userAccounts = [] } = useUserAccounts();
   const updateSettings = useUpdateWorkspaceSettings();
-  const [counts, setCounts] = useState<Record<string, number>>(() => getLocalCounts());
   const [collapsed, setCollapsed] = useState(settings?.appearance.sidebarCollapsed ?? false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isArabic = settings?.appearance.language === 'ar';
-
-  useEffect(() => {
-    const refreshCounts = () => setCounts(getLocalCounts());
-    refreshCounts();
-    window.addEventListener('storage', refreshCounts);
-    window.addEventListener('workspace-import-progress', refreshCounts);
-    return () => {
-      window.removeEventListener('storage', refreshCounts);
-      window.removeEventListener('workspace-import-progress', refreshCounts);
-    };
-  }, [location.pathname]);
 
   const currentUserAccount = useMemo(
     () =>
@@ -228,7 +176,6 @@ const AppSidebar = () => {
               {!collapsed && <p className="px-2 pb-2 pt-1 text-[11px] font-black uppercase tracking-[0.2em] text-sidebar-foreground/45">{section.title}</p>}
               {section.items.map((item) => {
                 const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
-                const count = item.countKey ? counts[item.countKey] : undefined;
                 return (
                   <Link
                     key={item.path}
@@ -247,16 +194,7 @@ const AppSidebar = () => {
                     <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors ${isActive ? 'bg-primary/15 text-primary' : item.important ? 'bg-primary/10 text-primary' : 'bg-sidebar-foreground/5 text-sidebar-foreground/70 group-hover:bg-sidebar-foreground/10'}`}>
                       <item.icon className="h-4 w-4" />
                     </span>
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1 truncate tracking-tight">{item.label}</span>
-                        {count !== undefined && (
-                          <span className={`ml-auto flex h-6 min-w-[28px] items-center justify-center rounded-full px-2 text-[11px] font-black ${item.important ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/30' : 'bg-primary/15 text-primary'}`}>
-                            {count > 99 ? '99+' : count}
-                          </span>
-                        )}
-                      </>
-                    )}
+                    {!collapsed && <span className="flex-1 truncate tracking-tight">{item.label}</span>}
                   </Link>
                 );
               })}
