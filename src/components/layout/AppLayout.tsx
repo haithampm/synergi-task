@@ -14,8 +14,69 @@ interface AppLayoutProps {
 const importActionPattern = /\b(import|upload|parse|load|sync)\b/i;
 const legacyAdminMailbox = 'Admin mailbox: admin@company.com';
 const currentAdminMailbox = 'Admin mailbox: haitham.pm@gmail.com';
+const workspaceStorageKey = 'synergi-workspace-data';
+const fullAdminPermissions = [
+  'view_dashboard',
+  'view_reports',
+  'manage_projects',
+  'manage_schedule',
+  'manage_tasks',
+  'manage_documents',
+  'manage_resources',
+  'manage_team',
+  'manage_users',
+  'team_chat',
+  'moderate_channels',
+  'share',
+  'manage_workflows',
+  'manage_privileges',
+  'manage_integrations',
+  'export',
+];
+
+const normalizeAdminRolesInStorage = () => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const raw = window.localStorage.getItem(workspaceStorageKey);
+    if (!raw) return;
+
+    const data = JSON.parse(raw) as {
+      settings?: {
+        privilegeRoles?: Array<{ id: string; name: string; permissions: string[] }>;
+        profile?: { email?: string };
+      };
+    };
+    if (!data.settings) return;
+
+    const roles = Array.isArray(data.settings.privilegeRoles) ? data.settings.privilegeRoles : [];
+    const roleMap = new Map(roles.map((role) => [role.id, role]));
+
+    roleMap.set('admin', {
+      id: 'admin',
+      name: 'Admin',
+      permissions: Array.from(new Set([...(roleMap.get('admin')?.permissions ?? []), ...fullAdminPermissions])),
+    });
+
+    roleMap.set('super_admin', {
+      id: 'super_admin',
+      name: 'Super Admin',
+      permissions: Array.from(new Set([...(roleMap.get('super_admin')?.permissions ?? []), ...fullAdminPermissions])),
+    });
+
+    data.settings.privilegeRoles = Array.from(roleMap.values());
+    data.settings.profile = {
+      ...(data.settings.profile ?? {}),
+      email: data.settings.profile?.email === 'admin@company.com' ? 'haitham.pm@gmail.com' : data.settings.profile?.email,
+    };
+    window.localStorage.setItem(workspaceStorageKey, JSON.stringify(data));
+  } catch (error) {
+    console.warn('Could not normalize admin roles in workspace settings', error);
+  }
+};
 
 const AppLayout = ({ children }: AppLayoutProps) => {
+  normalizeAdminRolesInStorage();
   const { data: settings } = useWorkspaceSettings();
   const isArabic = settings?.appearance.language === 'ar';
   const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
