@@ -12,6 +12,8 @@ interface AppLayoutProps {
 }
 
 const importActionPattern = /\b(import|upload|parse|load|sync)\b/i;
+const legacyAdminMailbox = 'Admin mailbox: admin@company.com';
+const currentAdminMailbox = 'Admin mailbox: haitham.pm@gmail.com';
 
 const AppLayout = ({ children }: AppLayoutProps) => {
   const { data: settings } = useWorkspaceSettings();
@@ -29,6 +31,27 @@ const AppLayout = ({ children }: AppLayoutProps) => {
     document.documentElement.lang = isArabic ? 'ar' : 'en';
     document.documentElement.dir = isArabic ? 'rtl' : 'ltr';
   }, [isArabic]);
+
+  useEffect(() => {
+    if (location.pathname !== '/settings') return undefined;
+
+    const replaceLegacyAdminMailbox = () => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if (node.textContent?.includes(legacyAdminMailbox)) {
+          node.textContent = node.textContent.replace(legacyAdminMailbox, currentAdminMailbox);
+        }
+        node = walker.nextNode();
+      }
+    };
+
+    replaceLegacyAdminMailbox();
+    const observer = new MutationObserver(replaceLegacyAdminMailbox);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    return () => observer.disconnect();
+  }, [location.pathname]);
 
   useEffect(() => {
     const clearTimers = () => {
