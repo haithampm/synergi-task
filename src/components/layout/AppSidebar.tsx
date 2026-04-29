@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X
+  LogOut, FileUp, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -43,6 +43,7 @@ const navSections = [
     items: [
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations' },
       { icon: FileUp, label: 'Import/Export', path: '/import-export', permission: 'export' },
+      { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true },
       { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges' },
     ],
   },
