@@ -38,6 +38,36 @@ const fullAdminPermissions = [
 const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 const isKnownAdminEmail = (email?: string | null) => adminEmails.includes(normalizeEmail(email));
 
+const readWorkspaceStorage = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(workspaceStorageKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const isAdminSessionFromStorage = () => {
+  const data = readWorkspaceStorage() as {
+    settings?: { profile?: { email?: string }; currentUser?: { roleId?: string } };
+    userAccounts?: Array<{ email?: string; roleId?: string; status?: string }>;
+  } | null;
+  if (!data) return false;
+
+  const profileEmail = normalizeEmail(data.settings?.profile?.email);
+  const currentRole = normalizeEmail(data.settings?.currentUser?.roleId);
+  const hasKnownAdminAccount = data.userAccounts?.some(
+    (account) => isKnownAdminEmail(account.email) && account.status !== 'suspended',
+  );
+
+  return (
+    isKnownAdminEmail(profileEmail) ||
+    hasKnownAdminAccount ||
+    ['admin', 'super_admin', 'organization_admin', 'project_admin'].includes(currentRole)
+  );
+};
+
 const normalizeAdminRolesInStorage = () => {
   if (typeof window === 'undefined') return;
 
@@ -107,14 +137,10 @@ const normalizeAdminRolesInStorage = () => {
 };
 
 const unlockKnownAdminSettingsControls = () => {
-  if (typeof document === 'undefined') return;
-
-  const bodyText = document.body.innerText.toLowerCase();
-  const isAdminSession = adminEmails.some((email) => bodyText.includes(email));
-  if (!isAdminSession) return;
+  if (typeof document === 'undefined' || !isAdminSessionFromStorage()) return;
 
   const actionLabels = ['add user', 'edit', 'invite', 'reset password', 'notify', 'grant admin', 'set viewer', 'suspend', 'activate'];
-  document.querySelectorAll('button').forEach((button) => {
+  document.querySelectorAll('button[disabled], button[aria-disabled="true"]').forEach((button) => {
     const label = button.textContent?.trim().toLowerCase() ?? '';
     if (actionLabels.some((actionLabel) => label.includes(actionLabel))) {
       button.removeAttribute('disabled');
@@ -122,18 +148,9 @@ const unlockKnownAdminSettingsControls = () => {
       button.classList.remove('disabled:pointer-events-none', 'disabled:opacity-50');
     }
   });
-
-  document.querySelectorAll('[data-disabled="true"], [aria-disabled="true"]').forEach((element) => {
-    const text = element.textContent?.trim().toLowerCase() ?? '';
-    if (actionLabels.some((actionLabel) => text.includes(actionLabel))) {
-      element.removeAttribute('data-disabled');
-      element.removeAttribute('aria-disabled');
-    }
-  });
 };
 
 const AppLayout = ({ children }: AppLayoutProps) => {
-  normalizeAdminRolesInStorage();
   const { data: settings } = useWorkspaceSettings();
   const isArabic = settings?.appearance.language === 'ar';
   const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
@@ -146,6 +163,10 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   const hideTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   useEffect(() => {
+    normalizeAdminRolesInStorage();
+  }, []);
+
+  useEffect(() => {
     document.documentElement.lang = isArabic ? 'ar' : 'en';
     document.documentElement.dir = isArabic ? 'rtl' : 'ltr';
   }, [isArabic]);
@@ -153,23 +174,30 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   useEffect(() => {
     if (location.pathname !== '/settings') return undefined;
 
+    let frameId = 0;
     const patchSettingsPage = () => {
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node) {
-        if (node.textContent?.includes(legacyAdminMailbox)) {
-          node.textContent = node.textContent.replace(legacyAdminMailbox, currentAdminMailbox);
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          if (node.textContent?.includes(legacyAdminMailbox)) {
+            node.textContent = node.textContent.replace(legacyAdminMailbox, currentAdminMailbox);
+          }
+          node = walker.nextNode();
         }
-        node = walker.nextNode();
-      }
-      unlockKnownAdminSettingsControls();
+        unlockKnownAdminSettingsControls();
+      });
     };
 
     patchSettingsPage();
     const observer = new MutationObserver(patchSettingsPage);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-    return () => observer.disconnect();
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
   }, [location.pathname]);
 
   useEffect(() => {
@@ -294,39 +322,19 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-3 sm:left-4 md:left-8' : 'right-3 sm:right-4 md:right-8'}`}>
         <div className="flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl sm:max-w-[calc(100vw-2rem)] md:max-w-none">
           <WorkspaceAssistant isArabic={isArabic} />
-          <Button
-            size="sm"
-            variant={location.pathname === '/schedule' ? 'default' : 'outline'}
-            className="gap-2"
-            onClick={() => navigate('/schedule')}
-          >
+          <Button size="sm" variant={location.pathname === '/schedule' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/schedule')}>
             <GanttChart className="h-4 w-4" />
             <span className="hidden sm:inline">Schedule</span>
           </Button>
-          <Button
-            size="sm"
-            variant={location.pathname === '/sticky-notes' ? 'default' : 'outline'}
-            className="gap-2"
-            onClick={() => navigate('/sticky-notes')}
-          >
+          <Button size="sm" variant={location.pathname === '/sticky-notes' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/sticky-notes')}>
             <StickyNote className="h-4 w-4" />
             <span className="hidden sm:inline">Sticky Notes</span>
           </Button>
-          <Button
-            size="sm"
-            variant={location.pathname === '/tasks' ? 'default' : 'outline'}
-            className="gap-2"
-            onClick={() => navigate('/tasks')}
-          >
+          <Button size="sm" variant={location.pathname === '/tasks' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/tasks')}>
             <CheckSquare className="h-4 w-4" />
             <span className="hidden sm:inline">To Do</span>
           </Button>
-          <Button
-            size="sm"
-            variant={location.pathname === '/team-chat' ? 'default' : 'outline'}
-            className="gap-2"
-            onClick={() => navigate('/team-chat')}
-          >
+          <Button size="sm" variant={location.pathname === '/team-chat' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/team-chat')}>
             <MessageSquare className="h-4 w-4" />
             <span className="hidden sm:inline">Team Chat</span>
           </Button>
