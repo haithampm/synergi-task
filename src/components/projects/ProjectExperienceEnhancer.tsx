@@ -16,7 +16,9 @@ const readCachedProjects = (): CachedProject[] => {
     const raw = window.localStorage.getItem(workspaceStorageKey);
     if (!raw) return [];
     const data = JSON.parse(raw) as { projects?: CachedProject[] };
-    return Array.isArray(data.projects) ? data.projects.filter((project) => project?.id && project?.name) : [];
+    return Array.isArray(data.projects)
+      ? data.projects.filter((project) => project?.id && project?.name && project.status !== "archived")
+      : [];
   } catch {
     return [];
   }
@@ -27,8 +29,10 @@ const normalize = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 const replaceTextNodes = (root: HTMLElement) => {
   const replacements: Record<string, string> = {
     "New Project": "Create Project",
-    "Registry": "Function",
-    "Project Registry": "Project Function",
+    "Project Function": "Projects",
+    "Function": "Projects",
+    "Registry": "Projects",
+    "Project Registry": "Projects",
     "Delete Project": "Archive / Delete Project",
     "Project archived.": "Project archived.",
   };
@@ -55,23 +59,37 @@ const getLifecycleRows = () => {
   });
 };
 
-const addLifecycleFilters = (projects: CachedProject[]) => {
-  if (document.getElementById("project-lifecycle-filter-panel")) return;
+const hideArchivedProjectRows = () => {
+  const rows = Array.from(document.querySelectorAll("tr, [role='row'], .rounded-2xl, .rounded-3xl")) as HTMLElement[];
+  rows.forEach((row) => {
+    const text = normalize(row.innerText);
+    if (text.includes("archived") && !row.closest("[data-allow-archived='true']")) {
+      row.style.display = "none";
+    }
+  });
+};
 
+const addLifecycleFilters = (projects: CachedProject[]) => {
   const headings = Array.from(document.querySelectorAll("h1,h2,h3,p,div,span")) as HTMLElement[];
   const heading = headings.find((element) => normalize(element.textContent).includes("implementation lifecycle matrix"));
   if (!heading) return;
+
+  const existingPanel = document.getElementById("project-lifecycle-filter-panel");
+  if (existingPanel) return;
 
   const departments = Array.from(new Set(projects.map((project) => project.department).filter(Boolean))) as string[];
   const statuses = Array.from(new Set(projects.map((project) => project.status).filter(Boolean))) as string[];
 
   const panel = document.createElement("div");
   panel.id = "project-lifecycle-filter-panel";
-  panel.className = "my-3 grid gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-sm md:grid-cols-4";
+  panel.className = "my-3 grid gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-sm md:grid-cols-5";
   panel.innerHTML = `
+    <label class="space-y-1 font-semibold md:col-span-2">Search matrix
+      <input data-matrix-search placeholder="Search project, leader, stage..." class="w-full rounded-xl border bg-background px-3 py-2 text-sm font-medium" />
+    </label>
     <label class="space-y-1 font-semibold">Project
       <select data-project-filter class="w-full rounded-xl border bg-background px-3 py-2 text-sm font-medium">
-        <option value="all">All projects</option>
+        <option value="all">All active projects</option>
         ${projects.map((project) => `<option value="${project.id}">${project.name}</option>`).join("")}
       </select>
     </label>
@@ -87,13 +105,14 @@ const addLifecycleFilters = (projects: CachedProject[]) => {
         ${departments.map((department) => `<option value="${department}">${department}</option>`).join("")}
       </select>
     </label>
-    <button type="button" data-clear-lifecycle-filter class="self-end rounded-xl border bg-background px-3 py-2 text-sm font-bold hover:bg-primary/10">Clear filters</button>
+    <button type="button" data-clear-lifecycle-filter class="rounded-xl border bg-background px-3 py-2 text-sm font-bold hover:bg-primary/10 md:col-start-5">Clear filters</button>
   `;
 
   const container = heading.closest("div") ?? heading;
   container.insertAdjacentElement("afterend", panel);
 
   const applyFilters = () => {
+    const search = normalize((panel.querySelector("[data-matrix-search]") as HTMLInputElement | null)?.value ?? "");
     const projectId = (panel.querySelector("[data-project-filter]") as HTMLSelectElement | null)?.value ?? "all";
     const status = (panel.querySelector("[data-status-filter]") as HTMLSelectElement | null)?.value ?? "all";
     const department = (panel.querySelector("[data-department-filter]") as HTMLSelectElement | null)?.value ?? "all";
@@ -101,22 +120,29 @@ const addLifecycleFilters = (projects: CachedProject[]) => {
 
     getLifecycleRows().forEach((row) => {
       const text = normalize(row.innerText);
+      const isArchived = text.includes("archived");
+      const matchesSearch = !search || text.includes(search);
       const matchesProject = projectId === "all" || text.includes(normalize(selectedProject?.name));
       const matchesStatus = status === "all" || text.includes(normalize(status));
       const matchesDepartment = department === "all" || text.includes(normalize(department));
-      row.style.display = matchesProject && matchesStatus && matchesDepartment ? "" : "none";
+      row.style.display = !isArchived && matchesSearch && matchesProject && matchesStatus && matchesDepartment ? "" : "none";
     });
   };
 
   panel.addEventListener("change", applyFilters);
+  panel.addEventListener("input", applyFilters);
   panel.querySelector("[data-clear-lifecycle-filter]")?.addEventListener("click", () => {
     panel.querySelectorAll("select").forEach((select) => {
       (select as HTMLSelectElement).value = "all";
     });
+    const searchInput = panel.querySelector("[data-matrix-search]") as HTMLInputElement | null;
+    if (searchInput) searchInput.value = "";
     getLifecycleRows().forEach((row) => {
-      row.style.display = "";
+      row.style.display = normalize(row.innerText).includes("archived") ? "none" : "";
     });
   });
+
+  applyFilters();
 };
 
 const markProjectNamesClickable = (projects: CachedProject[], navigate: ReturnType<typeof useNavigate>) => {
@@ -181,6 +207,7 @@ const ProjectExperienceEnhancer = () => {
       frame = window.requestAnimationFrame(() => {
         const projects = readCachedProjects();
         replaceTextNodes(document.body);
+        hideArchivedProjectRows();
         addLifecycleFilters(projects);
         markProjectNamesClickable(projects, navigate);
         enhanceDeleteLabels();
