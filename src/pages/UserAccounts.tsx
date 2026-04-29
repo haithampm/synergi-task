@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { useQueryClient } from "@tanstack/react-query";
 import { workspaceKeys, useUserAccounts, useUpdateUserAccount, useDeleteUserAccount, useWorkspaceSettings } from "@/hooks/useProjects";
+import { syncWorkspaceUserAccount } from "@/integrations/supabase/workspace-data";
 import { toast } from "sonner";
 import { makeId, readWorkspaceData, updateWorkspaceData, WorkspaceUserAccount } from "@/lib/workspace-store";
 
@@ -153,13 +154,14 @@ const UserAccounts = () => {
       };
 
       saveLocalUserAccount(account);
+      await syncWorkspaceUserAccount(account);
 
       if (existing?.id) {
         await updateAccount.mutateAsync(account);
       }
 
       await refreshUsers();
-      toast.success(existing?.id ? "User account updated" : "User account created");
+      toast.success(existing?.id ? "User account updated locally and on server" : "User account created locally and queued to server");
       setIsSheetOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save user account");
