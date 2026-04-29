@@ -44,6 +44,7 @@ const normalizeAdminRolesInStorage = () => {
     const data = JSON.parse(raw) as {
       settings?: {
         privilegeRoles?: Array<{ id: string; name: string; permissions: string[] }>;
+        currentUser?: { roleId?: string };
         profile?: { email?: string };
       };
     };
@@ -65,6 +66,10 @@ const normalizeAdminRolesInStorage = () => {
     });
 
     data.settings.privilegeRoles = Array.from(roleMap.values());
+    data.settings.currentUser = {
+      ...(data.settings.currentUser ?? {}),
+      roleId: data.settings.currentUser?.roleId || 'admin',
+    };
     data.settings.profile = {
       ...(data.settings.profile ?? {}),
       email: data.settings.profile?.email === 'admin@company.com' ? 'haitham.pm@gmail.com' : data.settings.profile?.email,
@@ -175,7 +180,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       }
       if (!fileProgressVisible) startProgress(detail?.label ?? 'Import in progress...');
       if (typeof detail?.progress === 'number') {
-        setFileProgress(Math.max(0, Math.min(100, detail.progress)));
+        setFileProgress(Math.max(0, Math.min(100, detail.progress));
       }
       if (detail?.label) setFileProgressLabel(detail.label);
     };
@@ -193,7 +198,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   }, [fileProgressVisible]);
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen w-full overflow-x-hidden bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_42%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.45))]" />
       {fileProgressVisible && (
         <div className={`fixed top-3 z-[70] w-[calc(100vw-1.5rem)] max-w-md ${isArabic ? 'left-3 sm:left-5' : 'right-3 sm:right-5'}`}>
@@ -216,7 +221,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       )}
       <AppSidebar />
       <main
-        className={`min-w-0 pb-28 transition-all duration-300 ${
+        className={`min-w-0 w-full pb-28 transition-all duration-300 ${
           isArabic
             ? sidebarCollapsed
               ? 'lg:pr-[68px]'
@@ -226,7 +231,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
               : 'lg:pl-72'
         }`}
       >
-        <div className="min-w-0 overflow-x-hidden">
+        <div className="mx-auto min-w-0 w-full max-w-[1800px] overflow-x-hidden">
           {children}
         </div>
         <div className="px-4 pb-6 pt-2 text-center text-xs text-muted-foreground sm:px-6">
