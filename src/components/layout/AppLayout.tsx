@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from 'react';
-import { CheckSquare, MessageSquare, StickyNote } from 'lucide-react';
+import { CheckSquare, GanttChart, MessageSquare, StickyNote } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
 import WorkspaceAssistant from '@/components/WorkspaceAssistant';
@@ -23,28 +23,39 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   }, [isArabic]);
 
   return (
-    <div className="min-h-screen bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen overflow-x-hidden bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_42%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.45))]" />
       <AppSidebar />
       <main
-        className={`pb-24 transition-all duration-300 ${
+        className={`min-w-0 pb-28 transition-all duration-300 ${
           isArabic
             ? sidebarCollapsed
               ? 'lg:pr-[68px]'
-              : 'lg:pr-[240px]'
+              : 'lg:pr-72'
             : sidebarCollapsed
               ? 'lg:pl-[68px]'
-              : 'lg:pl-[240px]'
+              : 'lg:pl-72'
         }`}
       >
-        {children}
-        <div className="px-6 pb-6 pt-2 text-center text-xs text-muted-foreground">
+        <div className="min-w-0 overflow-x-hidden">
+          {children}
+        </div>
+        <div className="px-4 pb-6 pt-2 text-center text-xs text-muted-foreground sm:px-6">
           {`© ${new Date().getFullYear()} ${settings?.branding.appName ?? 'Synergi PM Workspace'} by Haitham Elmohamady`}
         </div>
       </main>
-      <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-4 md:left-8' : 'right-4 md:right-8'}`}>
-        <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl md:max-w-none">
+      <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-3 sm:left-4 md:left-8' : 'right-3 sm:right-4 md:right-8'}`}>
+        <div className="flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl sm:max-w-[calc(100vw-2rem)] md:max-w-none">
           <WorkspaceAssistant isArabic={isArabic} />
+          <Button
+            size="sm"
+            variant={location.pathname === '/schedule' ? 'default' : 'outline'}
+            className="gap-2"
+            onClick={() => navigate('/schedule')}
+          >
+            <GanttChart className="h-4 w-4" />
+            <span className="hidden sm:inline">Schedule</span>
+          </Button>
           <Button
             size="sm"
             variant={location.pathname === '/sticky-notes' ? 'default' : 'outline'}
