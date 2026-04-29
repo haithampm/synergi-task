@@ -180,7 +180,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       }
       if (!fileProgressVisible) startProgress(detail?.label ?? 'Import in progress...');
       if (typeof detail?.progress === 'number') {
-        setFileProgress(Math.max(0, Math.min(100, detail.progress));
+        setFileProgress(Math.max(0, Math.min(100, detail.progress)));
       }
       if (detail?.label) setFileProgressLabel(detail.label);
     };
