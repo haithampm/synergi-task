@@ -1,18 +1,20 @@
 import { useMemo, useState } from "react";
-import { CheckSquare, Plus, StickyNote, Trash2 } from "lucide-react";
+import { CheckSquare, Pin, Plus, StickyNote, Trash2 } from "lucide-react";
 import AppLayout from "@/components/layout/AppLayout";
 import AppHeader from "@/components/layout/AppHeader";
 import PageSection from "@/components/layout/PageSection";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateStickyNote, useDeleteStickyNote, useStickyNotes, useUpdateStickyNote, useWorkspaceSettings } from "@/hooks/useProjects";
+import { useQueryClient } from "@tanstack/react-query";
+import { workspaceKeys, useCreateStickyNote, useDeleteStickyNote, useStickyNotes, useUpdateStickyNote, useWorkspaceSettings } from "@/hooks/useProjects";
+import { makeId, updateWorkspaceData, type WorkspaceStickyNote } from "@/lib/workspace-store";
 import { toast } from "sonner";
 
-const normalizeOwner = (value?: string | null) => value?.trim().toLowerCase() ?? "";
-
 const StickyNotesPage = () => {
+  const queryClient = useQueryClient();
   const { data: settings } = useWorkspaceSettings();
   const { data: stickyNotes = [] } = useStickyNotes();
   const createStickyNote = useCreateStickyNote();
@@ -20,96 +22,150 @@ const StickyNotesPage = () => {
   const deleteStickyNote = useDeleteStickyNote();
   const [stickyTitle, setStickyTitle] = useState("");
   const [stickyContent, setStickyContent] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const userStickyNotes = useMemo(() => {
-    const currentUserAccountId = settings?.currentUser.userAccountId;
-    const currentTeamMemberId = settings?.currentUser.teamMemberId;
-    const currentDisplayName = normalizeOwner(settings?.currentUser.displayName);
-    const currentProfileEmail = normalizeOwner(settings?.profile.email);
+  const sortedStickyNotes = useMemo(
+    () => [...stickyNotes].sort((a, b) => Number(b.done) - Number(a.done) || new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()),
+    [stickyNotes],
+  );
 
-    return [...stickyNotes]
-      .filter((note) => {
-        const hasOwner = Boolean(note.ownerUserAccountId || note.ownerTeamMemberId || note.ownerName);
-        if (!hasOwner) return true;
-        if (currentUserAccountId && note.ownerUserAccountId === currentUserAccountId) return true;
-        if (currentTeamMemberId && note.ownerTeamMemberId === currentTeamMemberId) return true;
-        const noteOwnerName = normalizeOwner(note.ownerName);
-        return Boolean(noteOwnerName && (noteOwnerName === currentDisplayName || noteOwnerName === currentProfileEmail));
-      })
-      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
-  }, [settings, stickyNotes]);
+  const openNotes = sortedStickyNotes.filter((note) => !note.done).length;
+  const doneNotes = sortedStickyNotes.filter((note) => note.done).length;
+
+  const saveLocalStickyNote = (note: WorkspaceStickyNote) => {
+    updateWorkspaceData((current) => ({
+      ...current,
+      stickyNotes: [note, ...current.stickyNotes.filter((item) => item.id !== note.id)],
+      auditLogs: [
+        {
+          id: makeId("audit"),
+          action: "Sticky note created",
+          entityType: "sticky-note",
+          entityId: note.id,
+          actorName: current.settings.currentUser.displayName || current.settings.profile.email || "Workspace User",
+          detail: `${note.title} was added to Sticky Notes.`,
+          createdAt: new Date().toISOString(),
+        },
+        ...current.auditLogs,
+      ].slice(0, 300),
+    }));
+  };
 
   const addStickyNote = async () => {
     if (!stickyTitle.trim() && !stickyContent.trim()) return;
+    setSaving(true);
+    const note: WorkspaceStickyNote = {
+      id: makeId("note"),
+      ownerUserAccountId: settings?.currentUser.userAccountId || undefined,
+      ownerTeamMemberId: settings?.currentUser.teamMemberId || undefined,
+      ownerName: settings?.currentUser.displayName || settings?.profile.email || "Workspace User",
+      title: stickyTitle.trim() || "Quick note",
+      content: stickyContent.trim() || "New reminder",
+      color: "amber",
+      done: false,
+      createdAt: new Date().toISOString(),
+    };
+
     try {
-      await createStickyNote.mutateAsync({
-        ownerUserAccountId: settings?.currentUser.userAccountId,
-        ownerTeamMemberId: settings?.currentUser.teamMemberId,
-        ownerName: settings?.currentUser.displayName || settings?.profile.email || "Workspace User",
-        title: stickyTitle.trim() || "Quick note",
-        content: stickyContent.trim() || "New reminder",
-        color: "amber",
-        done: false,
-      });
+      saveLocalStickyNote(note);
+      await queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes });
       setStickyTitle("");
       setStickyContent("");
       toast.success("Sticky note added");
+      try {
+        await createStickyNote.mutateAsync(note);
+      } catch (remoteError) {
+        console.warn("Sticky note saved locally but server sync failed", remoteError);
+        toast.warning("Sticky note saved locally. Server sync will need Supabase access/policy review.");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add sticky note");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleDone = async (note: WorkspaceStickyNote) => {
+    updateWorkspaceData((current) => ({
+      ...current,
+      stickyNotes: current.stickyNotes.map((item) => item.id === note.id ? { ...item, done: !note.done } : item),
+    }));
+    await queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes });
+    try {
+      await updateStickyNote.mutateAsync({ id: note.id, done: !note.done });
+    } catch (error) {
+      toast.warning("Updated locally. Server sync could not complete.");
+    }
+  };
+
+  const removeNote = async (note: WorkspaceStickyNote) => {
+    updateWorkspaceData((current) => ({
+      ...current,
+      stickyNotes: current.stickyNotes.filter((item) => item.id !== note.id),
+    }));
+    await queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes });
+    try {
+      await deleteStickyNote.mutateAsync(note.id);
+    } catch (error) {
+      toast.warning("Removed locally. Server sync could not complete.");
     }
   };
 
   return (
     <AppLayout>
-      <AppHeader title="Sticky Notes" subtitle="Personal reminders and quick notes in one dedicated workspace page." />
+      <AppHeader title="Sticky Notes" subtitle="Notion-style quick notes, reminders, and pinned actions." />
       <div className="space-y-6 p-4 animate-fade-in sm:p-6">
         <PageSection
-          title="My Sticky Notes"
-          description="Create, complete, and manage your personal notes here. Notes without an owner are shown here so saved notes never disappear after sync."
+          title="Sticky Notes Board"
+          description="Create, complete, and manage quick notes. Notes are saved locally first so they do not disappear if server sync is delayed."
         />
 
-        <Card className="glass">
+        <div className="grid gap-3 md:grid-cols-3">
+          <Card className="glass"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Notes</p><p className="mt-2 text-2xl font-black">{stickyNotes.length}</p></CardContent></Card>
+          <Card className="glass"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Open</p><p className="mt-2 text-2xl font-black">{openNotes}</p></CardContent></Card>
+          <Card className="glass"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Done</p><p className="mt-2 text-2xl font-black">{doneNotes}</p></CardContent></Card>
+        </div>
+
+        <Card className="glass border-primary/20">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base"><StickyNote className="h-4 w-4" /> New Sticky Note</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base"><StickyNote className="h-4 w-4 text-primary" /> Quick Add</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <Input value={stickyTitle} onChange={(event) => setStickyTitle(event.target.value)} placeholder="Title" />
             <Textarea value={stickyContent} onChange={(event) => setStickyContent(event.target.value)} placeholder="Reminder, action, or quick note" className="min-h-[110px]" />
-            <Button className="gap-2" onClick={addStickyNote} disabled={createStickyNote.isPending || (!stickyTitle.trim() && !stickyContent.trim())}>
-              <Plus className="h-4 w-4" /> {createStickyNote.isPending ? "Adding..." : "Add Sticky Note"}
+            <Button className="gap-2" onClick={addStickyNote} disabled={saving || createStickyNote.isPending || (!stickyTitle.trim() && !stickyContent.trim())}>
+              <Plus className="h-4 w-4" /> {saving || createStickyNote.isPending ? "Adding..." : "Add Sticky Note"}
             </Button>
           </CardContent>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {userStickyNotes.length === 0 ? (
+          {sortedStickyNotes.length === 0 ? (
             <Card className="glass md:col-span-2 xl:col-span-3">
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
                 No sticky notes yet. Add your first note above.
               </CardContent>
             </Card>
           ) : (
-            userStickyNotes.map((note) => (
-              <Card key={note.id} className="glass">
+            sortedStickyNotes.map((note) => (
+              <Card key={note.id} className="glass border-amber-200/30 bg-gradient-to-br from-amber-50/40 to-background dark:from-amber-950/10">
                 <CardContent className="space-y-4 p-5">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className={`font-medium ${note.done ? "line-through text-muted-foreground" : ""}`}>{note.title}</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{note.content}</p>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Pin className="h-3.5 w-3.5 text-amber-500" />
+                        <p className={`font-semibold ${note.done ? "line-through text-muted-foreground" : ""}`}>{note.title}</p>
+                        {note.done ? <Badge variant="secondary">Done</Badge> : <Badge>Open</Badge>}
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">{note.content}</p>
                     </div>
-                    <span className="text-[10px] text-muted-foreground">{note.createdAt ? new Date(note.createdAt).toLocaleDateString() : "Today"}</span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">{note.createdAt ? new Date(note.createdAt).toLocaleDateString() : "Today"}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant={note.done ? "outline" : "default"}
-                      className="gap-2"
-                      onClick={() => void updateStickyNote.mutateAsync({ id: note.id, done: !note.done })}
-                    >
-                      <CheckSquare className="h-4 w-4" />
-                      {note.done ? "Reopen" : "Done"}
+                    <Button size="sm" variant={note.done ? "outline" : "default"} className="gap-2" onClick={() => void toggleDone(note)}>
+                      <CheckSquare className="h-4 w-4" /> {note.done ? "Reopen" : "Done"}
                     </Button>
-                    <Button size="sm" variant="ghost" className="gap-2" onClick={() => void deleteStickyNote.mutateAsync(note.id)}>
+                    <Button size="sm" variant="ghost" className="gap-2" onClick={() => void removeNote(note)}>
                       <Trash2 className="h-4 w-4 text-rose-500" /> Remove
                     </Button>
                   </div>
