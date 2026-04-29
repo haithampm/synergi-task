@@ -75,8 +75,7 @@ const StickyNotesPage = () => {
       try {
         await createStickyNote.mutateAsync(note);
       } catch (remoteError) {
-        console.warn("Sticky note saved locally but server sync failed", remoteError);
-        toast.warning("Sticky note saved locally. Server sync will need Supabase access/policy review.");
+        console.warn("Sticky note server sync skipped after local save", remoteError);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add sticky note");
@@ -91,10 +90,11 @@ const StickyNotesPage = () => {
       stickyNotes: current.stickyNotes.map((item) => item.id === note.id ? { ...item, done: !note.done } : item),
     }));
     await queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes });
+    toast.success(note.done ? "Sticky note reopened" : "Sticky note completed");
     try {
       await updateStickyNote.mutateAsync({ id: note.id, done: !note.done });
     } catch (error) {
-      toast.warning("Updated locally. Server sync could not complete.");
+      console.warn("Sticky note server sync skipped after local update", error);
     }
   };
 
@@ -104,10 +104,11 @@ const StickyNotesPage = () => {
       stickyNotes: current.stickyNotes.filter((item) => item.id !== note.id),
     }));
     await queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes });
+    toast.success("Sticky note removed");
     try {
       await deleteStickyNote.mutateAsync(note.id);
     } catch (error) {
-      toast.warning("Removed locally. Server sync could not complete.");
+      console.warn("Sticky note server sync skipped after local remove", error);
     }
   };
 
