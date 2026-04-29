@@ -6,7 +6,6 @@ type CachedProject = {
   name: string;
   status?: string;
   department?: string;
-  tags?: string[];
 };
 
 const workspaceStorageKey = "synergi-workspace-data";
@@ -26,56 +25,35 @@ const readCachedProjects = (): CachedProject[] => {
 
 const normalize = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 
-const replaceTextNodes = (root: HTMLElement) => {
-  const replacements: Record<string, string> = {
-    "New Project": "Create Project",
-    "Project Function": "Projects",
-    "Function": "Projects",
-    "Registry": "Projects",
-    "Project Registry": "Projects",
-    "Delete Project": "Archive / Delete Project",
-    "Project archived.": "Project archived.",
-  };
-
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  while (node) {
-    if (node.textContent) {
-      Object.entries(replacements).forEach(([from, to]) => {
-        if (node.textContent?.includes(from)) {
-          node.textContent = node.textContent.replaceAll(from, to);
-        }
-      });
-    }
-    node = walker.nextNode();
-  }
-};
-
-const getLifecycleRows = () => {
-  const candidates = Array.from(document.querySelectorAll("tr, [role='row'], .grid > div, .rounded-2xl, .rounded-3xl")) as HTMLElement[];
-  return candidates.filter((element) => {
-    const text = normalize(element.innerText);
-    return text.includes("implementation") || text.includes("planning") || text.includes("closure") || text.includes("activities") || text.includes("leader");
+const replaceVisibleLabels = (root: HTMLElement) => {
+  root.querySelectorAll("button, [role='tab'], h1, h2, h3, p, span").forEach((element) => {
+    const current = element.textContent ?? "";
+    if (current === "New Project") element.textContent = "Create Project";
+    if (["Registry", "Function", "Project Registry", "Project Function"].includes(current)) element.textContent = "Projects";
+    if (current === "Delete Project") element.textContent = "Archive / Delete Project";
   });
 };
 
+const findLifecycleHeading = () => {
+  const headings = Array.from(document.querySelectorAll("h1,h2,h3,p,span")) as HTMLElement[];
+  return headings.find((element) => normalize(element.textContent).includes("implementation lifecycle matrix"));
+};
+
+const getLifecycleRows = () => {
+  const heading = findLifecycleHeading();
+  const section = heading?.closest("section, .space-y-4, .space-y-6, .rounded-2xl, .rounded-3xl") ?? document.body;
+  return Array.from(section.querySelectorAll("tr, [role='row']")) as HTMLElement[];
+};
+
 const hideArchivedProjectRows = () => {
-  const rows = Array.from(document.querySelectorAll("tr, [role='row'], .rounded-2xl, .rounded-3xl")) as HTMLElement[];
-  rows.forEach((row) => {
-    const text = normalize(row.innerText);
-    if (text.includes("archived") && !row.closest("[data-allow-archived='true']")) {
-      row.style.display = "none";
-    }
+  getLifecycleRows().forEach((row) => {
+    row.style.display = normalize(row.innerText).includes("archived") ? "none" : "";
   });
 };
 
 const addLifecycleFilters = (projects: CachedProject[]) => {
-  const headings = Array.from(document.querySelectorAll("h1,h2,h3,p,div,span")) as HTMLElement[];
-  const heading = headings.find((element) => normalize(element.textContent).includes("implementation lifecycle matrix"));
-  if (!heading) return;
-
-  const existingPanel = document.getElementById("project-lifecycle-filter-panel");
-  if (existingPanel) return;
+  const heading = findLifecycleHeading();
+  if (!heading || document.getElementById("project-lifecycle-filter-panel")) return;
 
   const departments = Array.from(new Set(projects.map((project) => project.department).filter(Boolean))) as string[];
   const statuses = Array.from(new Set(projects.map((project) => project.status).filter(Boolean))) as string[];
@@ -108,8 +86,7 @@ const addLifecycleFilters = (projects: CachedProject[]) => {
     <button type="button" data-clear-lifecycle-filter class="rounded-xl border bg-background px-3 py-2 text-sm font-bold hover:bg-primary/10 md:col-start-5">Clear filters</button>
   `;
 
-  const container = heading.closest("div") ?? heading;
-  container.insertAdjacentElement("afterend", panel);
+  (heading.closest("div") ?? heading).insertAdjacentElement("afterend", panel);
 
   const applyFilters = () => {
     const search = normalize((panel.querySelector("[data-matrix-search]") as HTMLInputElement | null)?.value ?? "");
@@ -120,26 +97,24 @@ const addLifecycleFilters = (projects: CachedProject[]) => {
 
     getLifecycleRows().forEach((row) => {
       const text = normalize(row.innerText);
-      const isArchived = text.includes("archived");
-      const matchesSearch = !search || text.includes(search);
-      const matchesProject = projectId === "all" || text.includes(normalize(selectedProject?.name));
-      const matchesStatus = status === "all" || text.includes(normalize(status));
-      const matchesDepartment = department === "all" || text.includes(normalize(department));
-      row.style.display = !isArchived && matchesSearch && matchesProject && matchesStatus && matchesDepartment ? "" : "none";
+      row.style.display =
+        !text.includes("archived") &&
+        (!search || text.includes(search)) &&
+        (projectId === "all" || text.includes(normalize(selectedProject?.name))) &&
+        (status === "all" || text.includes(normalize(status))) &&
+        (department === "all" || text.includes(normalize(department)))
+          ? ""
+          : "none";
     });
   };
 
   panel.addEventListener("change", applyFilters);
   panel.addEventListener("input", applyFilters);
   panel.querySelector("[data-clear-lifecycle-filter]")?.addEventListener("click", () => {
-    panel.querySelectorAll("select").forEach((select) => {
-      (select as HTMLSelectElement).value = "all";
-    });
+    panel.querySelectorAll("select").forEach((select) => ((select as HTMLSelectElement).value = "all"));
     const searchInput = panel.querySelector("[data-matrix-search]") as HTMLInputElement | null;
     if (searchInput) searchInput.value = "";
-    getLifecycleRows().forEach((row) => {
-      row.style.display = normalize(row.innerText).includes("archived") ? "none" : "";
-    });
+    applyFilters();
   });
 
   applyFilters();
@@ -149,10 +124,9 @@ const markProjectNamesClickable = (projects: CachedProject[], navigate: ReturnTy
   const projectByName = new Map(projects.map((project) => [normalize(project.name), project]));
   const nodes = Array.from(document.querySelectorAll("td, th, p, span, h2, h3, button")) as HTMLElement[];
 
-  nodes.forEach((node) => {
+  nodes.slice(0, 400).forEach((node) => {
     if (node.dataset.projectClickable === "true") return;
-    const text = normalize(node.textContent);
-    const project = projectByName.get(text);
+    const project = projectByName.get(normalize(node.textContent));
     if (!project) return;
 
     node.dataset.projectClickable = "true";
@@ -162,36 +136,20 @@ const markProjectNamesClickable = (projects: CachedProject[], navigate: ReturnTy
       event.preventDefault();
       event.stopPropagation();
       navigate(`/projects?projectId=${project.id}`);
-    });
+    }, { once: false });
   });
 };
 
 const enhanceDeleteLabels = () => {
-  const buttons = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
-  buttons.forEach((button) => {
-    const text = normalize(button.textContent);
-    if (button.dataset.projectDeleteEnhanced === "true") return;
+  Array.from(document.querySelectorAll("button")).forEach((button) => {
+    const element = button as HTMLButtonElement;
+    const text = normalize(element.textContent);
+    if (element.dataset.projectDeleteEnhanced === "true") return;
     if (!text.includes("delete") && !text.includes("archive")) return;
 
-    button.dataset.projectDeleteEnhanced = "true";
-    button.title = "Archive keeps the project recoverable. Permanent delete should be used only when you are sure.";
-    if (text.includes("delete") && !text.includes("archive")) {
-      button.appendChild(document.createTextNode(" / Archive"));
-    }
+    element.dataset.projectDeleteEnhanced = "true";
+    element.title = "Archive keeps the project recoverable. Permanent delete should be used only when you are sure.";
   });
-};
-
-const addArchiveDeleteNote = () => {
-  if (document.getElementById("project-delete-policy-note")) return;
-  const destructiveButtons = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
-  const target = destructiveButtons.find((button) => normalize(button.textContent).includes("archive") || normalize(button.textContent).includes("delete"));
-  if (!target) return;
-
-  const note = document.createElement("p");
-  note.id = "project-delete-policy-note";
-  note.className = "mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100";
-  note.textContent = "Deletion policy: use Archive to hide a project safely. Permanent delete should be used only when you want to remove it forever.";
-  target.insertAdjacentElement("afterend", note);
 };
 
 const ProjectExperienceEnhancer = () => {
@@ -201,27 +159,22 @@ const ProjectExperienceEnhancer = () => {
   useEffect(() => {
     if (location.pathname !== "/projects") return undefined;
 
-    let frame = 0;
-    const enhance = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
+    let cancelled = false;
+    const timers = [150, 700, 1600].map((delay) => window.setTimeout(() => {
+      if (cancelled) return;
+      window.requestAnimationFrame(() => {
         const projects = readCachedProjects();
-        replaceTextNodes(document.body);
-        hideArchivedProjectRows();
+        replaceVisibleLabels(document.body);
         addLifecycleFilters(projects);
+        hideArchivedProjectRows();
         markProjectNamesClickable(projects, navigate);
         enhanceDeleteLabels();
-        addArchiveDeleteNote();
       });
-    };
-
-    enhance();
-    const observer = new MutationObserver(enhance);
-    observer.observe(document.body, { childList: true, subtree: true });
+    }, delay));
 
     return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [location.pathname, navigate]);
 
