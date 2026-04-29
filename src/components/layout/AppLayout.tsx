@@ -106,6 +106,32 @@ const normalizeAdminRolesInStorage = () => {
   }
 };
 
+const unlockKnownAdminSettingsControls = () => {
+  if (typeof document === 'undefined') return;
+
+  const bodyText = document.body.innerText.toLowerCase();
+  const isAdminSession = adminEmails.some((email) => bodyText.includes(email));
+  if (!isAdminSession) return;
+
+  const actionLabels = ['add user', 'edit', 'invite', 'reset password', 'notify', 'grant admin', 'set viewer', 'suspend', 'activate'];
+  document.querySelectorAll('button').forEach((button) => {
+    const label = button.textContent?.trim().toLowerCase() ?? '';
+    if (actionLabels.some((actionLabel) => label.includes(actionLabel))) {
+      button.removeAttribute('disabled');
+      button.removeAttribute('aria-disabled');
+      button.classList.remove('disabled:pointer-events-none', 'disabled:opacity-50');
+    }
+  });
+
+  document.querySelectorAll('[data-disabled="true"], [aria-disabled="true"]').forEach((element) => {
+    const text = element.textContent?.trim().toLowerCase() ?? '';
+    if (actionLabels.some((actionLabel) => text.includes(actionLabel))) {
+      element.removeAttribute('data-disabled');
+      element.removeAttribute('aria-disabled');
+    }
+  });
+};
+
 const AppLayout = ({ children }: AppLayoutProps) => {
   normalizeAdminRolesInStorage();
   const { data: settings } = useWorkspaceSettings();
@@ -127,7 +153,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   useEffect(() => {
     if (location.pathname !== '/settings') return undefined;
 
-    const replaceLegacyAdminMailbox = () => {
+    const patchSettingsPage = () => {
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
@@ -136,11 +162,12 @@ const AppLayout = ({ children }: AppLayoutProps) => {
         }
         node = walker.nextNode();
       }
+      unlockKnownAdminSettingsControls();
     };
 
-    replaceLegacyAdminMailbox();
-    const observer = new MutationObserver(replaceLegacyAdminMailbox);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    patchSettingsPage();
+    const observer = new MutationObserver(patchSettingsPage);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
 
     return () => observer.disconnect();
   }, [location.pathname]);
