@@ -59,9 +59,7 @@ const matrixProjects: MatrixProject[] = [
 ];
 
 const normalize = (value: string) => value.trim().toLowerCase();
-
 const getCurrentPath = () => (typeof window === 'undefined' ? '' : window.location.pathname.replace(/\/$/, '') || '/');
-
 const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
 const isProjectStatus = (value: unknown): value is ProjectStatus =>
@@ -107,7 +105,7 @@ const formatDate = (value: string) =>
 
 const ImplementationActivitiesMatrix = () => {
   const [currentPath, setCurrentPath] = useState(getCurrentPath);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState('all');
   const [year, setYear] = useState('all');
@@ -115,7 +113,11 @@ const ImplementationActivitiesMatrix = () => {
   const [statusMap, setStatusMap] = useState<Record<string, ProjectStatus>>(readStatusMap);
 
   useEffect(() => {
-    const updatePath = () => setCurrentPath(getCurrentPath());
+    const updatePath = () => {
+      const nextPath = getCurrentPath();
+      setCurrentPath(nextPath);
+      if (nextPath === importExportPath) setOpen(true);
+    };
     const patchHistory = (method: 'pushState' | 'replaceState') => {
       const original = window.history[method];
       window.history[method] = function patchedHistoryMethod(...args) {
@@ -193,19 +195,21 @@ const ImplementationActivitiesMatrix = () => {
 
   return (
     <>
-      <Button
-        type="button"
-        size="sm"
-        className="fixed right-4 top-[370px] z-[55] gap-2 rounded-2xl shadow-xl"
-        onClick={openAllProjects}
-      >
-        <Table2 className="h-4 w-4" /> Matrix ({matrixProjects.length})
-      </Button>
+      {!open && (
+        <Button
+          type="button"
+          size="sm"
+          className="fixed right-4 top-[370px] z-[55] gap-2 rounded-2xl shadow-xl"
+          onClick={openAllProjects}
+        >
+          <Table2 className="h-4 w-4" /> Matrix ({matrixProjects.length})
+        </Button>
+      )}
 
       {open && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-6">
-          <div className="flex max-h-[96vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-border/70 bg-background shadow-2xl">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/25 p-4">
+        <div className="fixed inset-0 z-[90] bg-background/98 p-2 backdrop-blur-sm sm:p-4">
+          <div className="flex h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-3xl border border-border/70 bg-background shadow-2xl sm:h-[calc(100vh-2rem)]">
+            <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b bg-muted/25 p-3 sm:p-4">
               <div>
                 <p className="text-lg font-black">Implementation Activities Matrix</p>
                 <p className="text-sm text-muted-foreground">
@@ -225,32 +229,34 @@ const ImplementationActivitiesMatrix = () => {
               </div>
             </div>
 
-            <div className="grid gap-3 border-b p-4 lg:grid-cols-[minmax(0,1fr)_160px_160px_180px]">
-              <label className="relative block">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter by project name" className="pl-9" />
-              </label>
-              <select value={group} onChange={(event) => setGroup(event.target.value)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
-                <option value="all">All groups</option>
-                {groups.map((item) => (
-                  <option key={item} value={item}>{item}</option>
-                ))}
-              </select>
-              <select value={year} onChange={(event) => setYear(event.target.value)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
-                <option value="all">All years</option>
-                {years.map((item) => (
-                  <option key={item} value={item}>{item}</option>
-                ))}
-              </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | ProjectStatus)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
-                <option value="all">All project statuses</option>
-                {projectStatusOptions.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
+            <div className="shrink-0 border-b bg-background p-3 sm:p-4">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px_160px_180px]">
+                <label className="relative block">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter by project name" className="pl-9" />
+                </label>
+                <select value={group} onChange={(event) => setGroup(event.target.value)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
+                  <option value="all">All groups</option>
+                  {groups.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+                <select value={year} onChange={(event) => setYear(event.target.value)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
+                  <option value="all">All years</option>
+                  {years.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | ProjectStatus)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
+                  <option value="all">All project statuses</option>
+                  {projectStatusOptions.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto p-4">
+            <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
               <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
                 <thead>
                   <tr>
