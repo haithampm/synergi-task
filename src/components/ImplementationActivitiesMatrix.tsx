@@ -4,12 +4,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 const importExportPath = '/import-export';
+const statusStorageKey = 'synergi-implementation-matrix-status';
+
+type ActivityStatus = 'not-started' | 'in-progress' | 'at-risk' | 'blocked' | 'completed';
 
 type MatrixProject = {
   projectName: string;
   startDate: string;
   endDate: string;
 };
+
+const activityStatusOptions: Array<{ value: ActivityStatus; label: string }> = [
+  { value: 'not-started', label: 'Not Started' },
+  { value: 'in-progress', label: 'In Progress' },
+  { value: 'at-risk', label: 'At Risk' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'completed', label: 'Completed' },
+];
 
 const matrixProjects: MatrixProject[] = [
   { projectName: 'EPM-940 Phase 5', startDate: '2025-12-10', endDate: '2028-12-09' },
@@ -44,10 +55,21 @@ const getCurrentPath = () => (typeof window === 'undefined' ? '' : window.locati
 
 const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
-const downloadCsv = (rows: MatrixProject[]) => {
+const readStatusMap = () => {
+  if (typeof window === 'undefined') return {} as Record<string, ActivityStatus>;
+  try {
+    return JSON.parse(window.localStorage.getItem(statusStorageKey) || '{}') as Record<string, ActivityStatus>;
+  } catch {
+    return {} as Record<string, ActivityStatus>;
+  }
+};
+
+const getStatusLabel = (value: ActivityStatus) => activityStatusOptions.find((option) => option.value === value)?.label ?? value;
+
+const downloadCsv = (rows: Array<MatrixProject & { activityStatus: ActivityStatus }>) => {
   const csv = [
-    'Project Name,Start Date,End Date',
-    ...rows.map((row) => [row.projectName, row.startDate, row.endDate].map(csvCell).join(',')),
+    'Project Name,Start Date,End Date,Activity Status',
+    ...rows.map((row) => [row.projectName, row.startDate, row.endDate, getStatusLabel(row.activityStatus)].map(csvCell).join(',')),
   ].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -71,6 +93,8 @@ const ImplementationActivitiesMatrix = () => {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState('all');
   const [year, setYear] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ActivityStatus>('all');
+  const [statusMap, setStatusMap] = useState<Record<string, ActivityStatus>>(readStatusMap);
 
   useMemo(() => {
     const updatePath = () => setCurrentPath(getCurrentPath());
@@ -111,15 +135,29 @@ const ImplementationActivitiesMatrix = () => {
     [],
   );
 
+  const rowsWithStatus = useMemo(
+    () => matrixProjects.map((project) => ({ ...project, activityStatus: statusMap[project.projectName] ?? 'not-started' })),
+    [statusMap],
+  );
+
   const filteredRows = useMemo(() => {
     const search = normalize(query);
-    return matrixProjects.filter((project) => {
+    return rowsWithStatus.filter((project) => {
       const matchesSearch = !search || normalize(project.projectName).includes(search);
       const matchesGroup = group === 'all' || project.projectName.startsWith(`${group}-`);
       const matchesYear = year === 'all' || project.startDate.startsWith(year) || project.endDate.startsWith(year);
-      return matchesSearch && matchesGroup && matchesYear;
+      const matchesStatus = statusFilter === 'all' || project.activityStatus === statusFilter;
+      return matchesSearch && matchesGroup && matchesYear && matchesStatus;
     });
-  }, [group, query, year]);
+  }, [group, query, rowsWithStatus, statusFilter, year]);
+
+  const updateProjectStatus = (projectName: string, activityStatus: ActivityStatus) => {
+    setStatusMap((current) => {
+      const next = { ...current, [projectName]: activityStatus };
+      window.localStorage.setItem(statusStorageKey, JSON.stringify(next));
+      return next;
+    });
+  };
 
   if (currentPath !== importExportPath) return null;
 
@@ -154,7 +192,7 @@ const ImplementationActivitiesMatrix = () => {
               </div>
             </div>
 
-            <div className="grid gap-3 border-b p-4 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
+            <div className="grid gap-3 border-b p-4 lg:grid-cols-[minmax(0,1fr)_160px_160px_180px]">
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter by project name" className="pl-9" />
@@ -171,6 +209,12 @@ const ImplementationActivitiesMatrix = () => {
                   <option key={item} value={item}>{item}</option>
                 ))}
               </select>
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | ActivityStatus)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
+                <option value="all">All activity statuses</option>
+                {activityStatusOptions.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
             </div>
 
             <div className="min-h-0 overflow-auto p-4">
@@ -180,6 +224,7 @@ const ImplementationActivitiesMatrix = () => {
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Project Name</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Start Date</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">End Date</th>
+                    <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Activity Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -188,6 +233,17 @@ const ImplementationActivitiesMatrix = () => {
                       <td className="border-b px-3 py-2 font-semibold">{project.projectName}</td>
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.startDate)}</td>
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.endDate)}</td>
+                      <td className="border-b px-3 py-2">
+                        <select
+                          value={project.activityStatus}
+                          onChange={(event) => updateProjectStatus(project.projectName, event.target.value as ActivityStatus)}
+                          className="h-9 min-w-[150px] rounded-xl border border-input bg-background px-3 text-sm font-semibold"
+                        >
+                          {activityStatusOptions.map((item) => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
