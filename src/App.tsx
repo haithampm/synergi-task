@@ -18,7 +18,7 @@ import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataS
 import type { User } from "@supabase/supabase-js";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Dashboard = lazy(() => import("./pages/DashboardDynamic"));
 const Projects = lazy(() => import("./pages/Projects"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Team = lazy(() => import("./pages/Team"));
