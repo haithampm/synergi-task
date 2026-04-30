@@ -14,6 +14,7 @@ import { useWorkspaceRealtimeSync } from "@/hooks/useWorkspaceRealtimeSync";
 import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 import { getSafeRedirectPath } from "@/lib/auth-ui";
 import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEnhancer";
+import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
 import type { User } from "@supabase/supabase-js";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
@@ -111,6 +112,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
 
   return (
     <>
+      <ActiveProjectDataSanitizer />
       <ProjectExperienceEnhancer />
       <Suspense fallback={null}>
         <CommandPalette />
