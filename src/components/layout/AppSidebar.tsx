@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, MessageSquare,
   BarChart3, Settings, ChevronLeft, ChevronRight,
-  LogOut, FileUp, CalendarDays, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck, UserCog
+  LogOut, FileUp, CalendarDays, GanttChart, Files, BriefcaseBusiness, StickyNote, User, Activity, Ticket, X, ShieldCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -24,7 +24,8 @@ const navSections = [
     title: 'Management',
     items: [
       { icon: FolderKanban, label: 'Projects', path: '/projects', permission: 'manage_projects' },
-      { icon: CalendarDays, label: 'Calendar', path: '/calendar', permission: 'manage_schedule', important: true },
+      { icon: GanttChart, label: 'Schedule', path: '/schedule', permission: 'manage_schedule', important: true },
+      { icon: CalendarDays, label: 'Calendar', path: '/calendar', permission: 'manage_schedule' },
       { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks' },
       { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents' },
       { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },
@@ -43,7 +44,6 @@ const navSections = [
   {
     title: 'Administration',
     items: [
-      { icon: UserCog, label: 'User Accounts', path: '/user-accounts', permission: 'manage_users', important: true, adminOnly: true },
       { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
