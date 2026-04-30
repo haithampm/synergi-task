@@ -39,7 +39,7 @@ export const getStoredImportMode = (): WorkspaceImportMode => {
   return stored === 'update-only' || stored === 'create-only' || stored === 'merge' ? stored : 'merge';
 };
 
-const getCurrentPath = () => (typeof window === 'undefined' ? '' : window.location.pathname);
+const getCurrentPath = () => (typeof window === 'undefined' ? '' : window.location.pathname.replace(/\/$/, '') || '/');
 
 const ImportModeSelector = () => {
   const [mode, setMode] = useState<WorkspaceImportMode>(() => getStoredImportMode());
@@ -52,20 +52,32 @@ const ImportModeSelector = () => {
 
   useEffect(() => {
     const updatePath = () => setCurrentPath(getCurrentPath());
+    const patchHistory = (method: 'pushState' | 'replaceState') => {
+      const original = window.history[method];
+      window.history[method] = function patchedHistoryMethod(...args) {
+        const result = original.apply(this, args);
+        window.dispatchEvent(new Event('workspace-route-changed'));
+        return result;
+      };
+      return () => {
+        window.history[method] = original;
+      };
+    };
+
+    const restorePushState = patchHistory('pushState');
+    const restoreReplaceState = patchHistory('replaceState');
+
+    updatePath();
     window.addEventListener('popstate', updatePath);
     window.addEventListener('hashchange', updatePath);
-    window.addEventListener('workspace-route-changed', updatePath as EventListener);
-
-    const clickTimer = window.setTimeout(updatePath, 0);
-    const handleClick = () => window.setTimeout(updatePath, 0);
-    window.addEventListener('click', handleClick, true);
+    window.addEventListener('workspace-route-changed', updatePath);
 
     return () => {
-      window.clearTimeout(clickTimer);
+      restorePushState();
+      restoreReplaceState();
       window.removeEventListener('popstate', updatePath);
       window.removeEventListener('hashchange', updatePath);
-      window.removeEventListener('workspace-route-changed', updatePath as EventListener);
-      window.removeEventListener('click', handleClick, true);
+      window.removeEventListener('workspace-route-changed', updatePath);
     };
   }, []);
 
