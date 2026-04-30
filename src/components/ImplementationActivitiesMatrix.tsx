@@ -153,6 +153,18 @@ const ImplementationActivitiesMatrix = () => {
     [],
   );
 
+  const resetFilters = () => {
+    setQuery('');
+    setGroup('all');
+    setYear('all');
+    setStatusFilter('all');
+  };
+
+  const openAllProjects = () => {
+    resetFilters();
+    setOpen(true);
+  };
+
   const rowsWithStatus = useMemo(
     () => matrixProjects.map((project) => ({ ...project, projectStatus: statusMap[project.projectName] ?? 'active' })),
     [statusMap],
@@ -185,14 +197,14 @@ const ImplementationActivitiesMatrix = () => {
         type="button"
         size="sm"
         className="fixed right-4 top-[370px] z-[55] gap-2 rounded-2xl shadow-xl"
-        onClick={() => setOpen(true)}
+        onClick={openAllProjects}
       >
-        <Table2 className="h-4 w-4" /> Matrix
+        <Table2 className="h-4 w-4" /> Matrix ({matrixProjects.length})
       </Button>
 
       {open && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-6">
-          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border/70 bg-background shadow-2xl">
+          <div className="flex max-h-[96vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-border/70 bg-background shadow-2xl">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/25 p-4">
               <div>
                 <p className="text-lg font-black">Implementation Activities Matrix</p>
@@ -201,6 +213,9 @@ const ImplementationActivitiesMatrix = () => {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="gap-2" onClick={resetFilters}>
+                  <Filter className="h-4 w-4" /> Show All Projects
+                </Button>
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => downloadCsv(filteredRows)}>
                   <Download className="h-4 w-4" /> Export Filtered
                 </Button>
@@ -235,10 +250,11 @@ const ImplementationActivitiesMatrix = () => {
               </select>
             </div>
 
-            <div className="min-h-0 overflow-auto p-4">
+            <div className="min-h-0 flex-1 overflow-auto p-4">
               <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
                 <thead>
                   <tr>
+                    <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">#</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Project Name</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Start Date</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">End Date</th>
@@ -246,8 +262,9 @@ const ImplementationActivitiesMatrix = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((project) => (
+                  {filteredRows.map((project, index) => (
                     <tr key={project.projectName} className="odd:bg-muted/20">
+                      <td className="border-b px-3 py-2 text-xs font-black text-muted-foreground">{index + 1}</td>
                       <td className="border-b px-3 py-2 font-semibold">{project.projectName}</td>
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.startDate)}</td>
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.endDate)}</td>
