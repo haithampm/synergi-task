@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Filter, Search, Table2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 const importExportPath = '/import-export';
-const statusStorageKey = 'synergi-implementation-matrix-status';
+const statusStorageKey = 'synergi-implementation-matrix-project-status';
 
-type ActivityStatus = 'not-started' | 'in-progress' | 'at-risk' | 'blocked' | 'completed';
+type ProjectStatus = 'active' | 'planning' | 'on-hold' | 'at-risk' | 'completed' | 'cancelled';
 
 type MatrixProject = {
   projectName: string;
@@ -14,13 +14,22 @@ type MatrixProject = {
   endDate: string;
 };
 
-const activityStatusOptions: Array<{ value: ActivityStatus; label: string }> = [
-  { value: 'not-started', label: 'Not Started' },
-  { value: 'in-progress', label: 'In Progress' },
+const projectStatusOptions: Array<{ value: ProjectStatus; label: string }> = [
+  { value: 'active', label: 'Active' },
+  { value: 'planning', label: 'Planning' },
+  { value: 'on-hold', label: 'On Hold' },
   { value: 'at-risk', label: 'At Risk' },
-  { value: 'blocked', label: 'Blocked' },
   { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
+
+const legacyStatusMap: Record<string, ProjectStatus> = {
+  'not-started': 'planning',
+  'in-progress': 'active',
+  'at-risk': 'at-risk',
+  blocked: 'on-hold',
+  completed: 'completed',
+};
 
 const matrixProjects: MatrixProject[] = [
   { projectName: 'EPM-940 Phase 5', startDate: '2025-12-10', endDate: '2028-12-09' },
@@ -55,21 +64,30 @@ const getCurrentPath = () => (typeof window === 'undefined' ? '' : window.locati
 
 const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
+const isProjectStatus = (value: unknown): value is ProjectStatus =>
+  typeof value === 'string' && projectStatusOptions.some((option) => option.value === value);
+
 const readStatusMap = () => {
-  if (typeof window === 'undefined') return {} as Record<string, ActivityStatus>;
+  if (typeof window === 'undefined') return {} as Record<string, ProjectStatus>;
   try {
-    return JSON.parse(window.localStorage.getItem(statusStorageKey) || '{}') as Record<string, ActivityStatus>;
+    const raw = JSON.parse(window.localStorage.getItem(statusStorageKey) || '{}') as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(raw).map(([projectName, value]) => [
+        projectName,
+        isProjectStatus(value) ? value : legacyStatusMap[String(value)] ?? 'active',
+      ]),
+    ) as Record<string, ProjectStatus>;
   } catch {
-    return {} as Record<string, ActivityStatus>;
+    return {} as Record<string, ProjectStatus>;
   }
 };
 
-const getStatusLabel = (value: ActivityStatus) => activityStatusOptions.find((option) => option.value === value)?.label ?? value;
+const getStatusLabel = (value: ProjectStatus) => projectStatusOptions.find((option) => option.value === value)?.label ?? value;
 
-const downloadCsv = (rows: Array<MatrixProject & { activityStatus: ActivityStatus }>) => {
+const downloadCsv = (rows: Array<MatrixProject & { projectStatus: ProjectStatus }>) => {
   const csv = [
-    'Project Name,Start Date,End Date,Activity Status',
-    ...rows.map((row) => [row.projectName, row.startDate, row.endDate, getStatusLabel(row.activityStatus)].map(csvCell).join(',')),
+    'Project Name,Start Date,End Date,Project Status',
+    ...rows.map((row) => [row.projectName, row.startDate, row.endDate, getStatusLabel(row.projectStatus)].map(csvCell).join(',')),
   ].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -93,10 +111,10 @@ const ImplementationActivitiesMatrix = () => {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState('all');
   const [year, setYear] = useState('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | ActivityStatus>('all');
-  const [statusMap, setStatusMap] = useState<Record<string, ActivityStatus>>(readStatusMap);
+  const [statusFilter, setStatusFilter] = useState<'all' | ProjectStatus>('all');
+  const [statusMap, setStatusMap] = useState<Record<string, ProjectStatus>>(readStatusMap);
 
-  useMemo(() => {
+  useEffect(() => {
     const updatePath = () => setCurrentPath(getCurrentPath());
     const patchHistory = (method: 'pushState' | 'replaceState') => {
       const original = window.history[method];
@@ -136,7 +154,7 @@ const ImplementationActivitiesMatrix = () => {
   );
 
   const rowsWithStatus = useMemo(
-    () => matrixProjects.map((project) => ({ ...project, activityStatus: statusMap[project.projectName] ?? 'not-started' })),
+    () => matrixProjects.map((project) => ({ ...project, projectStatus: statusMap[project.projectName] ?? 'active' })),
     [statusMap],
   );
 
@@ -146,14 +164,14 @@ const ImplementationActivitiesMatrix = () => {
       const matchesSearch = !search || normalize(project.projectName).includes(search);
       const matchesGroup = group === 'all' || project.projectName.startsWith(`${group}-`);
       const matchesYear = year === 'all' || project.startDate.startsWith(year) || project.endDate.startsWith(year);
-      const matchesStatus = statusFilter === 'all' || project.activityStatus === statusFilter;
+      const matchesStatus = statusFilter === 'all' || project.projectStatus === statusFilter;
       return matchesSearch && matchesGroup && matchesYear && matchesStatus;
     });
   }, [group, query, rowsWithStatus, statusFilter, year]);
 
-  const updateProjectStatus = (projectName: string, activityStatus: ActivityStatus) => {
+  const updateProjectStatus = (projectName: string, projectStatus: ProjectStatus) => {
     setStatusMap((current) => {
-      const next = { ...current, [projectName]: activityStatus };
+      const next = { ...current, [projectName]: projectStatus };
       window.localStorage.setItem(statusStorageKey, JSON.stringify(next));
       return next;
     });
@@ -209,9 +227,9 @@ const ImplementationActivitiesMatrix = () => {
                   <option key={item} value={item}>{item}</option>
                 ))}
               </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | ActivityStatus)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
-                <option value="all">All activity statuses</option>
-                {activityStatusOptions.map((item) => (
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | ProjectStatus)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
+                <option value="all">All project statuses</option>
+                {projectStatusOptions.map((item) => (
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
@@ -224,7 +242,7 @@ const ImplementationActivitiesMatrix = () => {
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Project Name</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Start Date</th>
                     <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">End Date</th>
-                    <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Activity Status</th>
+                    <th className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">Project Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -235,11 +253,11 @@ const ImplementationActivitiesMatrix = () => {
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.endDate)}</td>
                       <td className="border-b px-3 py-2">
                         <select
-                          value={project.activityStatus}
-                          onChange={(event) => updateProjectStatus(project.projectName, event.target.value as ActivityStatus)}
+                          value={project.projectStatus}
+                          onChange={(event) => updateProjectStatus(project.projectName, event.target.value as ProjectStatus)}
                           className="h-9 min-w-[150px] rounded-xl border border-input bg-background px-3 text-sm font-semibold"
                         >
-                          {activityStatusOptions.map((item) => (
+                          {projectStatusOptions.map((item) => (
                             <option key={item.value} value={item.value}>{item.label}</option>
                           ))}
                         </select>
