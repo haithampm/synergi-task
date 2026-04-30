@@ -47,11 +47,11 @@ const ImportModeSelector = () => {
   }, [mode]);
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="fixed left-1/2 top-20 z-[75] w-[calc(100vw-1.5rem)] max-w-4xl -translate-x-1/2 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-muted-foreground">Import mode</p>
-          <p className="text-xs text-muted-foreground">Choose how imported rows are applied.</p>
+          <p className="text-xs text-muted-foreground">Choose how imported rows are applied before importing data.</p>
         </div>
         <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-black text-primary">
           {modeOptions.find((option) => option.value === mode)?.label ?? 'Merge'}
