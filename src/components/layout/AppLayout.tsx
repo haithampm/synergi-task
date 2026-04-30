@@ -1,10 +1,11 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
-import { CheckSquare, GanttChart, MessageSquare, StickyNote, UploadCloud } from 'lucide-react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckSquare, Download, GanttChart, MessageSquare, StickyNote, UploadCloud, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
 import WorkspaceAssistant from '@/components/WorkspaceAssistant';
 import { useWorkspaceSettings } from '@/hooks/useProjects';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 
 interface AppLayoutProps {
@@ -16,6 +17,7 @@ const legacyAdminMailbox = 'Admin mailbox: admin@company.com';
 const currentAdminMailbox = 'Admin mailbox: haitham.pm@gmail.com';
 const workspaceStorageKey = 'synergi-workspace-data';
 const archivedStorageKey = 'synergi-archived-projects';
+const importColumnPreferencesKey = 'synergi-import-column-preferences';
 const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 const fullAdminPermissions = [
   'view_dashboard',
@@ -36,6 +38,14 @@ const fullAdminPermissions = [
   'export',
 ];
 
+type ImportPreviewState = {
+  columns: string[];
+  fileName: string;
+  records: Array<Record<string, string>>;
+  selectedColumns: string[];
+  visible: boolean;
+};
+
 const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 const isKnownAdminEmail = (email?: string | null) => adminEmails.includes(normalizeEmail(email));
 
@@ -47,6 +57,53 @@ const readWorkspaceStorage = () => {
   } catch {
     return null;
   }
+};
+
+const parseCsvLine = (line: string) => {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      values.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current);
+  return values;
+};
+
+const parseCsvPreview = (text: string) => {
+  const rows = text.split(/\r?\n/).filter((row) => row.trim().length > 0);
+  if (rows.length < 2) return { columns: [], records: [] as Array<Record<string, string>> };
+  const columns = parseCsvLine(rows[0]).map((column) => column.trim()).filter(Boolean);
+  const records = rows.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return Object.fromEntries(columns.map((column, index) => [column, values[index] ?? '']));
+  });
+  return { columns, records };
+};
+
+const stringifyCsvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+const recordsToFilteredCsv = (records: Array<Record<string, string>>, columns: string[]) => {
+  if (!records.length || !columns.length) return '';
+  return [
+    columns.join(','),
+    ...records.map((record) => columns.map((column) => stringifyCsvCell(record[column])).join(',')),
+  ].join('\n');
 };
 
 const isAdminSessionFromStorage = () => {
@@ -191,8 +248,17 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   const [fileProgressVisible, setFileProgressVisible] = useState(false);
   const [fileProgress, setFileProgress] = useState(0);
   const [fileProgressLabel, setFileProgressLabel] = useState('Preparing import...');
+  const [importPreview, setImportPreview] = useState<ImportPreviewState>({
+    columns: [],
+    fileName: '',
+    records: [],
+    selectedColumns: [],
+    visible: false,
+  });
   const progressTimer = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const hideTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  const previewRows = useMemo(() => importPreview.records.slice(0, 10), [importPreview.records]);
 
   useEffect(() => {
     normalizeAdminRolesInStorage();
@@ -270,8 +336,54 @@ const AppLayout = ({ children }: AppLayoutProps) => {
     const handleFileChange = (event: Event) => {
       const target = event.target as HTMLInputElement | null;
       if (target?.type !== 'file' || !target.files?.length) return;
-      const fileName = target.files[0]?.name;
+      const file = target.files[0];
+      const fileName = file?.name;
       startProgress(fileName ? `Loading ${fileName}...` : 'Loading import file...');
+
+      if (file) {
+        void file.text().then((text) => {
+          const extension = file.name.split('.').pop()?.toLowerCase();
+          let columns: string[] = [];
+          let records: Array<Record<string, string>> = [];
+
+          if (extension === 'csv') {
+            const parsed = parseCsvPreview(text);
+            columns = parsed.columns;
+            records = parsed.records;
+          } else if (extension === 'json') {
+            try {
+              const parsed = JSON.parse(text);
+              const arrayData = Array.isArray(parsed)
+                ? parsed
+                : Array.isArray(parsed?.projects)
+                  ? parsed.projects
+                  : Array.isArray(parsed?.tasks)
+                    ? parsed.tasks
+                    : Array.isArray(parsed?.tickets)
+                      ? parsed.tickets
+                      : [];
+              records = arrayData.slice(0, 250).map((item: Record<string, unknown>) =>
+                Object.fromEntries(Object.entries(item).map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')])),
+              );
+              columns = Array.from(new Set(records.flatMap((record) => Object.keys(record))));
+            } catch {
+              columns = [];
+              records = [];
+            }
+          }
+
+          if (columns.length && records.length) {
+            setImportPreview({
+              columns,
+              fileName: file.name,
+              records,
+              selectedColumns: columns,
+              visible: true,
+            });
+          }
+        });
+      }
+
       window.setTimeout(completeProgress, 2200);
     };
 
@@ -311,6 +423,38 @@ const AppLayout = ({ children }: AppLayoutProps) => {
     };
   }, [fileProgressVisible]);
 
+  const toggleImportPreviewColumn = (column: string, checked: boolean) => {
+    setImportPreview((current) => ({
+      ...current,
+      selectedColumns: checked
+        ? Array.from(new Set([...current.selectedColumns, column]))
+        : current.selectedColumns.filter((item) => item !== column),
+    }));
+  };
+
+  const applyImportPreviewColumns = () => {
+    const payload = {
+      columns: importPreview.selectedColumns,
+      fileName: importPreview.fileName,
+      savedAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem(importColumnPreferencesKey, JSON.stringify(payload));
+    window.dispatchEvent(new CustomEvent('workspace-import-columns-selected', { detail: payload }));
+    setImportPreview((current) => ({ ...current, visible: false }));
+  };
+
+  const downloadFilteredImportPreview = () => {
+    const csv = recordsToFilteredCsv(importPreview.records, importPreview.selectedColumns);
+    if (!csv) return;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = importPreview.fileName.replace(/\.[^.]+$/, '') + '-selected-columns.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_42%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.45))]" />
@@ -330,6 +474,69 @@ const AppLayout = ({ children }: AppLayoutProps) => {
               <span className="text-xs font-black text-primary">{Math.round(fileProgress)}%</span>
             </div>
             <Progress value={fileProgress} className="h-2" />
+          </div>
+        </div>
+      )}
+      {importPreview.visible && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-6">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-border/70 bg-background shadow-2xl">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/25 p-4">
+              <div>
+                <p className="text-lg font-black">Review import table</p>
+                <p className="text-sm text-muted-foreground">
+                  {importPreview.fileName} · {importPreview.records.length} rows · {importPreview.selectedColumns.length}/{importPreview.columns.length} columns selected
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => setImportPreview((current) => ({ ...current, selectedColumns: current.columns }))}>Select All</Button>
+                <Button variant="outline" size="sm" onClick={() => setImportPreview((current) => ({ ...current, selectedColumns: current.columns.slice(0, 2) }))}>Required Only</Button>
+                <Button variant="outline" size="sm" className="gap-2" onClick={downloadFilteredImportPreview} disabled={!importPreview.selectedColumns.length}>
+                  <Download className="h-4 w-4" /> Download Selected CSV
+                </Button>
+                <Button size="sm" onClick={applyImportPreviewColumns} disabled={!importPreview.selectedColumns.length}>Apply Columns</Button>
+                <Button variant="ghost" size="icon" onClick={() => setImportPreview((current) => ({ ...current, visible: false }))}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="max-h-[32vh] overflow-y-auto border-b p-4 lg:max-h-none lg:border-b-0 lg:border-r">
+                <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-muted-foreground">Optional columns</p>
+                <div className="space-y-2">
+                  {importPreview.columns.map((column) => (
+                    <label key={column} className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/10 p-2 text-sm">
+                      <Checkbox checked={importPreview.selectedColumns.includes(column)} onCheckedChange={(checked) => toggleImportPreviewColumn(column, checked === true)} />
+                      <span className="truncate font-medium">{column}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="min-w-0 overflow-auto p-4">
+                <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
+                  <thead>
+                    <tr>
+                      {importPreview.selectedColumns.map((column) => (
+                        <th key={column} className="sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="odd:bg-muted/20">
+                        {importPreview.selectedColumns.map((column) => (
+                          <td key={`${rowIndex}-${column}`} className="max-w-[240px] truncate border-b px-3 py-2 text-muted-foreground" title={row[column]}>
+                            {row[column]}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-3 text-xs text-muted-foreground">Preview shows first 10 rows. Download selected CSV to import only the chosen columns, or Apply Columns to save the selected-column rule for this import session.</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
