@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
 import WorkspaceAssistant from '@/components/WorkspaceAssistant';
 import DataExportOverlay from '@/components/DataExportOverlay';
+import DatabaseSyncStatus from '@/components/DatabaseSyncStatus';
 import { useWorkspaceSettings } from '@/hooks/useProjects';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -565,6 +566,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-3 sm:left-4 md:left-8' : 'right-3 sm:right-4 md:right-8'}`}>
         <div className="flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl sm:max-w-[calc(100vw-2rem)] md:max-w-none">
           <WorkspaceAssistant isArabic={isArabic} />
+          <DatabaseSyncStatus />
           <Button size="sm" variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">Export Data</span>
