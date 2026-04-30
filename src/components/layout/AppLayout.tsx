@@ -15,6 +15,7 @@ const importActionPattern = /\b(import|upload|parse|load|sync)\b/i;
 const legacyAdminMailbox = 'Admin mailbox: admin@company.com';
 const currentAdminMailbox = 'Admin mailbox: haitham.pm@gmail.com';
 const workspaceStorageKey = 'synergi-workspace-data';
+const archivedStorageKey = 'synergi-archived-projects';
 const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 const fullAdminPermissions = [
   'view_dashboard',
@@ -66,6 +67,37 @@ const isAdminSessionFromStorage = () => {
     hasKnownAdminAccount ||
     ['admin', 'super_admin', 'organization_admin', 'project_admin'].includes(currentRole)
   );
+};
+
+const normalizeArchivedProjectsInStorage = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(workspaceStorageKey);
+    if (!raw) return;
+    const data = JSON.parse(raw) as { projects?: Array<{ id?: string; status?: string }> };
+    if (!Array.isArray(data.projects)) return;
+
+    const archivedProjects = data.projects.filter((project) => project.status === 'archived');
+    if (!archivedProjects.length) return;
+
+    const existingArchive = JSON.parse(window.localStorage.getItem(archivedStorageKey) || '[]');
+    const archiveById = new Map<string, unknown>();
+    if (Array.isArray(existingArchive)) {
+      existingArchive.forEach((project) => {
+        const id = (project as { id?: string })?.id;
+        if (id) archiveById.set(id, project);
+      });
+    }
+    archivedProjects.forEach((project) => {
+      if (project.id) archiveById.set(project.id, project);
+    });
+
+    data.projects = data.projects.filter((project) => project.status !== 'archived');
+    window.localStorage.setItem(archivedStorageKey, JSON.stringify(Array.from(archiveById.values())));
+    window.localStorage.setItem(workspaceStorageKey, JSON.stringify(data));
+  } catch (error) {
+    console.warn('Could not normalize archived projects in workspace settings', error);
+  }
 };
 
 const normalizeAdminRolesInStorage = () => {
@@ -164,6 +196,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
 
   useEffect(() => {
     normalizeAdminRolesInStorage();
+    normalizeArchivedProjectsInStorage();
   }, []);
 
   useEffect(() => {
