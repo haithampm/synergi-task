@@ -3,6 +3,7 @@ import { CheckSquare, Download, GanttChart, MessageSquare, StickyNote, UploadClo
 import { useLocation, useNavigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
 import WorkspaceAssistant from '@/components/WorkspaceAssistant';
+import DataExportOverlay from '@/components/DataExportOverlay';
 import { useWorkspaceSettings } from '@/hooks/useProjects';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -248,6 +249,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   const [fileProgressVisible, setFileProgressVisible] = useState(false);
   const [fileProgress, setFileProgress] = useState(0);
   const [fileProgressLabel, setFileProgressLabel] = useState('Preparing import...');
+  const [exportOpen, setExportOpen] = useState(false);
   const [importPreview, setImportPreview] = useState<ImportPreviewState>({
     columns: [],
     fileName: '',
@@ -458,6 +460,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-background" dir={isArabic ? 'rtl' : 'ltr'}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)/0.10),_transparent_42%),linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)/0.45))]" />
+      <DataExportOverlay open={exportOpen} onClose={() => setExportOpen(false)} />
       {fileProgressVisible && (
         <div className={`fixed top-3 z-[70] w-[calc(100vw-1.5rem)] max-w-md ${isArabic ? 'left-3 sm:left-5' : 'right-3 sm:right-5'}`}>
           <div className="rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl backdrop-blur-xl">
@@ -562,6 +565,10 @@ const AppLayout = ({ children }: AppLayoutProps) => {
       <div className={`fixed bottom-4 z-40 ${isArabic ? 'left-3 sm:left-4 md:left-8' : 'right-3 sm:right-4 md:right-8'}`}>
         <div className="flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/90 p-2 shadow-xl backdrop-blur-xl sm:max-w-[calc(100vw-2rem)] md:max-w-none">
           <WorkspaceAssistant isArabic={isArabic} />
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export Data</span>
+          </Button>
           <Button size="sm" variant={location.pathname === '/schedule' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/schedule')}>
             <GanttChart className="h-4 w-4" />
             <span className="hidden sm:inline">Schedule</span>
