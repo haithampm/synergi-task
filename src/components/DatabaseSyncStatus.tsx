@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, CloudOff, Database, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDatabaseConnection } from '@/hooks/useProjects';
@@ -10,6 +11,7 @@ const getStatusClasses = (status?: string) => {
 };
 
 const DatabaseSyncStatus = () => {
+  const location = useLocation();
   const { data: health, refetch, isFetching } = useDatabaseConnection();
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'syncing' | 'synced' | 'local'>('connecting');
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -24,6 +26,8 @@ const DatabaseSyncStatus = () => {
     window.addEventListener('workspace-sync-status', handleSyncStatus as EventListener);
     return () => window.removeEventListener('workspace-sync-status', handleSyncStatus as EventListener);
   }, []);
+
+  if (location.pathname.replace(/\/$/, '') !== '/app-monitor') return null;
 
   const isHealthy = Boolean(health?.operational && health.connected && health.authenticated && health.workspaceId);
   const hasConfigIssue = Boolean(health && (!health.operational || !health.configured));
