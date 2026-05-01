@@ -3,6 +3,7 @@ import App from "./App.tsx";
 import ImportModeSelector from "@/components/ImportModeSelector";
 import ImplementationActivitiesMatrix from "@/components/ImplementationActivitiesMatrix";
 import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
+import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -11,5 +12,6 @@ createRoot(document.getElementById("root")!).render(
     <ImportModeSelector />
     <ImplementationActivitiesMatrix />
     <ProjectOwnerTaskPanel />
+    <PMODeliveryCyclePanel />
   </>,
 );
