@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, ClipboardList, ExternalLink, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { Activity, ArrowLeft, ArrowRight, Clock3, ClipboardList, ExternalLink, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,15 +26,30 @@ type TaskRow = {
   assignee_id?: string | null;
   assignee?: string | null;
   progress?: number | null;
+  phase?: string | null;
+  workload_hours?: number | null;
+  estimated_hours?: number | null;
 };
 
+type PanelTab = 'tasks' | 'activities' | 'timesheet';
+
 const isProjectsPage = () => window.location.pathname.replace(/\/$/, '') === '/projects';
+
 const formatDate = (value?: string | null) => {
   if (!value) return 'No due date';
   const date = new Date(`${value.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
+
+const getStatusLabel = (status?: string | null) => {
+  const value = String(status ?? 'todo').trim().toLowerCase();
+  if (value === 'todo') return 'Tasks';
+  if (value === 'in-progress') return 'In Progress';
+  return value.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const getTaskHours = (task: TaskRow) => Number(task.workload_hours ?? task.estimated_hours ?? 0) || 0;
 
 const statusClass: Record<string, string> = {
   active: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
@@ -50,6 +65,7 @@ const statusClass: Record<string, string> = {
 const ProjectOwnerTaskPanel = () => {
   const [visible, setVisible] = useState(isProjectsPage);
   const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<PanelTab>('tasks');
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
@@ -94,7 +110,10 @@ const ProjectOwnerTaskPanel = () => {
     try {
       const [projectResult, taskResult] = await Promise.all([
         supabase.from('projects').select('id,workspace_id,name,status,priority,start_date,end_date,progress').order('name', { ascending: true }),
-        supabase.from('tasks').select('id,title,status,priority,due_date,project_id,assignee_id,progress').order('due_date', { ascending: true, nullsFirst: false }),
+        supabase
+          .from('tasks')
+          .select('id,title,status,priority,due_date,project_id,assignee_id,progress,phase,workload_hours,estimated_hours')
+          .order('due_date', { ascending: true, nullsFirst: false }),
       ]);
       if (projectResult.error) throw projectResult.error;
       if (taskResult.error) throw taskResult.error;
@@ -110,7 +129,7 @@ const ProjectOwnerTaskPanel = () => {
         '';
       setSelectedProjectId(nextSelected);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to load project tasks.');
+      setMessage(error instanceof Error ? error.message : 'Failed to load project tasks and activities.');
     } finally {
       setLoading(false);
     }
@@ -132,6 +151,19 @@ const ProjectOwnerTaskPanel = () => {
     () => tasks.filter((task) => task.project_id === selectedProject?.id),
     [selectedProject?.id, tasks],
   );
+
+  const taskSummary = useMemo(() => {
+    const totalHours = projectTasks.reduce((sum, task) => sum + getTaskHours(task), 0);
+    const completed = projectTasks.filter((task) => String(task.status ?? '').toLowerCase() === 'done').length;
+    const inProgress = projectTasks.filter((task) => String(task.status ?? '').toLowerCase() === 'in-progress').length;
+    const taskReady = projectTasks.filter((task) => String(task.status ?? '').toLowerCase() === 'todo').length;
+    const overdue = projectTasks.filter((task) => {
+      if (!task.due_date || String(task.status ?? '').toLowerCase() === 'done') return false;
+      return new Date(`${task.due_date.slice(0, 10)}T23:59:59`) < new Date();
+    }).length;
+    const phases = Array.from(new Set(projectTasks.map((task) => task.phase || 'Execution')));
+    return { totalHours, completed, inProgress, taskReady, overdue, phases };
+  }, [projectTasks]);
 
   const selectProject = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -161,13 +193,15 @@ const ProjectOwnerTaskPanel = () => {
           priority: 'medium',
           phase: 'Execution',
           progress: 0,
+          workload_hours: 8,
+          estimated_hours: 8,
         })
-        .select('id,title,status,priority,due_date,project_id,assignee_id,progress')
+        .select('id,title,status,priority,due_date,project_id,assignee_id,progress,phase,workload_hours,estimated_hours')
         .single();
       if (error) throw error;
       setTasks((current) => [...current, data as TaskRow]);
       setTaskTitle('');
-      setMessage('Task added to selected project.');
+      setMessage('Task/activity added to selected project.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to add task.');
     } finally {
@@ -193,8 +227,8 @@ const ProjectOwnerTaskPanel = () => {
           <div className="flex h-[calc(100vh-1rem)] flex-col overflow-hidden rounded-3xl border bg-background shadow-2xl sm:h-[calc(100vh-2rem)]">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/25 p-4">
               <div>
-                <p className="text-xl font-black">Project owner task view</p>
-                <p className="text-sm text-muted-foreground">View linked project tasks, add a task, and move to next or previous project.</p>
+                <p className="text-xl font-black">Project Tasks, Activities & Timesheet</p>
+                <p className="text-sm text-muted-foreground">Program-manager view for linked tasks, delivery activities, planned effort, and project navigation.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void loadData()} disabled={loading}>
@@ -256,10 +290,53 @@ const ProjectOwnerTaskPanel = () => {
                       </div>
                     </div>
 
+                    <div className="grid gap-3 border-b p-4 sm:grid-cols-2 xl:grid-cols-5">
+                      <div className="rounded-2xl border bg-background p-3">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">Tasks</p>
+                        <p className="mt-1 text-2xl font-black">{projectTasks.length}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-background p-3">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">In Progress</p>
+                        <p className="mt-1 text-2xl font-black">{taskSummary.inProgress}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-background p-3">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">Completed</p>
+                        <p className="mt-1 text-2xl font-black">{taskSummary.completed}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-background p-3">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">Overdue</p>
+                        <p className="mt-1 text-2xl font-black">{taskSummary.overdue}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-background p-3">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">Planned Hours</p>
+                        <p className="mt-1 text-2xl font-black">{taskSummary.totalHours}</p>
+                      </div>
+                    </div>
+
                     <div className="border-b p-4">
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-muted-foreground">Project Tasks sub-tab</p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { key: 'tasks', label: 'Tasks', icon: ClipboardList },
+                          { key: 'activities', label: 'Activities', icon: Activity },
+                          { key: 'timesheet', label: 'Timesheet', icon: Clock3 },
+                        ] as Array<{ key: PanelTab; label: string; icon: typeof ClipboardList }>).map((tab) => {
+                          const Icon = tab.icon;
+                          return (
+                            <Button
+                              key={tab.key}
+                              type="button"
+                              variant={activeTab === tab.key ? 'default' : 'outline'}
+                              size="sm"
+                              className="gap-2 rounded-2xl"
+                              onClick={() => setActiveTab(tab.key)}
+                            >
+                              <Icon className="h-4 w-4" /> {tab.label}
+                            </Button>
+                          );
+                        })}
+                      </div>
                       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                        <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="New linked task title" />
+                        <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="New linked task/activity title" />
                         <Button type="button" className="gap-2" onClick={() => void createTask()} disabled={creating || !taskTitle.trim()}>
                           <Plus className="h-4 w-4" /> Add Task
                         </Button>
@@ -271,15 +348,63 @@ const ProjectOwnerTaskPanel = () => {
                     </div>
 
                     <div className="min-h-0 flex-1 overflow-auto p-4">
-                      {projectTasks.length ? (
+                      {activeTab === 'activities' ? (
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                          {taskSummary.phases.map((phase) => {
+                            const phaseTasks = projectTasks.filter((task) => (task.phase || 'Execution') === phase);
+                            const phaseHours = phaseTasks.reduce((sum, task) => sum + getTaskHours(task), 0);
+                            return (
+                              <div key={phase} className="rounded-2xl border bg-muted/10 p-4">
+                                <p className="text-sm font-black">{phase}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{phaseTasks.length} tasks · {phaseHours} planned hours</p>
+                                <div className="mt-3 space-y-2">
+                                  {phaseTasks.map((task) => (
+                                    <div key={task.id} className="rounded-xl border bg-background px-3 py-2 text-sm">
+                                      <p className="font-semibold">{task.title}</p>
+                                      <p className="text-xs text-muted-foreground">{getStatusLabel(task.status)} · {formatDate(task.due_date)}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : activeTab === 'timesheet' ? (
+                        <div className="overflow-hidden rounded-2xl border">
+                          <table className="min-w-full text-left text-sm">
+                            <thead className="bg-muted/40 text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                              <tr>
+                                <th className="px-3 py-2">Task / Activity</th>
+                                <th className="px-3 py-2">Phase</th>
+                                <th className="px-3 py-2">Status</th>
+                                <th className="px-3 py-2">Planned Hours</th>
+                                <th className="px-3 py-2">Timesheet</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {projectTasks.map((task) => (
+                                <tr key={task.id} className="border-t odd:bg-muted/15">
+                                  <td className="px-3 py-2 font-semibold">{task.title}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{task.phase || 'Execution'}</td>
+                                  <td className="px-3 py-2"><Badge variant="outline" className={statusClass[String(task.status ?? 'todo')] ?? 'bg-muted'}>{getStatusLabel(task.status)}</Badge></td>
+                                  <td className="px-3 py-2 text-muted-foreground">{getTaskHours(task)}h</td>
+                                  <td className="px-3 py-2 text-muted-foreground">Ready for timesheet entry</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : projectTasks.length ? (
                         <div className="overflow-hidden rounded-2xl border">
                           <table className="min-w-full text-left text-sm">
                             <thead className="bg-muted/40 text-xs uppercase tracking-[0.14em] text-muted-foreground">
                               <tr>
                                 <th className="px-3 py-2">Task</th>
+                                <th className="px-3 py-2">Activity Phase</th>
                                 <th className="px-3 py-2">Status</th>
                                 <th className="px-3 py-2">Priority</th>
                                 <th className="px-3 py-2">Due</th>
+                                <th className="px-3 py-2">Hours</th>
                                 <th className="px-3 py-2">Progress</th>
                               </tr>
                             </thead>
@@ -287,9 +412,11 @@ const ProjectOwnerTaskPanel = () => {
                               {projectTasks.map((task) => (
                                 <tr key={task.id} className="border-t odd:bg-muted/15">
                                   <td className="px-3 py-2 font-semibold">{task.title}</td>
-                                  <td className="px-3 py-2"><Badge variant="outline" className={statusClass[String(task.status ?? 'todo')] ?? 'bg-muted'}>{task.status ?? 'todo'}</Badge></td>
+                                  <td className="px-3 py-2 text-muted-foreground">{task.phase || 'Execution'}</td>
+                                  <td className="px-3 py-2"><Badge variant="outline" className={statusClass[String(task.status ?? 'todo')] ?? 'bg-muted'}>{getStatusLabel(task.status)}</Badge></td>
                                   <td className="px-3 py-2 capitalize text-muted-foreground">{task.priority ?? 'medium'}</td>
                                   <td className="px-3 py-2 text-muted-foreground">{formatDate(task.due_date)}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{getTaskHours(task)}h</td>
                                   <td className="px-3 py-2 text-muted-foreground">{task.progress ?? 0}%</td>
                                 </tr>
                               ))}
