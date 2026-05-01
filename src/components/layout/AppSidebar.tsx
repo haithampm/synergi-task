@@ -14,40 +14,40 @@ const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 
 const navSections = [
   {
-    title: 'Overview',
+    title: 'Executive',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'view_dashboard', important: true },
-      { icon: BarChart3, label: 'Reports', path: '/reports', permission: 'view_reports' },
+      { icon: LayoutDashboard, label: 'PMO BI Dashboard', path: '/dashboard', permission: 'view_dashboard', important: true },
+      { icon: BarChart3, label: 'Reports & Exports', path: '/reports', permission: 'view_reports' },
     ],
   },
   {
-    title: 'Management',
+    title: 'Delivery Management',
     items: [
-      { icon: FolderKanban, label: 'Projects', path: '/projects', permission: 'manage_projects' },
-      { icon: GanttChart, label: 'Schedule', path: '/schedule', permission: 'manage_schedule', important: true },
-      { icon: CalendarDays, label: 'Calendar', path: '/calendar', permission: 'manage_schedule' },
-      { icon: CheckSquare, label: 'To Do', path: '/tasks', permission: 'manage_tasks' },
-      { icon: Files, label: 'Documents', path: '/documents', permission: 'manage_documents' },
-      { icon: BriefcaseBusiness, label: 'Resources', path: '/resources', permission: 'manage_resources' },
-      { icon: Ticket, label: 'Tickets', path: '/tickets', permission: 'manage_tasks', important: true },
+      { icon: FolderKanban, label: 'Projects Portfolio', path: '/projects', permission: 'manage_projects', important: true },
+      { icon: CheckSquare, label: 'Tasks & Activities', path: '/tasks', permission: 'manage_tasks', important: true },
+      { icon: GanttChart, label: 'Master Schedule', path: '/schedule', permission: 'manage_schedule', important: true },
+      { icon: Ticket, label: 'Open Points / Tickets', path: '/tickets', permission: 'manage_tasks', important: true },
+      { icon: CalendarDays, label: 'Calendar & Meetings', path: '/calendar', permission: 'manage_schedule' },
+      { icon: Files, label: 'Documents Center', path: '/documents', permission: 'manage_documents' },
+      { icon: BriefcaseBusiness, label: 'Resources & Utilization', path: '/resources', permission: 'manage_resources' },
     ],
   },
   {
     title: 'Collaboration',
     items: [
-      { icon: Users, label: 'Team', path: '/team', permission: 'manage_team' },
+      { icon: Users, label: 'Team Directory', path: '/team', permission: 'manage_team' },
       { icon: MessageSquare, label: 'Team Chat', path: '/team-chat', permission: 'team_chat' },
-      { icon: MessageSquare, label: 'AI Agent', path: '/ai-chat', highlight: true },
+      { icon: MessageSquare, label: 'AI PM Assistant', path: '/ai-chat', highlight: true },
       { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', important: true },
     ],
   },
   {
     title: 'Administration',
     items: [
-      { icon: ShieldCheck, label: 'Permissions', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
-      { icon: Settings, label: 'Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
+      { icon: ShieldCheck, label: 'Permissions & Access', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
+      { icon: Settings, label: 'Workspace Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
-      { icon: FileUp, label: 'Import/Export', path: '/import-export', permission: 'export' },
+      { icon: FileUp, label: 'Import / Export', path: '/import-export', permission: 'export' },
     ],
   },
 ];
@@ -157,7 +157,7 @@ const AppSidebar = () => {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-base font-black tracking-tight">{settings?.branding.appName || 'IMS'}</span>
-                <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/50">Workspace menu</span>
+                <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/50">PMO command menu</span>
               </span>
             </Link>
           )}
