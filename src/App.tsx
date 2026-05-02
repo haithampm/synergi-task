@@ -35,7 +35,7 @@ const UserAccounts = lazy(() => import("./pages/UserAccounts"));
 const Profile = lazy(() => import("./pages/Profile"));
 const StickyNotesPage = lazy(() => import("./pages/StickyNotes"));
 const ImportExport = lazy(() => import("./pages/ImportExportProgress"));
-const Schedule = lazy(() => import("./pages/ScheduleAdvanced"));
+const Schedule = lazy(() => import("./pages/ScheduleSpreadsheet"));
 const AppMonitor = lazy(() => import("./pages/AppMonitor"));
 const Auth = lazy(() => import("./pages/Auth"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -55,9 +55,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
   useWorkspaceProfileLink(user);
   useWorkspaceRealtimeSync();
 
-  if (workspaceAccess.loading) {
-    return <AppLoader />;
-  }
+  if (workspaceAccess.loading) return <AppLoader />;
 
   if (workspaceAccess.error) {
     return (
@@ -65,26 +63,14 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
         <div className="max-w-lg w-full rounded-3xl border bg-card p-8 text-center space-y-4 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Workspace Access Required</p>
           <h1 className="text-2xl font-semibold">This account is not linked to the production workspace yet</h1>
-          <p className="text-sm text-muted-foreground">
-            {workspaceAccess.error}
-          </p>
-          <Button
-            type="button"
-            className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            onClick={() => {
-              void signOut();
-            }}
-          >
-            Sign Out
-          </Button>
+          <p className="text-sm text-muted-foreground">{workspaceAccess.error}</p>
+          <Button type="button" className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => { void signOut(); }}>Sign Out</Button>
         </div>
       </div>
     );
   }
 
-  const matchedAccount = userAccounts.find(
-    (acc) => acc.email.trim().toLowerCase() === user.email?.trim().toLowerCase()
-  );
+  const matchedAccount = userAccounts.find((acc) => acc.email.trim().toLowerCase() === user.email?.trim().toLowerCase());
 
   if (matchedAccount?.status === "suspended") {
     return (
@@ -92,19 +78,8 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
         <div className="max-w-md w-full rounded-3xl border bg-card p-8 text-center space-y-4 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Access Restricted</p>
           <h1 className="text-2xl font-semibold">This user account is suspended</h1>
-          <p className="text-sm text-muted-foreground">
-            The administrator has suspended access for <span className="font-medium text-foreground">{matchedAccount.email}</span>.
-            Contact your workspace admin to reactivate the profile.
-          </p>
-          <Button
-            type="button"
-            className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            onClick={() => {
-              void signOut();
-            }}
-          >
-            Sign Out
-          </Button>
+          <p className="text-sm text-muted-foreground">The administrator has suspended access for <span className="font-medium text-foreground">{matchedAccount.email}</span>. Contact your workspace admin to reactivate the profile.</p>
+          <Button type="button" className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => { void signOut(); }}>Sign Out</Button>
         </div>
       </div>
     );
@@ -114,9 +89,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
     <>
       <ActiveProjectDataSanitizer />
       <ProjectExperienceEnhancer />
-      <Suspense fallback={null}>
-        <CommandPalette />
-      </Suspense>
+      <Suspense fallback={null}><CommandPalette /></Suspense>
       <Suspense fallback={<AppLoader />}>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -148,16 +121,11 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
 
 function ProtectedRoutes() {
   const { user, loading, signOut } = useAuth();
-
-  if (loading) {
-    return <AppLoader />;
-  }
-
+  if (loading) return <AppLoader />;
   if (!user) {
     const requestedPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     return <Navigate to={`/auth?redirect=${encodeURIComponent(requestedPath)}`} replace />;
   }
-
   return <AuthenticatedWorkspace user={user} signOut={signOut} />;
 }
 
@@ -167,11 +135,7 @@ function AuthRoute() {
   const redirectPath = getSafeRedirectPath(window.location.search, "/");
   if (loading) return <AppLoader />;
   if (user && !allowRecoveryScreen) return <Navigate to={redirectPath} replace />;
-  return (
-    <Suspense fallback={<AppLoader />}>
-      <Auth />
-    </Suspense>
-  );
+  return <Suspense fallback={<AppLoader />}><Auth /></Suspense>;
 }
 
 function App() {
