@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateWorkspace, workspaceKeys } from "@/hooks/useProjects";
 import { isSupabaseReady } from "@/integrations/supabase/workspace-data";
 
-const CASCADE_REFRESH_DEBOUNCE_MS = 350;
-const ACTIVE_SYNC_INTERVAL_MS = 15_000;
+const CASCADE_REFRESH_DEBOUNCE_MS = 800;
+const ACTIVE_SYNC_INTERVAL_MS = 120_000;
+const MIN_REFRESH_GAP_MS = 5_000;
 
 const workspaceMutationKeywords = [
   "project",
@@ -35,6 +36,8 @@ const isWorkspaceRelatedMutation = (mutation: any) => {
 
 export const useWorkspaceDataBridge = () => {
   const queryClient = useQueryClient();
+  const lastRefreshAtRef = useRef(0);
+  const runningRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +47,7 @@ export const useWorkspaceDataBridge = () => {
     const notify = (status: string, reason: string) => {
       window.dispatchEvent(
         new CustomEvent("workspace-sync-status", {
-          detail: { status, reason, syncedAt: status === "synced" ? new Date().toISOString() : undefined },
+          detail: { source: "workspace-data-bridge", status, reason, syncedAt: status === "synced" ? new Date().toISOString() : undefined },
         }),
       );
     };
@@ -55,22 +58,30 @@ export const useWorkspaceDataBridge = () => {
 
       const run = () => {
         if (cancelled) return;
+        const now = Date.now();
+        if (runningRef.current || now - lastRefreshAtRef.current < MIN_REFRESH_GAP_MS) return;
+
+        runningRef.current = true;
+        lastRefreshAtRef.current = now;
         notify("syncing", reason);
 
         void Promise.all([
           invalidateWorkspace(queryClient),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.projects, type: "active" }),
-          queryClient.refetchQueries({ queryKey: ["tasks"], type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.team, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.tickets, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.meetings, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.stickyNotes, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.dashboard, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.dashboards, type: "active" }),
-          queryClient.refetchQueries({ queryKey: workspaceKeys.reports, type: "active" }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.projects }),
+          queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.team }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.tickets }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.meetings }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.stickyNotes }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.dashboard }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.dashboards }),
+          queryClient.invalidateQueries({ queryKey: workspaceKeys.reports }),
         ])
           .then(() => notify("synced", reason))
-          .catch(() => notify("error", reason));
+          .catch(() => notify("error", reason))
+          .finally(() => {
+            runningRef.current = false;
+          });
       };
 
       if (immediate) run();
@@ -91,13 +102,14 @@ export const useWorkspaceDataBridge = () => {
     });
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === "synergi-workspace-sync") refreshLinkedWorkspaceData("cross-tab-update", true);
+      if (event.key === "synergi-workspace-sync") refreshLinkedWorkspaceData("cross-tab-update");
     };
     const handleManualRefresh = () => refreshLinkedWorkspaceData("manual-workspace-refresh", true);
     const handleWorkspaceSyncStatus = (event: Event) => {
       const detail = (event as CustomEvent).detail;
-      if (detail?.status === "synced" || detail?.status === "live") {
-        refreshLinkedWorkspaceData(`bridge-${detail.reason ?? "realtime"}`);
+      if (detail?.source === "workspace-data-bridge") return;
+      if (detail?.status === "live" || detail?.reason === "remote-change") {
+        refreshLinkedWorkspaceData(`realtime-${detail.reason ?? "remote-change"}`);
       }
     };
 
@@ -107,11 +119,9 @@ export const useWorkspaceDataBridge = () => {
 
     interval = window.setInterval(() => {
       if (document.visibilityState === "visible" && isSupabaseReady()) {
-        refreshLinkedWorkspaceData("active-data-bridge-poll");
+        refreshLinkedWorkspaceData("background-health-refresh");
       }
     }, ACTIVE_SYNC_INTERVAL_MS);
-
-    refreshLinkedWorkspaceData("data-bridge-mounted", true);
 
     return () => {
       cancelled = true;
