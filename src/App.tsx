@@ -11,6 +11,7 @@ import { useWorkspaceAccessBootstrap } from "@/hooks/useWorkspaceAccessBootstrap
 import { useUserAccounts, useWorkspaceSettings } from "@/hooks/useProjects";
 import { useWorkspaceProfileLink } from "@/hooks/useWorkspaceProfileLink";
 import { useWorkspaceRealtimeSync } from "@/hooks/useWorkspaceRealtimeSync";
+import { useWorkspaceDataBridge } from "@/hooks/useWorkspaceDataBridge";
 import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 import { getSafeRedirectPath } from "@/lib/auth-ui";
 import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEnhancer";
@@ -54,6 +55,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
   const { data: userAccounts = [] } = useUserAccounts();
   useWorkspaceProfileLink(user);
   useWorkspaceRealtimeSync();
+  useWorkspaceDataBridge();
 
   if (workspaceAccess.loading) return <AppLoader />;
 
