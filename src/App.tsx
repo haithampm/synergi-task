@@ -20,7 +20,7 @@ import type { User } from "@supabase/supabase-js";
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
 const Dashboard = lazy(() => import("./pages/DashboardDynamic"));
 const Projects = lazy(() => import("./pages/Projects"));
-const Tasks = lazy(() => import("./pages/TasksGroupedTable"));
+const Tasks = lazy(() => import("./pages/TasksWorkManagement"));
 const Team = lazy(() => import("./pages/Team"));
 const TeamChatPage = lazy(() => import("./pages/TeamChat"));
 const CalendarPage = lazy(() => import("./pages/Calendar"));
