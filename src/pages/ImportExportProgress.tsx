@@ -276,14 +276,21 @@ const ImportExportProgress = () => {
     downloadText(`${dataset}-${stamp}.${format}`, format === "json" ? JSON.stringify(records, null, 2) : csvForGenericRows(records), format === "json" ? "application/json" : "text/csv;charset=utf-8");
   };
 
+  const exportAllSystemData = () => {
+    const current = readWorkspaceData();
+    const stamp = new Date().toISOString().slice(0, 10);
+    const backup = Object.fromEntries(datasets.map((item) => [item.key, (current as any)[item.key] ?? []]));
+    downloadText(`synergi-all-system-data-${stamp}.json`, JSON.stringify(backup, null, 2), "application/json");
+  };
+
   return (
     <AppLayout>
       <AppHeader title="Import / Export" subtitle="Import and export system data. Ticket exports use the exact approved Ticket Register form columns." />
       <div className="space-y-6 p-4 sm:p-6">
-        <PageSection title="System Data Import / Export Center" description="Select Tickets / Open Points to export the exact ticket form columns: ID, Project, Application, Requested By, Request Date, Description (Case), Priority, Ticket Number, Status, Closure Date, Replay, Note1, Note2." />
+        <PageSection title="System Data Import / Export Center" description="Use this page for all import and export actions. Export was removed from the global quick bar and is now managed here only." />
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card className="glass border-primary/20 shadow-xl">
-            <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><UploadCloud className="h-5 w-5 text-primary" /> Import data</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><UploadCloud className="h-5 w-5 text-primary" /> Import Data</CardTitle></CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2"><Label>Data scope</Label><Select value={dataset} onValueChange={(value) => setDataset(value as DatasetKey)} disabled={busy}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{scopeOptions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
@@ -293,7 +300,7 @@ const ImportExportProgress = () => {
               <div className="rounded-2xl border bg-muted/20 p-4"><Badge>{busy ? "Processing" : lastResult}</Badge></div>
             </CardContent>
           </Card>
-          <Card className="glass"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-primary" /> Export / backup</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Ticket CSV and JSON exports are mapped to the updated ticket form columns only.</p><div className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="mr-2 h-4 w-4" /> CSV</Button><Button variant="outline" onClick={() => exportData("json")}><Download className="mr-2 h-4 w-4" /> JSON</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
+          <Card className="glass border-accent/20 shadow-xl"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-accent" /> Export Data</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Export the selected data scope. Ticket exports are mapped to the updated ticket form columns only.</p><div className="grid gap-2"><Button className="justify-start gap-2" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="h-4 w-4" /> Export Selected Scope as CSV</Button><Button variant="outline" className="justify-start gap-2" onClick={() => exportData("json")}><Download className="h-4 w-4" /> Export Selected Scope as JSON</Button><Button variant="secondary" className="justify-start gap-2" onClick={exportAllSystemData}><Download className="h-4 w-4" /> Export All System Data Backup</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
         </div>
         <Card className="glass overflow-hidden"><CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> System counts</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Dataset</TableHead><TableHead>Export fields</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader><TableBody>{datasets.map((item) => <TableRow key={item.key}><TableCell className="font-semibold">{item.label}</TableCell><TableCell className="text-muted-foreground">{item.key === "tickets" ? ticketRegisterExportColumns.join(" | ") : item.required.join(", ")}</TableCell><TableCell className="text-right font-black">{counts[item.key]}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
       </div>
