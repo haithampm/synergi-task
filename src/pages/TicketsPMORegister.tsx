@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CalendarDays, FileText, Pencil, Plus, Search, TicketCheck } from 'lucide-react';
+import { CalendarDays, Pencil, Plus, Search, TicketCheck } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
@@ -10,19 +10,13 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import TicketRegisterImporter from '@/components/tickets/TicketRegisterImporter';
 import { useCreateTicket, useProjects, useTeamMembers, useTickets, useUpdateTicket } from '@/hooks/useProjects';
 import { toast } from 'sonner';
 import type { WorkspaceTicket } from '@/lib/workspace-store';
 
 const ticketStatuses = ['open', 'in-progress', 'resolved', 'closed'];
 const priorities = ['urgent', 'high', 'medium', 'low'];
-
-const statusStyle: Record<string, string> = {
-  open: 'bg-red-500/10 text-red-600 border-red-500/20',
-  'in-progress': 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  resolved: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  closed: 'bg-muted text-muted-foreground border-border',
-};
 
 const emptyDraft = {
   idText: '',
@@ -73,21 +67,7 @@ export default function TicketsPMORegister() {
     return tickets.filter((ticket: any) => {
       const projectId = projectIdOf(ticket);
       const matchesProject = !projectFilterId || projectId === projectFilterId;
-      const haystack = [
-        ticket.id,
-        ticketNo(ticket),
-        projectNameById.get(projectId),
-        application(ticket),
-        requestedBy(ticket),
-        requestDate(ticket),
-        caseText(ticket),
-        ticket.priority,
-        ticket.status,
-        closureDate(ticket),
-        reply(ticket),
-        note1(ticket),
-        note2(ticket),
-      ].join(' ').toLowerCase();
+      const haystack = [ticket.id, ticketNo(ticket), projectNameById.get(projectId), application(ticket), requestedBy(ticket), requestDate(ticket), caseText(ticket), ticket.priority, ticket.status, closureDate(ticket), reply(ticket), note1(ticket), note2(ticket)].join(' ').toLowerCase();
       return matchesProject && (!q || haystack.includes(q));
     });
   }, [projectFilterId, projectNameById, search, tickets]);
@@ -121,40 +101,8 @@ export default function TicketsPMORegister() {
 
   const buildPayload = () => {
     const title = draft.ticketNumber?.trim() || draft.descriptionCase.trim().slice(0, 80) || 'New ticket case';
-    const customFieldValues = {
-      ...(editingTicket as any)?.customFieldValues,
-      idText: draft.idText,
-      projectId: draft.projectId,
-      application: draft.application,
-      requestedBy: draft.requestedBy,
-      requestDate: draft.requestDate,
-      descriptionCase: draft.descriptionCase,
-      ticketNumber: draft.ticketNumber,
-      closureDate: draft.closureDate,
-      reply: draft.reply,
-      note1: draft.note1,
-      note2: draft.note2,
-    };
-    return {
-      title,
-      description: draft.descriptionCase,
-      priority: draft.priority as WorkspaceTicket['priority'],
-      status: draft.status as WorkspaceTicket['status'],
-      assignee: draft.requestedBy || 'Unassigned',
-      projectId: draft.projectId || undefined,
-      sla: draft.status === 'closed' ? 'Closed' : 'Active',
-      customFieldValues,
-      idText: draft.idText,
-      application: draft.application,
-      requestedBy: draft.requestedBy,
-      requestDate: draft.requestDate,
-      descriptionCase: draft.descriptionCase,
-      ticketNumber: draft.ticketNumber,
-      closureDate: draft.closureDate,
-      reply: draft.reply,
-      note1: draft.note1,
-      note2: draft.note2,
-    } as any;
+    const customFieldValues = { ...(editingTicket as any)?.customFieldValues, idText: draft.idText, projectId: draft.projectId, application: draft.application, requestedBy: draft.requestedBy, requestDate: draft.requestDate, descriptionCase: draft.descriptionCase, ticketNumber: draft.ticketNumber, closureDate: draft.closureDate, reply: draft.reply, note1: draft.note1, note2: draft.note2 };
+    return { title, description: draft.descriptionCase, priority: draft.priority as WorkspaceTicket['priority'], status: draft.status as WorkspaceTicket['status'], assignee: draft.requestedBy || 'Unassigned', projectId: draft.projectId || undefined, sla: draft.status === 'closed' ? 'Closed' : 'Active', customFieldValues, idText: draft.idText, application: draft.application, requestedBy: draft.requestedBy, requestDate: draft.requestDate, descriptionCase: draft.descriptionCase, ticketNumber: draft.ticketNumber, closureDate: draft.closureDate, reply: draft.reply, note1: draft.note1, note2: draft.note2 } as any;
   };
 
   const saveTicket = async () => {
@@ -168,22 +116,14 @@ export default function TicketsPMORegister() {
       await createTicket.mutateAsync(payload as Partial<WorkspaceTicket> & { title: string });
       toast.success('Ticket case created');
     }
+    window.dispatchEvent(new CustomEvent('workspace-data-changed', { detail: { entity: 'tickets', reason: 'ticket-form-save' } }));
     setDialogOpen(false);
     setEditingTicket(null);
   };
 
   const updateStatus = async (ticket: WorkspaceTicket, status: string) => {
     const closeDate = status === 'closed' ? new Date().toISOString().slice(0, 10) : closureDate(ticket as any);
-    await updateTicket.mutateAsync({
-      id: ticket.id,
-      status: status as WorkspaceTicket['status'],
-      sla: status === 'closed' ? 'Closed' : 'Active',
-      customFieldValues: {
-        ...(ticket as any).customFieldValues,
-        closureDate: closeDate,
-      },
-      closureDate: closeDate,
-    } as any);
+    await updateTicket.mutateAsync({ id: ticket.id, status: status as WorkspaceTicket['status'], sla: status === 'closed' ? 'Closed' : 'Active', customFieldValues: { ...(ticket as any).customFieldValues, closureDate: closeDate }, closureDate: closeDate } as any);
     toast.success('Ticket status updated');
   };
 
@@ -198,7 +138,10 @@ export default function TicketsPMORegister() {
               <h1 className="text-2xl font-black">Case Register</h1>
               <p className="text-sm text-muted-foreground">Track ID, project, application, requester, case description, response, notes and closure.</p>
             </div>
-            <Button className="gap-2" onClick={openCreate}><Plus className="h-4 w-4" />Create Ticket Case</Button>
+            <div className="flex flex-wrap gap-2">
+              <TicketRegisterImporter projects={projects as any} tickets={tickets as any} createTicket={createTicket as any} updateTicket={updateTicket as any} />
+              <Button className="gap-2" onClick={openCreate}><Plus className="h-4 w-4" />Create Ticket Case</Button>
+            </div>
           </div>
         </div>
 
@@ -209,10 +152,7 @@ export default function TicketsPMORegister() {
           </label>
           <Select value={projectFilterId || 'all'} onValueChange={(value) => setSearchParams(value === 'all' ? {} : { projectId: value }, { replace: true })}>
             <SelectTrigger><SelectValue placeholder="Project" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Projects</SelectItem>
-              {projects.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-            </SelectContent>
+            <SelectContent><SelectItem value="all">All Projects</SelectItem>{projects.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="outline" onClick={() => { setSearch(''); setSearchParams({}, { replace: true }); }}>Reset</Button>
         </div>
@@ -224,104 +164,10 @@ export default function TicketsPMORegister() {
           <Card><CardContent className="p-4"><p className="text-xs uppercase tracking-wider text-muted-foreground">Closed</p><p className="mt-1 text-2xl font-bold">{filtered.filter((ticket: any) => ticket.status === 'closed').length}</p></CardContent></Card>
         </div>
 
-        <Card className="overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-[1900px] w-full text-sm">
-              <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-3">ID</th>
-                  <th className="px-3 py-3">Project</th>
-                  <th className="px-3 py-3">Application</th>
-                  <th className="px-3 py-3">Requested By</th>
-                  <th className="px-3 py-3">Request Date</th>
-                  <th className="px-3 py-3">Description / Case</th>
-                  <th className="px-3 py-3">Priority</th>
-                  <th className="px-3 py-3">Ticket Number</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Closure Date</th>
-                  <th className="px-3 py-3">Reply</th>
-                  <th className="px-3 py-3">Note 1</th>
-                  <th className="px-3 py-3">Note 2</th>
-                  <th className="px-3 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((ticket: any) => {
-                  const projectId = projectIdOf(ticket);
-                  return (
-                    <tr key={ticket.id} className="border-t hover:bg-muted/20">
-                      <td className="px-3 py-3 font-mono text-xs">{getField(ticket, 'idText', ticket.id)}</td>
-                      <td className="px-3 py-3 min-w-[180px]">{projectId ? <Link className="font-medium text-primary hover:underline" to={`/projects?projectId=${projectId}`}>{projectNameById.get(projectId) || 'Project'}</Link> : 'Not linked'}</td>
-                      <td className="px-3 py-3">{application(ticket)}</td>
-                      <td className="px-3 py-3">{requestedBy(ticket)}</td>
-                      <td className="px-3 py-3"><CalendarDays className="mr-1 inline h-3 w-3" />{requestDate(ticket)}</td>
-                      <td className="px-3 py-3 max-w-[320px]"><p className="line-clamp-2">{caseText(ticket)}</p></td>
-                      <td className="px-3 py-3"><Badge variant="outline" className="capitalize">{ticket.priority}</Badge></td>
-                      <td className="px-3 py-3 font-semibold">{ticketNo(ticket)}</td>
-                      <td className="px-3 py-3">
-                        <Select value={ticket.status} onValueChange={(value) => updateStatus(ticket, value)}>
-                          <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>{ticketStatuses.map((status) => <SelectItem key={status} value={status}>{status.replace(/-/g, ' ')}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-3 py-3">{closureDate(ticket)}</td>
-                      <td className="px-3 py-3 max-w-[260px]"><p className="line-clamp-2">{reply(ticket)}</p></td>
-                      <td className="px-3 py-3 max-w-[220px]"><p className="line-clamp-2">{note1(ticket)}</p></td>
-                      <td className="px-3 py-3 max-w-[220px]"><p className="line-clamp-2">{note2(ticket)}</p></td>
-                      <td className="px-3 py-3 text-right"><Button variant="outline" size="sm" onClick={() => openEdit(ticket)}><Pencil className="mr-1 h-3 w-3" />Open</Button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {!filtered.length ? <div className="p-10 text-center text-sm text-muted-foreground">No ticket cases match the current filters.</div> : null}
-          </div>
-        </Card>
+        <Card className="overflow-hidden shadow-sm"><div className="overflow-x-auto"><table className="min-w-[1900px] w-full text-sm"><thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr>{['ID','Project','Application','Requested By','Request Date','Description / Case','Priority','Ticket Number','Status','Closure Date','Reply','Note 1','Note 2','Actions'].map((h)=><th key={h} className="px-3 py-3 text-right last:text-right first:text-left">{h}</th>)}</tr></thead><tbody>{filtered.map((ticket: any) => { const projectId = projectIdOf(ticket); return <tr key={ticket.id} className="border-t hover:bg-muted/20"><td className="px-3 py-3 font-mono text-xs">{getField(ticket, 'idText', ticket.id)}</td><td className="px-3 py-3 min-w-[180px]">{projectId ? <Link className="font-medium text-primary hover:underline" to={`/projects?projectId=${projectId}`}>{projectNameById.get(projectId) || 'Project'}</Link> : 'Not linked'}</td><td className="px-3 py-3">{application(ticket)}</td><td className="px-3 py-3">{requestedBy(ticket)}</td><td className="px-3 py-3"><CalendarDays className="mr-1 inline h-3 w-3" />{requestDate(ticket)}</td><td className="px-3 py-3 max-w-[320px]"><p className="line-clamp-2">{caseText(ticket)}</p></td><td className="px-3 py-3"><Badge variant="outline" className="capitalize">{ticket.priority}</Badge></td><td className="px-3 py-3 font-semibold">{ticketNo(ticket)}</td><td className="px-3 py-3"><Select value={ticket.status} onValueChange={(value) => updateStatus(ticket, value)}><SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger><SelectContent>{ticketStatuses.map((status) => <SelectItem key={status} value={status}>{status.replace(/-/g, ' ')}</SelectItem>)}</SelectContent></Select></td><td className="px-3 py-3">{closureDate(ticket)}</td><td className="px-3 py-3 max-w-[260px]"><p className="line-clamp-2">{reply(ticket)}</p></td><td className="px-3 py-3 max-w-[220px]"><p className="line-clamp-2">{note1(ticket)}</p></td><td className="px-3 py-3 max-w-[220px]"><p className="line-clamp-2">{note2(ticket)}</p></td><td className="px-3 py-3 text-right"><Button variant="outline" size="sm" onClick={() => openEdit(ticket)}><Pencil className="mr-1 h-3 w-3" />Open</Button></td></tr>; })}</tbody></table>{!filtered.length ? <div className="p-10 text-center text-sm text-muted-foreground">No ticket cases match the current filters.</div> : null}</div></Card>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-5xl">
-            <DialogHeader><DialogTitle>{editingTicket ? 'Edit Ticket Case' : 'Create Ticket Case'}</DialogTitle></DialogHeader>
-            <div className="grid gap-4 py-2 lg:grid-cols-3">
-              <Input placeholder="ID" value={draft.idText} onChange={(e) => setDraft((p) => ({ ...p, idText: e.target.value }))} />
-              <Select value={draft.projectId || '__none__'} onValueChange={(value) => setDraft((p) => ({ ...p, projectId: value === '__none__' ? '' : value }))}>
-                <SelectTrigger><SelectValue placeholder="Project" /></SelectTrigger>
-                <SelectContent><SelectItem value="__none__">No project</SelectItem>{projects.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
-              </Select>
-              <Input placeholder="Application" value={draft.application} onChange={(e) => setDraft((p) => ({ ...p, application: e.target.value }))} />
-              <Select value={draft.requestedBy || '__manual__'} onValueChange={(value) => setDraft((p) => ({ ...p, requestedBy: value === '__manual__' ? '' : value }))}>
-                <SelectTrigger><SelectValue placeholder="Requested By" /></SelectTrigger>
-                <SelectContent><SelectItem value="__manual__">Manual entry</SelectItem>{teamMembers.map((member: any) => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}</SelectContent>
-              </Select>
-              <Input placeholder="Requested By - manual" value={draft.requestedBy} onChange={(e) => setDraft((p) => ({ ...p, requestedBy: e.target.value }))} />
-              <Input type="date" placeholder="Request Date" value={draft.requestDate} onChange={(e) => setDraft((p) => ({ ...p, requestDate: e.target.value }))} />
-              <div className="lg:col-span-3">
-                <Textarea rows={4} placeholder="Description (Case) *" value={draft.descriptionCase} onChange={(e) => setDraft((p) => ({ ...p, descriptionCase: e.target.value }))} />
-              </div>
-              <Select value={draft.priority} onValueChange={(value) => setDraft((p) => ({ ...p, priority: value }))}>
-                <SelectTrigger><SelectValue placeholder="Priority" /></SelectTrigger>
-                <SelectContent>{priorities.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}</SelectContent>
-              </Select>
-              <Input placeholder="Ticket Number *" value={draft.ticketNumber} onChange={(e) => setDraft((p) => ({ ...p, ticketNumber: e.target.value }))} />
-              <Select value={draft.status} onValueChange={(value) => setDraft((p) => ({ ...p, status: value }))}>
-                <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
-                <SelectContent>{ticketStatuses.map((status) => <SelectItem key={status} value={status}>{status.replace(/-/g, ' ')}</SelectItem>)}</SelectContent>
-              </Select>
-              <Input type="date" placeholder="Closure Date" value={draft.closureDate} onChange={(e) => setDraft((p) => ({ ...p, closureDate: e.target.value }))} />
-              <div className="lg:col-span-2">
-                <Textarea rows={3} placeholder="Reply" value={draft.reply} onChange={(e) => setDraft((p) => ({ ...p, reply: e.target.value }))} />
-              </div>
-              <Textarea rows={3} placeholder="Note 1" value={draft.note1} onChange={(e) => setDraft((p) => ({ ...p, note1: e.target.value }))} />
-              <Textarea rows={3} placeholder="Note 2" value={draft.note2} onChange={(e) => setDraft((p) => ({ ...p, note2: e.target.value }))} />
-              <div className="rounded-2xl border bg-muted/20 p-4 text-sm lg:col-span-3">
-                <div className="flex items-center gap-2 font-semibold"><TicketCheck className="h-4 w-4 text-primary" /> Ticket Register Mapping</div>
-                <p className="mt-1 text-muted-foreground">The register fields are saved with the ticket record and mirrored into custom field values so import/export and future form changes can reuse them.</p>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={saveTicket}>{editingTicket ? 'Save Ticket Case' : 'Create Ticket Case'}</Button>
-            </DialogFooter>
-          </DialogContent>
+          <DialogContent className="max-w-5xl"><DialogHeader><DialogTitle>{editingTicket ? 'Edit Ticket Case' : 'Create Ticket Case'}</DialogTitle></DialogHeader><div className="grid gap-4 py-2 lg:grid-cols-3"><Input placeholder="ID" value={draft.idText} onChange={(e) => setDraft((p) => ({ ...p, idText: e.target.value }))} /><Select value={draft.projectId || '__none__'} onValueChange={(value) => setDraft((p) => ({ ...p, projectId: value === '__none__' ? '' : value }))}><SelectTrigger><SelectValue placeholder="Project" /></SelectTrigger><SelectContent><SelectItem value="__none__">No project</SelectItem>{projects.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent></Select><Input placeholder="Application" value={draft.application} onChange={(e) => setDraft((p) => ({ ...p, application: e.target.value }))} /><Select value={draft.requestedBy || '__manual__'} onValueChange={(value) => setDraft((p) => ({ ...p, requestedBy: value === '__manual__' ? '' : value }))}><SelectTrigger><SelectValue placeholder="Requested By" /></SelectTrigger><SelectContent><SelectItem value="__manual__">Manual entry</SelectItem>{teamMembers.map((member: any) => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}</SelectContent></Select><Input placeholder="Requested By - manual" value={draft.requestedBy} onChange={(e) => setDraft((p) => ({ ...p, requestedBy: e.target.value }))} /><Input type="date" placeholder="Request Date" value={draft.requestDate} onChange={(e) => setDraft((p) => ({ ...p, requestDate: e.target.value }))} /><div className="lg:col-span-3"><Textarea rows={4} placeholder="Description (Case) *" value={draft.descriptionCase} onChange={(e) => setDraft((p) => ({ ...p, descriptionCase: e.target.value }))} /></div><Select value={draft.priority} onValueChange={(value) => setDraft((p) => ({ ...p, priority: value }))}><SelectTrigger><SelectValue placeholder="Priority" /></SelectTrigger><SelectContent>{priorities.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}</SelectContent></Select><Input placeholder="Ticket Number *" value={draft.ticketNumber} onChange={(e) => setDraft((p) => ({ ...p, ticketNumber: e.target.value }))} /><Select value={draft.status} onValueChange={(value) => setDraft((p) => ({ ...p, status: value }))}><SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger><SelectContent>{ticketStatuses.map((status) => <SelectItem key={status} value={status}>{status.replace(/-/g, ' ')}</SelectItem>)}</SelectContent></Select><Input type="date" placeholder="Closure Date" value={draft.closureDate} onChange={(e) => setDraft((p) => ({ ...p, closureDate: e.target.value }))} /><div className="lg:col-span-2"><Textarea rows={3} placeholder="Reply" value={draft.reply} onChange={(e) => setDraft((p) => ({ ...p, reply: e.target.value }))} /></div><Textarea rows={3} placeholder="Note 1" value={draft.note1} onChange={(e) => setDraft((p) => ({ ...p, note1: e.target.value }))} /><Textarea rows={3} placeholder="Note 2" value={draft.note2} onChange={(e) => setDraft((p) => ({ ...p, note2: e.target.value }))} /><div className="rounded-2xl border bg-muted/20 p-4 text-sm lg:col-span-3"><div className="flex items-center gap-2 font-semibold"><TicketCheck className="h-4 w-4 text-primary" /> Ticket Register Mapping</div><p className="mt-1 text-muted-foreground">All register fields are saved with the ticket record and mirrored into custom field values for import/export compatibility.</p></div></div><DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button onClick={saveTicket}>{editingTicket ? 'Save Ticket Case' : 'Create Ticket Case'}</Button></DialogFooter></DialogContent>
         </Dialog>
       </div>
     </AppLayout>
