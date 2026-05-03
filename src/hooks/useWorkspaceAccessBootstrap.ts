@@ -24,6 +24,13 @@ const needsWorkspaceSeed = (branding: unknown) => {
   return !Array.isArray(record.privilegeRoles) || !Array.isArray(record.integrations);
 };
 
+const isTransientBrowserLockError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /lock broken|steal option|navigator\.locks|lock request/i.test(message);
+};
+
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export const useWorkspaceAccessBootstrap = (user: User | null): WorkspaceAccessBootstrapState => {
   const queryClient = useQueryClient();
   const [state, setState] = useState<WorkspaceAccessBootstrapState>({
@@ -39,38 +46,62 @@ export const useWorkspaceAccessBootstrap = (user: User | null): WorkspaceAccessB
 
     let cancelled = false;
 
+    const runWorkspaceCheck = async () => {
+      const result = await ensureRemoteWorkspaceMembership();
+      if (cancelled) return;
+
+      const context = await fetchRemoteWorkspaceContext();
+      if (!context?.membership?.workspace_id) {
+        setState({
+          loading: false,
+          error:
+            result.message ??
+            "This signed-in account is not linked to a workspace yet. Ask the workspace owner to link your account.",
+        });
+        return;
+      }
+
+      if (result.status === "created" || needsWorkspaceSeed(context.workspace?.branding)) {
+        await syncWorkspaceSettings(readWorkspaceData().settings);
+      }
+
+      await invalidateWorkspace(queryClient);
+      if (!cancelled) {
+        setState({ loading: false, error: null });
+      }
+    };
+
     const run = async () => {
       setState({ loading: true, error: null });
       try {
-        const result = await ensureRemoteWorkspaceMembership();
+        await runWorkspaceCheck();
+      } catch (error) {
         if (cancelled) return;
 
-        const context = await fetchRemoteWorkspaceContext();
-        if (!context?.membership?.workspace_id) {
-          setState({
-            loading: false,
-            error:
-              result.message ??
-              "This signed-in account is not linked to a workspace yet. Ask the workspace owner to link your account.",
-          });
-          return;
+        if (isTransientBrowserLockError(error)) {
+          try {
+            await wait(900);
+            if (cancelled) return;
+            await runWorkspaceCheck();
+            return;
+          } catch (retryError) {
+            if (cancelled) return;
+            if (isTransientBrowserLockError(retryError)) {
+              setState({ loading: false, error: null });
+              return;
+            }
+            setState({
+              loading: false,
+              error: retryError instanceof Error ? retryError.message : "Failed to connect this account to the workspace.",
+            });
+            return;
+          }
         }
 
-        if (result.status === "created" || needsWorkspaceSeed(context.workspace?.branding)) {
-          await syncWorkspaceSettings(readWorkspaceData().settings);
-        }
-
-        await invalidateWorkspace(queryClient);
-        if (!cancelled) {
-          setState({ loading: false, error: null });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            loading: false,
-            error: error instanceof Error ? error.message : "Failed to connect this account to the workspace.",
-          });
-        }
+        setState({
+          loading: false,
+          error: error instanceof Error ? error.message : "Failed to connect this account to the workspace.",
+        });
       }
     };
 
