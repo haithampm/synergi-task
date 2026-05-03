@@ -29,7 +29,7 @@ const DocumentsPage = lazy(() => import("./pages/Documents"));
 const ResourcesPage = lazy(() => import("./pages/Resources"));
 const AiChat = lazy(() => import("./pages/AiChat"));
 const Reports = lazy(() => import("./pages/Reports"));
-const Tickets = lazy(() => import("./pages/Tickets"));
+const Tickets = lazy(() => import("./pages/TicketsPMORegister"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Permissions = lazy(() => import("./pages/Permissions"));
 const UserAccounts = lazy(() => import("./pages/UserAccounts"));
