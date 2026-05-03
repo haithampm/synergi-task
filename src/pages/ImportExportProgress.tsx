@@ -33,6 +33,22 @@ const datasets: Array<{ key: SingleDatasetKey; label: string; required: string[]
 
 const scopeOptions: Array<{ key: DatasetKey; label: string }> = [{ key: "all", label: "All System Data" }, ...datasets];
 
+const ticketRegisterExportColumns = [
+  "ID",
+  "Project",
+  "Application",
+  "Requested By",
+  "Request Date",
+  "Description (Case)",
+  "Priority",
+  "Ticket Number",
+  "Status",
+  "Closure Date",
+  "Replay",
+  "Note1",
+  "Note2",
+];
+
 const aliases: Record<string, string> = {
   projectname: "name",
   project_name: "name",
@@ -51,6 +67,7 @@ const aliases: Record<string, string> = {
   closuredate: "closureDate",
   closure_date: "closureDate",
   replay: "reply",
+  reply: "reply",
   note1: "note1",
   note2: "note2",
   application: "application",
@@ -145,7 +162,7 @@ const normalizeRecord = (dataset: SingleDatasetKey, record: Record<string, unkno
       return { id, title: data.title, description: data.description ?? "", status: data.status ?? "todo", priority: data.priority ?? "medium", assignee: data.assignee ?? "", projectId: data.projectId ?? "", project_id: data.projectId ?? data.project_id ?? "", projectName: data.projectName ?? "Unassigned", dueDate: data.dueDate ?? data.due_date ?? "", due_date: data.due_date ?? data.dueDate ?? "", tags: [], phase: data.phase ?? "Execution", progress: Number(data.progress ?? 0), comments: [], files: [], duration: data.duration ?? "1d", workloadHours: Number(data.workloadHours ?? 8), workflowStage: data.workflowStage ?? data.status ?? "todo", timesheetEntries: data.timesheetEntries ?? [], actualHours: Number(data.actualHours ?? 0), customFieldValues: data.customFieldValues ?? {} };
     case "tickets": {
       const ticketNumber = data.ticketNumber ?? data.title ?? id;
-      return { id, title: data.title ?? ticketNumber, description: data.description ?? data.descriptionCase ?? "", status: normalizeTicketStatus(data.status), priority: data.priority ?? "medium", assignee: data.assignee ?? data.requestedBy ?? "", projectId: data.projectId ?? "", taskId: data.taskId ?? "", createdAt: data.createdAt ?? data.requestDate ?? now, sla: data.sla ?? "Active", comments: data.comments ?? [], customFieldValues: { ...(typeof data.customFieldValues === "object" ? data.customFieldValues as object : {}), idText: data.idText ?? data.id ?? "", application: data.application ?? "", requestedBy: data.requestedBy ?? "", requestDate: data.requestDate ?? data.createdAt ?? "", descriptionCase: data.descriptionCase ?? data.description ?? "", ticketNumber, closureDate: data.closureDate ?? "", reply: data.reply ?? "", note1: data.note1 ?? "", note2: data.note2 ?? "" } };
+      return { id, title: data.title ?? ticketNumber, description: data.description ?? data.descriptionCase ?? "", status: normalizeTicketStatus(data.status), priority: data.priority ?? "medium", assignee: data.assignee ?? data.requestedBy ?? "", projectId: data.projectId ?? "", taskId: data.taskId ?? "", createdAt: data.createdAt ?? data.requestDate ?? now, sla: data.sla ?? "Active", comments: data.comments ?? [], customFieldValues: { ...(typeof data.customFieldValues === "object" ? data.customFieldValues as object : {}), idText: data.idText ?? data.id ?? "", application: data.application ?? "", requestedBy: data.requestedBy ?? "", requestDate: data.requestDate ?? data.createdAt ?? "", descriptionCase: data.descriptionCase ?? data.description ?? "", ticketNumber, closureDate: data.closureDate ?? "", replay: data.replay ?? data.reply ?? "", reply: data.replay ?? data.reply ?? "", note1: data.note1 ?? "", note2: data.note2 ?? "" } };
     }
     case "teamMembers": {
       const name = String(data.name ?? "");
@@ -172,9 +189,30 @@ const upsertRecords = (existing: any[], incoming: any[]) => {
   return next;
 };
 
-const recordsToCsv = (records: Record<string, unknown>[]) => {
-  if (!records.length) return "";
-  const headers = Array.from(new Set(records.flatMap((record) => Object.keys(record))));
+const readTicketField = (ticket: Record<string, unknown>, key: string, fallback = "") => {
+  const custom = (ticket.customFieldValues && typeof ticket.customFieldValues === "object" ? ticket.customFieldValues : {}) as Record<string, unknown>;
+  return String(ticket[key] ?? custom[key] ?? fallback ?? "");
+};
+
+const mapTicketForRegisterExport = (ticket: Record<string, unknown>) => ({
+  ID: readTicketField(ticket, "idText", String(ticket.id ?? "")),
+  Project: readTicketField(ticket, "projectName", readTicketField(ticket, "mappedProjectName", readTicketField(ticket, "rawProjectName", String(ticket.projectId ?? "")))),
+  Application: readTicketField(ticket, "application"),
+  "Requested By": readTicketField(ticket, "requestedBy", String(ticket.assignee ?? "")),
+  "Request Date": readTicketField(ticket, "requestDate", String(ticket.createdAt ?? "").slice(0, 10)),
+  "Description (Case)": readTicketField(ticket, "descriptionCase", String(ticket.description ?? "")),
+  Priority: String(ticket.priority ?? readTicketField(ticket, "priority", "medium")),
+  "Ticket Number": readTicketField(ticket, "ticketNumber", String(ticket.title ?? ticket.id ?? "")),
+  Status: String(ticket.status ?? "open"),
+  "Closure Date": readTicketField(ticket, "closureDate"),
+  Replay: readTicketField(ticket, "replay", readTicketField(ticket, "reply")),
+  Note1: readTicketField(ticket, "note1"),
+  Note2: readTicketField(ticket, "note2"),
+});
+
+const recordsToCsv = (records: Record<string, unknown>[], fixedHeaders?: string[]) => {
+  if (!records.length) return fixedHeaders?.join(",") ?? "";
+  const headers = fixedHeaders ?? Array.from(new Set(records.flatMap((record) => Object.keys(record))));
   const escapeValue = (value: unknown) => `"${(typeof value === "object" ? JSON.stringify(value ?? "") : String(value ?? "")).replace(/"/g, '""')}"`;
   return [headers.join(","), ...records.map((record) => headers.map((header) => escapeValue(record[header])).join(","))].join("\n");
 };
@@ -306,6 +344,11 @@ const ImportExportProgress = () => {
       toast.error("No records to export.");
       return;
     }
+    if (dataset === "tickets") {
+      const exportRows = records.map(mapTicketForRegisterExport);
+      downloadText(`tickets-register-${stamp}.${format}`, format === "json" ? JSON.stringify(exportRows, null, 2) : recordsToCsv(exportRows, ticketRegisterExportColumns), format === "json" ? "application/json" : "text/csv");
+      return;
+    }
     downloadText(`${dataset}-${stamp}.${format}`, format === "json" ? JSON.stringify(records, null, 2) : recordsToCsv(records), format === "json" ? "application/json" : "text/csv");
   };
 
@@ -322,14 +365,14 @@ const ImportExportProgress = () => {
                 <div className="space-y-2"><Label>Data scope</Label><Select value={dataset} onValueChange={(value) => setDataset(value as DatasetKey)} disabled={importing}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{scopeOptions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-2"><Label>Import mode</Label><Select value={mode} onValueChange={(value) => setMode(value as ImportMode)} disabled={importing}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="merge">Merge / update existing</SelectItem><SelectItem value="replace">Replace selected scope</SelectItem></SelectContent></Select></div>
               </div>
-              <div className="rounded-3xl border border-dashed border-primary/40 bg-primary/5 p-5"><Input ref={inputRef} type="file" accept=".csv,.json,text/csv,application/json" disabled={importing} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImport(file); }} /><p className="mt-3 text-sm text-muted-foreground">{dataset === "all" ? "All System Data requires JSON exported from this page." : <>Required fields: <span className="font-semibold text-foreground">{selectedDataset?.required.join(", ")}</span></>}</p></div>
+              <div className="rounded-3xl border border-dashed border-primary/40 bg-primary/5 p-5"><Input ref={inputRef} type="file" accept=".csv,.json,text/csv,application/json" disabled={importing} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImport(file); }} /><p className="mt-3 text-sm text-muted-foreground">{dataset === "all" ? "All System Data requires JSON exported from this page." : dataset === "tickets" ? "Tickets export/import uses the approved register columns: ID, Project, Application, Requested By, Request Date, Description (Case), Priority, Ticket Number, Status, Closure Date, Replay, Note1, Note2." : <>Required fields: <span className="font-semibold text-foreground">{selectedDataset?.required.join(", ")}</span></>}</p></div>
               <div className={`rounded-3xl border p-5 ${importing || result ? "border-primary/30 bg-primary/5" : "border-border bg-muted/10"}`}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-black">{stepLabels[step]}</p><p className="text-xs text-muted-foreground">{fileName || "No file selected"}</p></div><Badge variant={step === "error" ? "destructive" : step === "complete" ? "default" : "secondary"}>{Math.round(progress)}%</Badge></div><Progress value={progress} className="h-3" /></div>
               {result && <div className="rounded-2xl border bg-muted/20 p-4"><div className="flex flex-wrap gap-2"><Badge className="gap-1"><CheckCircle2 className="h-3 w-3" /> {result.accepted} accepted</Badge><Badge variant={result.errors.length ? "destructive" : "secondary"} className="gap-1"><AlertCircle className="h-3 w-3" /> {result.errors.length} issues</Badge></div>{result.errors.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">{result.errors.map((error) => <li key={error}>{error}</li>)}</ul>}</div>}
             </CardContent>
           </Card>
-          <Card className="glass"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-primary" /> Export / backup</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Export the selected scope. All System Data exports a complete JSON backup for restore.</p><div className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="mr-2 h-4 w-4" /> CSV</Button><Button variant="outline" onClick={() => exportData("json")}><Download className="mr-2 h-4 w-4" /> JSON</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
+          <Card className="glass"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-primary" /> Export / backup</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Export the selected scope. Ticket export uses the approved register columns. All System Data exports a complete JSON backup for restore.</p><div className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="mr-2 h-4 w-4" /> CSV</Button><Button variant="outline" onClick={() => exportData("json")}><Download className="mr-2 h-4 w-4" /> JSON</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
         </div>
-        <Card className="glass overflow-hidden"><CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> System counts</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Dataset</TableHead><TableHead>Required fields</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader><TableBody>{datasets.map((item) => <TableRow key={item.key}><TableCell className="font-semibold">{item.label}</TableCell><TableCell className="text-muted-foreground">{item.required.join(", ")}</TableCell><TableCell className="text-right font-black">{counts[item.key]}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
+        <Card className="glass overflow-hidden"><CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> System counts</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Dataset</TableHead><TableHead>Required fields</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader><TableBody>{datasets.map((item) => <TableRow key={item.key}><TableCell className="font-semibold">{item.label}</TableCell><TableCell className="text-muted-foreground">{item.key === "tickets" ? ticketRegisterExportColumns.join(", ") : item.required.join(", ")}</TableCell><TableCell className="text-right font-black">{counts[item.key]}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
       </div>
     </AppLayout>
   );
