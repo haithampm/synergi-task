@@ -50,7 +50,6 @@ export const mapSupportTicketProjectName = (rawProjectName?: string | null) => {
   if (exact) return exact;
 
   if (compactKey.includes("smartlighting") || compactKey.includes("smartlightning")) {
-    // Do not auto-link mixed rows such as Smart Lighting / Smart City. They need manual PMO review.
     if (compactKey.includes("smartcity") || raw.includes("/")) return "";
     return "EPM-Smart Lighting";
   }
@@ -183,8 +182,8 @@ export const buildSupportTicketRecord = (
 ): WorkspaceTicket => {
   const projectId = findProjectIdForSupportTicket(row, projects);
   const ticketNumber = row.ticketNumber.trim();
-  const ticketId = existingTicket?.id ?? ticketNumber || row.id || makeId("ticket");
-  const title = ticketNumber ? `${row.id} · ${ticketNumber}` : row.id || row.descriptionCase.slice(0, 80) || "Support ticket";
+  const ticketId = existingTicket?.id ?? (ticketNumber || row.id || makeId("ticket"));
+  const title = ticketNumber ? `${row.id} · ${ticketNumber}` : (row.id || row.descriptionCase.slice(0, 80) || "Support ticket");
   const status = normalizeStatus(row.status);
 
   return {
