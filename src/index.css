@@ -175,7 +175,7 @@
   @apply bg-muted-foreground/30;
 }
 
-/* Keep global quick actions focused. Export controls live on Import/Export page only. */
-body:not(:has([href="#import-data"])) .fixed.bottom-4 button:has(svg + span) span:not(.sr-only) {
-  /* Intentionally left without global text hiding; route-specific export UI is handled by ImportModeSelector. */
+/* Export actions belong on /import-export only; hide legacy global quick-bar export button. */
+.fixed.bottom-4 button:has(svg.lucide-download) {
+  display: none !important;
 }
