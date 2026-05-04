@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { CheckSquare, Trash2, Wand2 } from "lucide-react";
+import { CheckSquare, ExternalLink, Trash2, Wand2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -10,9 +11,10 @@ import { toast } from "sonner";
 
 const taskStatuses = ["backlog", "todo", "in-progress", "review", "done"];
 const taskPriorities = ["urgent", "high", "medium", "low"];
+const supportedPaths = ["/projects", "/tasks", "/schedule"];
 
 const taskProjectId = (task: any) => task.project_id ?? task.projectId ?? "";
-const taskDueDate = (task: any) => task.due_date ?? task.dueDate ?? "";
+const taskDueDate = (task: any) => task.due_date ?? task.dueDate ?? task.end_date ?? "";
 
 export default function ProjectTaskBulkActionsPanel() {
   const [open, setOpen] = useState(false);
@@ -28,7 +30,9 @@ export default function ProjectTaskBulkActionsPanel() {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
 
-  const visible = typeof window !== "undefined" && window.location.pathname === "/projects";
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+  const visible = supportedPaths.includes(pathname);
+  const pageLabel = pathname === "/schedule" ? "Schedule" : pathname === "/tasks" ? "Tasks" : "Project";
   const projectNameById = useMemo(() => new Map(projects.map((project: any) => [project.id, project.name])), [projects]);
   const projectTasks = useMemo(() => {
     return tasks
@@ -62,6 +66,7 @@ export default function ProjectTaskBulkActionsPanel() {
       await updateTask.mutateAsync({ id: task.id, ...updates });
     }
 
+    window.dispatchEvent(new CustomEvent("workspace-data-changed", { detail: { entity: "tasks", reason: "task-bulk-edit" } }));
     toast.success(`Updated ${selectedTasks.length} selected task${selectedTasks.length > 1 ? "s" : ""}.`);
     setBulkStatus("no-change");
     setBulkPriority("no-change");
@@ -77,6 +82,7 @@ export default function ProjectTaskBulkActionsPanel() {
       await deleteTask.mutateAsync(task.id);
     }
 
+    window.dispatchEvent(new CustomEvent("workspace-data-changed", { detail: { entity: "tasks", reason: "task-bulk-delete" } }));
     toast.success(`Deleted ${selectedTasks.length} selected task${selectedTasks.length > 1 ? "s" : ""}.`);
     clearSelection();
   };
@@ -86,12 +92,12 @@ export default function ProjectTaskBulkActionsPanel() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
           <Button className="gap-2 rounded-full shadow-lg">
-            <CheckSquare className="h-4 w-4" /> Project Task Actions
+            <CheckSquare className="h-4 w-4" /> {pageLabel} Task Actions
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-6xl">
           <DialogHeader>
-            <DialogTitle>Project Task Bulk Actions</DialogTitle>
+            <DialogTitle>{pageLabel} Task Edit / Delete Actions</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -135,7 +141,7 @@ export default function ProjectTaskBulkActionsPanel() {
                 </SelectContent>
               </Select>
               <Button className="gap-2" onClick={applyBulkUpdate} disabled={!selectedTasks.length || updateTask.isPending}>
-                <Wand2 className="h-4 w-4" /> Apply
+                <Wand2 className="h-4 w-4" /> Apply Edit
               </Button>
               <Button variant="destructive" className="gap-2" onClick={deleteSelected} disabled={!selectedTasks.length || deleteTask.isPending}>
                 <Trash2 className="h-4 w-4" /> Delete
@@ -153,28 +159,37 @@ export default function ProjectTaskBulkActionsPanel() {
                     <TableHead>Priority</TableHead>
                     <TableHead>Owner</TableHead>
                     <TableHead>Target Date</TableHead>
+                    <TableHead className="text-right">Open</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {projectTasks.map((task: any) => (
-                    <TableRow key={task.id} className={selectedTaskIds.includes(task.id) ? "bg-primary/5" : undefined}>
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-primary"
-                          checked={selectedTaskIds.includes(task.id)}
-                          onChange={() => toggleTask(task.id)}
-                          aria-label={`Select ${task.title}`}
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">{task.title}</TableCell>
-                      <TableCell className="text-muted-foreground">{projectNameById.get(taskProjectId(task)) ?? "Unassigned"}</TableCell>
-                      <TableCell><Badge variant="outline">{String(task.status ?? "todo").replace(/-/g, " ")}</Badge></TableCell>
-                      <TableCell><Badge variant="secondary">{task.priority ?? "medium"}</Badge></TableCell>
-                      <TableCell>{task.assignee || "Unassigned"}</TableCell>
-                      <TableCell>{taskDueDate(task) || "-"}</TableCell>
-                    </TableRow>
-                  ))}
+                  {projectTasks.map((task: any) => {
+                    const projectId = taskProjectId(task);
+                    return (
+                      <TableRow key={task.id} className={selectedTaskIds.includes(task.id) ? "bg-primary/5" : undefined}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-primary"
+                            checked={selectedTaskIds.includes(task.id)}
+                            onChange={() => toggleTask(task.id)}
+                            aria-label={`Select ${task.title}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{task.title}</TableCell>
+                        <TableCell className="text-muted-foreground">{projectNameById.get(projectId) ?? "Unassigned"}</TableCell>
+                        <TableCell><Badge variant="outline">{String(task.status ?? "todo").replace(/-/g, " ")}</Badge></TableCell>
+                        <TableCell><Badge variant="secondary">{task.priority ?? "medium"}</Badge></TableCell>
+                        <TableCell>{task.assignee || "Unassigned"}</TableCell>
+                        <TableCell>{taskDueDate(task) || "-"}</TableCell>
+                        <TableCell className="text-right">
+                          <Button asChild variant="ghost" size="sm">
+                            <Link to={`/tasks?taskId=${task.id}&projectId=${projectId}`}><ExternalLink className="mr-1 h-3 w-3" />Edit</Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               {!projectTasks.length ? <div className="p-8 text-center text-sm text-muted-foreground">No tasks found for the selected project.</div> : null}
