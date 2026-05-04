@@ -16,6 +16,11 @@ import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 import { getSafeRedirectPath } from "@/lib/auth-ui";
 import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEnhancer";
 import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
+import ImplementationActivitiesMatrix from "@/components/ImplementationActivitiesMatrix";
+import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
+import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
+import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
+import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
 import type { User } from "@supabase/supabase-js";
 
 const CommandPalette = lazy(() => import("@/components/CommandPalette").then((module) => ({ default: module.CommandPalette })));
@@ -91,6 +96,11 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
     <>
       <ActiveProjectDataSanitizer />
       <ProjectExperienceEnhancer />
+      <ImplementationActivitiesMatrix />
+      <ProjectOwnerTaskPanel />
+      <ProjectTaskBulkActionsPanel />
+      <ProjectScheduleImporter />
+      <PMODeliveryCyclePanel />
       <Suspense fallback={null}><CommandPalette /></Suspense>
       <Suspense fallback={<AppLoader />}>
         <Routes>
