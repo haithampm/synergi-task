@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useQueryClient } from "@tanstack/react-query";
 import {
   workspaceKeys,
+  useCreateTeamMember,
   useCreateTicket,
   useMeetings,
   useProjects,
@@ -20,10 +21,11 @@ import {
   useTasks,
   useTeamMembers,
   useTickets,
+  useUpdateTeamMember,
   useUpdateTicket,
   useUserAccounts,
 } from "@/hooks/useProjects";
-import { makeId, readWorkspaceData, updateWorkspaceData, type WorkspaceData, type WorkspaceTicket } from "@/lib/workspace-store";
+import { makeId, readWorkspaceData, updateWorkspaceData, type WorkspaceData, type WorkspaceTeamMember, type WorkspaceTicket } from "@/lib/workspace-store";
 import { mapTicketToRegisterExportRow, ticketRegisterExportColumns, ticketRowsToCsv } from "@/lib/ticket-register-export";
 import { toast } from "sonner";
 
@@ -59,8 +61,26 @@ const headerAliases: Record<string, string> = {
   note1: "note1",
   note2: "note2",
   name: "name",
+  employeename: "name",
+  membername: "name",
+  resourcename: "name",
   title: "title",
+  jobtitle: "role",
+  position: "role",
+  role: "role",
   email: "email",
+  emailaddress: "email",
+  phone: "phone",
+  mobile: "phone",
+  department: "department",
+  statusmember: "status",
+  capacity: "capacityHours",
+  capacityhours: "capacityHours",
+  utilizationtarget: "utilizationTarget",
+  privilege: "privilegeRole",
+  privilegerole: "privilegeRole",
+  assignedprojects: "assignedProjectIds",
+  assignedprojectids: "assignedProjectIds",
   fullname: "fullName",
 };
 
@@ -174,6 +194,33 @@ const normalizeTicketImport = (record: Record<string, unknown>, projectNameToId:
   } as Partial<WorkspaceTicket> & { title: string };
 };
 
+const normalizeTeamMemberImport = (record: Record<string, unknown>) => {
+  const name = String(record.name ?? "").trim();
+  const email = String(record.email ?? "").trim().toLowerCase();
+  const role = String(record.role ?? record.title ?? "").trim();
+  const assignedRaw = record.assignedProjectIds;
+  const assignedProjectIds = Array.isArray(assignedRaw)
+    ? assignedRaw
+    : String(assignedRaw ?? "").split(/[;,|]/).map((item) => item.trim()).filter(Boolean);
+
+  return {
+    name,
+    email,
+    role,
+    phone: String(record.phone ?? "").trim(),
+    department: String(record.department ?? "").trim(),
+    status: String(record.status ?? "online").trim().toLowerCase() || "online",
+    capacityHours: Number(record.capacityHours ?? 40) || 40,
+    utilizationTarget: Number(record.utilizationTarget ?? 85) || 85,
+    privilegeRole: String(record.privilegeRole ?? "lead").trim() || "lead",
+    assignedProjectIds,
+    customFieldValues: {
+      source: "import-export-team-upload",
+      importedAt: new Date().toISOString(),
+    },
+  } as Partial<WorkspaceTeamMember> & { name: string };
+};
+
 const findExistingTicket = (record: Partial<WorkspaceTicket> & { title: string }, tickets: WorkspaceTicket[]) => {
   const custom = record.customFieldValues ?? {};
   const ticketNumber = String(custom.ticketNumber ?? "").trim().toLowerCase();
@@ -187,6 +234,15 @@ const findExistingTicket = (record: Partial<WorkspaceTicket> & { title: string }
       (ticketNumber && String(ticket.title ?? "").trim().toLowerCase().includes(ticketNumber))
     );
   });
+};
+
+const findExistingTeamMember = (record: Partial<WorkspaceTeamMember> & { name: string }, members: WorkspaceTeamMember[]) => {
+  const email = String(record.email ?? "").trim().toLowerCase();
+  const name = String(record.name ?? "").trim().toLowerCase();
+  return members.find((member) =>
+    (email && member.email.trim().toLowerCase() === email) ||
+    (name && member.name.trim().toLowerCase() === name)
+  );
 };
 
 const upsertGeneric = (existing: any[], incoming: any[], prefix: string) => {
@@ -217,6 +273,8 @@ export default function ImportExportLive() {
   const { data: stickyNotes = [] } = useStickyNotes();
   const createTicket = useCreateTicket();
   const updateTicket = useUpdateTicket();
+  const createTeamMember = useCreateTeamMember();
+  const updateTeamMember = useUpdateTeamMember();
 
   const projectNameById = useMemo(() => new Map(projects.map((project: any) => [project.id, project.name])), [projects]);
   const projectNameToId = useMemo(() => new Map(projects.map((project: any) => [String(project.name).toLowerCase(), project.id])), [projects]);
@@ -250,11 +308,17 @@ export default function ImportExportLive() {
         const normalized = rawRows.map((row: Record<string, unknown>) => normalizeTicketImport(row, projectNameToId));
         for (const ticket of normalized) {
           const existing = findExistingTicket(ticket, tickets as WorkspaceTicket[]);
-          if (existing && mode !== "replace") {
-            await updateTicket.mutateAsync({ id: existing.id, ...ticket });
-          } else {
-            await createTicket.mutateAsync(ticket);
-          }
+          if (existing && mode !== "replace") await updateTicket.mutateAsync({ id: existing.id, ...ticket });
+          else await createTicket.mutateAsync(ticket);
+          accepted += 1;
+        }
+      } else if (dataset === "teamMembers") {
+        const rawRows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [];
+        const normalized = rawRows.map((row: Record<string, unknown>) => normalizeTeamMemberImport(row)).filter((member: Partial<WorkspaceTeamMember> & { name: string }) => member.name.trim());
+        for (const member of normalized) {
+          const existing = findExistingTeamMember(member, teamMembers as WorkspaceTeamMember[]);
+          if (existing && mode !== "replace") await updateTeamMember.mutateAsync({ id: existing.id, ...member });
+          else await createTeamMember.mutateAsync(member);
           accepted += 1;
         }
       } else if (dataset === "all") {
@@ -303,7 +367,8 @@ export default function ImportExportLive() {
       downloadText(`tickets-register-${stamp}.${format}`, format === "json" ? JSON.stringify(exportRows, null, 2) : ticketRowsToCsv(exportRows), format === "json" ? "application/json" : "text/csv;charset=utf-8");
       return;
     }
-    const records = ((current as any)[dataset] as Record<string, unknown>[]) ?? [];
+    const liveRecords = dataset === "teamMembers" ? teamMembers : undefined;
+    const records = ((liveRecords?.length ? liveRecords : (current as any)[dataset]) as Record<string, unknown>[]) ?? [];
     if (!records.length) return toast.error("No records to export.");
     downloadText(`${dataset}-${stamp}.${format}`, format === "json" ? JSON.stringify(records, null, 2) : genericCsv(records), format === "json" ? "application/json" : "text/csv;charset=utf-8");
   };
@@ -317,9 +382,9 @@ export default function ImportExportLive() {
 
   return (
     <AppLayout>
-      <AppHeader title="Import / Export" subtitle="Live import/export. Ticket uploads now use real create/update ticket actions." />
+      <AppHeader title="Import / Export" subtitle="Live import/export. Ticket and team uploads now use real create/update actions." />
       <div className="space-y-6 p-4 sm:p-6">
-        <PageSection title="System Data Import / Export Center" description="Use this page for all import and export actions. Ticket import writes through the ticket system and refreshes the Tickets page." />
+        <PageSection title="System Data Import / Export Center" description="Use this page for all import and export actions. Tickets and team members now write through the live system and refresh their pages." />
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card className="glass border-primary/20 shadow-xl">
             <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><UploadCloud className="h-5 w-5 text-primary" /> Import Data</CardTitle></CardHeader>
@@ -332,7 +397,7 @@ export default function ImportExportLive() {
               <div className="rounded-2xl border bg-muted/20 p-4"><Badge>{busy ? "Processing" : lastResult}</Badge></div>
             </CardContent>
           </Card>
-          <Card className="glass border-accent/20 shadow-xl"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-accent" /> Export Data</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Ticket exports are mapped to the updated ticket form columns only.</p><div className="grid gap-2"><Button className="justify-start gap-2" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="h-4 w-4" /> Export Selected Scope as CSV</Button><Button variant="outline" className="justify-start gap-2" onClick={() => exportData("json")}><Download className="h-4 w-4" /> Export Selected Scope as JSON</Button><Button variant="secondary" className="justify-start gap-2" onClick={exportAllSystemData}><Download className="h-4 w-4" /> Export All System Data Backup</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
+          <Card className="glass border-accent/20 shadow-xl"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-accent" /> Export Data</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Team member uploads now update the Team page and database using email/name matching.</p><div className="grid gap-2"><Button className="justify-start gap-2" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="h-4 w-4" /> Export Selected Scope as CSV</Button><Button variant="outline" className="justify-start gap-2" onClick={() => exportData("json")}><Download className="h-4 w-4" /> Export Selected Scope as JSON</Button><Button variant="secondary" className="justify-start gap-2" onClick={exportAllSystemData}><Download className="h-4 w-4" /> Export All System Data Backup</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
         </div>
         <Card className="glass overflow-hidden"><CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> System counts</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Dataset</TableHead><TableHead>Export fields</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader><TableBody>{datasets.map((item) => <TableRow key={item.key}><TableCell className="font-semibold">{item.label}</TableCell><TableCell className="text-muted-foreground">{item.key === "tickets" ? ticketRegisterExportColumns.join(" | ") : item.required}</TableCell><TableCell className="text-right font-black">{counts[item.key]}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
       </div>
