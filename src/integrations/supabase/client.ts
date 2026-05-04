@@ -89,6 +89,8 @@ type AuthStorageAdapter = {
   setItem: (key: string, value: string) => void;
 };
 
+type SupabaseLockFunction = <R>(name: string, acquireTimeout: number, fn: () => Promise<R>) => Promise<R>;
+
 const createMemoryStorage = (): AuthStorageAdapter => {
   const store = new Map<string, string>();
 
@@ -132,7 +134,28 @@ const createAuthStorage = (): AuthStorageAdapter => {
   return createMemoryStorage();
 };
 
+const createTabSafeSupabaseLock = (): SupabaseLockFunction => {
+  let chain = Promise.resolve();
+
+  return async <R,>(_name: string, _acquireTimeout: number, fn: () => Promise<R>) => {
+    const previous = chain.catch(() => undefined);
+    let releaseCurrent: () => void = () => undefined;
+    chain = previous.then(() => new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    }));
+
+    await previous;
+
+    try {
+      return await fn();
+    } finally {
+      releaseCurrent();
+    }
+  };
+};
+
 const authStorage = createAuthStorage();
+const authLock = createTabSafeSupabaseLock();
 
 export type SupabaseConfigStatus = {
   activeProjectRef: string | null;
@@ -174,6 +197,7 @@ export const supabase = createClient<Database>(
       storage: authStorage,
       persistSession: true,
       autoRefreshToken: true,
+      lock: authLock,
     },
   },
 );
