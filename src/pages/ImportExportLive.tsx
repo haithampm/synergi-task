@@ -13,6 +13,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useQueryClient } from "@tanstack/react-query";
 import {
   workspaceKeys,
+  useCreateMeeting,
+  useCreateProject,
+  useCreateStickyNote,
+  useCreateTask,
   useCreateTeamMember,
   useCreateTicket,
   useMeetings,
@@ -21,11 +25,27 @@ import {
   useTasks,
   useTeamMembers,
   useTickets,
+  useUpdateMeeting,
+  useUpdateProject,
+  useUpdateStickyNote,
+  useUpdateTask,
   useUpdateTeamMember,
   useUpdateTicket,
+  useUpdateUserAccount,
   useUserAccounts,
 } from "@/hooks/useProjects";
-import { makeId, readWorkspaceData, updateWorkspaceData, type WorkspaceData, type WorkspaceTeamMember, type WorkspaceTicket } from "@/lib/workspace-store";
+import {
+  readWorkspaceData,
+  updateWorkspaceData,
+  type WorkspaceData,
+  type WorkspaceMeeting,
+  type WorkspaceProject,
+  type WorkspaceStickyNote,
+  type WorkspaceTask,
+  type WorkspaceTeamMember,
+  type WorkspaceTicket,
+  type WorkspaceUserAccount,
+} from "@/lib/workspace-store";
 import { mapTicketToRegisterExportRow, ticketRegisterExportColumns, ticketRowsToCsv } from "@/lib/ticket-register-export";
 import { toast } from "sonner";
 
@@ -45,9 +65,11 @@ const datasets = [
 const scopeOptions: Array<{ key: DatasetKey; label: string }> = [{ key: "all", label: "All System Data" }, ...datasets];
 
 const headerAliases: Record<string, string> = {
-  id: "idText",
+  id: "id",
   project: "projectName",
   projectname: "projectName",
+  projectid: "projectId",
+  project_id: "projectId",
   application: "application",
   requestedby: "requestedBy",
   requestdate: "requestDate",
@@ -61,10 +83,18 @@ const headerAliases: Record<string, string> = {
   note1: "note1",
   note2: "note2",
   name: "name",
+  projecttitle: "name",
   employeename: "name",
   membername: "name",
   resourcename: "name",
   title: "title",
+  taskname: "title",
+  activityname: "title",
+  meetingtitle: "title",
+  subject: "title",
+  content: "content",
+  note: "content",
+  notes: "content",
   jobtitle: "role",
   position: "role",
   role: "role",
@@ -82,6 +112,28 @@ const headerAliases: Record<string, string> = {
   assignedprojects: "assignedProjectIds",
   assignedprojectids: "assignedProjectIds",
   fullname: "fullName",
+  full_name: "fullName",
+  startdate: "start_date",
+  start_date: "start_date",
+  enddate: "end_date",
+  end_date: "end_date",
+  duedate: "due_date",
+  due_date: "due_date",
+  assignee: "assignee",
+  owner: "assignee",
+  phase: "phase",
+  progress: "progress",
+  description: "description",
+  budget: "budget",
+  type: "type",
+  startsat: "startsAt",
+  starts_at: "startsAt",
+  endsat: "endsAt",
+  ends_at: "endsAt",
+  attendees: "attendeeIds",
+  attendeeids: "attendeeIds",
+  color: "color",
+  done: "done",
 };
 
 const normalizeHeader = (header: string) => {
@@ -140,6 +192,28 @@ const genericCsv = (records: Record<string, unknown>[]) => {
   return [headers.join(","), ...records.map((record) => headers.map((header) => escapeValue(record[header])).join(","))].join("\n");
 };
 
+const asArray = (value: unknown) => {
+  if (Array.isArray(value)) return value;
+  return String(value ?? "").split(/[;,|]/).map((item) => item.trim()).filter(Boolean);
+};
+
+const asBool = (value: unknown) => ["true", "yes", "1", "done", "closed"].includes(String(value ?? "").trim().toLowerCase());
+const asNumber = (value: unknown, fallback: number) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || fallback;
+const dateValue = (value: unknown, fallback = "") => {
+  const text = String(value ?? "").trim();
+  if (!text) return fallback;
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString().slice(0, 10);
+};
+
+const dateTimeValue = (value: unknown, fallback = new Date().toISOString()) => {
+  const text = String(value ?? "").trim();
+  if (!text) return fallback;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
+};
+
 const normalizeStatus = (value: unknown): WorkspaceTicket["status"] => {
   const key = String(value ?? "open").trim().toLowerCase().replace(/\s+/g, "-");
   if (["done", "cancelled", "canceled", "closed"].includes(key)) return "closed";
@@ -156,11 +230,51 @@ const normalizePriority = (value: unknown): WorkspaceTicket["priority"] => {
   return "medium";
 };
 
+const normalizeProjectImport = (record: Record<string, unknown>) => ({
+  name: String(record.name ?? "").trim(),
+  description: String(record.description ?? ""),
+  status: String(record.status ?? "active").trim().toLowerCase() || "active",
+  priority: normalizePriority(record.priority),
+  progress: asNumber(record.progress, 0),
+  start_date: dateValue(record.start_date ?? record.startDate, new Date().toISOString().slice(0, 10)),
+  startDate: dateValue(record.start_date ?? record.startDate, new Date().toISOString().slice(0, 10)),
+  end_date: dateValue(record.end_date ?? record.endDate, ""),
+  endDate: dateValue(record.end_date ?? record.endDate, ""),
+  department: String(record.department ?? ""),
+  budget: String(record.budget ?? ""),
+  customFieldValues: { source: "import-export-project-upload", importedAt: new Date().toISOString() },
+} as Partial<WorkspaceProject> & { name: string });
+
+const normalizeTaskImport = (record: Record<string, unknown>, projectNameToId: Map<string, string>) => {
+  const projectName = String(record.projectName ?? "").trim();
+  const projectId = String(record.projectId ?? "").trim() || projectNameToId.get(projectName.toLowerCase()) || "";
+  const title = String(record.title ?? "").trim();
+  return {
+    title,
+    description: String(record.description ?? ""),
+    status: String(record.status ?? "todo").trim().toLowerCase().replace(/\s+/g, "-") || "todo",
+    priority: normalizePriority(record.priority),
+    assignee: String(record.assignee ?? ""),
+    project_id: projectId,
+    projectId,
+    projectName,
+    due_date: dateValue(record.due_date ?? record.dueDate, ""),
+    dueDate: dateValue(record.due_date ?? record.dueDate, ""),
+    start_date: dateValue(record.start_date ?? record.startDate, ""),
+    end_date: dateValue(record.end_date ?? record.endDate, dateValue(record.due_date ?? record.dueDate, "")),
+    phase: String(record.phase ?? "Execution"),
+    progress: asNumber(record.progress, 0),
+    duration: String(record.duration ?? "3d"),
+    workloadHours: asNumber(record.workloadHours, 24),
+    customFieldValues: { source: "import-export-task-upload", importedAt: new Date().toISOString() },
+  } as Partial<WorkspaceTask> & { title: string };
+};
+
 const normalizeTicketImport = (record: Record<string, unknown>, projectNameToId: Map<string, string>) => {
-  const idText = String(record.idText ?? record.ID ?? "").trim();
-  const projectName = String(record.projectName ?? record.Project ?? "").trim();
+  const idText = String(record.idText ?? record.id ?? "").trim();
+  const projectName = String(record.projectName ?? "").trim();
   const ticketNumber = String(record.ticketNumber ?? "").trim();
-  const descriptionCase = String(record.descriptionCase ?? "").trim();
+  const descriptionCase = String(record.descriptionCase ?? record.description ?? "").trim();
   const replay = String(record.replay ?? record.reply ?? "").trim();
   const projectId = projectNameToId.get(projectName.toLowerCase()) ?? "";
   const status = normalizeStatus(record.status);
@@ -170,7 +284,7 @@ const normalizeTicketImport = (record: Record<string, unknown>, projectNameToId:
     description: descriptionCase,
     status,
     priority: normalizePriority(record.priority),
-    assignee: String(record.requestedBy ?? ""),
+    assignee: String(record.requestedBy ?? record.assignee ?? ""),
     projectId: projectId || undefined,
     createdAt: String(record.requestDate ?? new Date().toISOString()).slice(0, 10),
     sla: status === "closed" ? "Closed" : "Active",
@@ -196,30 +310,51 @@ const normalizeTicketImport = (record: Record<string, unknown>, projectNameToId:
 
 const normalizeTeamMemberImport = (record: Record<string, unknown>) => {
   const name = String(record.name ?? "").trim();
-  const email = String(record.email ?? "").trim().toLowerCase();
-  const role = String(record.role ?? record.title ?? "").trim();
-  const assignedRaw = record.assignedProjectIds;
-  const assignedProjectIds = Array.isArray(assignedRaw)
-    ? assignedRaw
-    : String(assignedRaw ?? "").split(/[;,|]/).map((item) => item.trim()).filter(Boolean);
-
   return {
     name,
-    email,
-    role,
+    email: String(record.email ?? "").trim().toLowerCase(),
+    role: String(record.role ?? record.title ?? "").trim(),
     phone: String(record.phone ?? "").trim(),
     department: String(record.department ?? "").trim(),
     status: String(record.status ?? "online").trim().toLowerCase() || "online",
-    capacityHours: Number(record.capacityHours ?? 40) || 40,
-    utilizationTarget: Number(record.utilizationTarget ?? 85) || 85,
+    capacityHours: asNumber(record.capacityHours, 40),
+    utilizationTarget: asNumber(record.utilizationTarget, 85),
     privilegeRole: String(record.privilegeRole ?? "lead").trim() || "lead",
-    assignedProjectIds,
-    customFieldValues: {
-      source: "import-export-team-upload",
-      importedAt: new Date().toISOString(),
-    },
+    assignedProjectIds: asArray(record.assignedProjectIds),
+    customFieldValues: { source: "import-export-team-upload", importedAt: new Date().toISOString() },
   } as Partial<WorkspaceTeamMember> & { name: string };
 };
+
+const normalizeMeetingImport = (record: Record<string, unknown>) => {
+  const startsAt = dateTimeValue(record.startsAt ?? record.start_date ?? record.startDate);
+  const endsAt = dateTimeValue(record.endsAt ?? record.end_date ?? record.endDate, startsAt);
+  return {
+    title: String(record.title ?? "").trim(),
+    type: String(record.type ?? "Planning"),
+    attendeeIds: asArray(record.attendeeIds),
+    startsAt,
+    endsAt,
+    provider: String(record.provider ?? "workspace"),
+    status: String(record.status ?? "scheduled"),
+    notes: String(record.notes ?? record.description ?? ""),
+    projectId: String(record.projectId ?? ""),
+  } as Partial<WorkspaceMeeting> & { title: string };
+};
+
+const normalizeStickyImport = (record: Record<string, unknown>) => ({
+  title: String(record.title ?? "Quick note").trim() || "Quick note",
+  content: String(record.content ?? record.title ?? "").trim(),
+  ownerName: String(record.ownerName ?? record.assignee ?? "Workspace User"),
+  color: String(record.color ?? "amber"),
+  done: asBool(record.done),
+  createdAt: dateTimeValue(record.createdAt),
+} as Partial<WorkspaceStickyNote> & { content: string });
+
+const findExistingProject = (record: Partial<WorkspaceProject> & { name: string }, rows: WorkspaceProject[]) => rows.find((item) => item.name.trim().toLowerCase() === record.name.trim().toLowerCase());
+const findExistingTask = (record: Partial<WorkspaceTask> & { title: string }, rows: WorkspaceTask[]) => rows.find((item) => item.title.trim().toLowerCase() === record.title.trim().toLowerCase() && String(item.projectId ?? item.project_id ?? "") === String(record.projectId ?? record.project_id ?? ""));
+const findExistingTeamMember = (record: Partial<WorkspaceTeamMember> & { name: string }, rows: WorkspaceTeamMember[]) => rows.find((item) => (record.email && item.email.trim().toLowerCase() === String(record.email).trim().toLowerCase()) || item.name.trim().toLowerCase() === record.name.trim().toLowerCase());
+const findExistingMeeting = (record: Partial<WorkspaceMeeting> & { title: string }, rows: WorkspaceMeeting[]) => rows.find((item) => item.title.trim().toLowerCase() === record.title.trim().toLowerCase() && String(item.startsAt).slice(0, 10) === String(record.startsAt).slice(0, 10));
+const findExistingSticky = (record: Partial<WorkspaceStickyNote> & { content: string }, rows: WorkspaceStickyNote[]) => rows.find((item) => (item.title ?? "").trim().toLowerCase() === String(record.title ?? "").trim().toLowerCase() && item.content.trim().toLowerCase() === record.content.trim().toLowerCase());
 
 const findExistingTicket = (record: Partial<WorkspaceTicket> & { title: string }, tickets: WorkspaceTicket[]) => {
   const custom = record.customFieldValues ?? {};
@@ -236,20 +371,10 @@ const findExistingTicket = (record: Partial<WorkspaceTicket> & { title: string }
   });
 };
 
-const findExistingTeamMember = (record: Partial<WorkspaceTeamMember> & { name: string }, members: WorkspaceTeamMember[]) => {
-  const email = String(record.email ?? "").trim().toLowerCase();
-  const name = String(record.name ?? "").trim().toLowerCase();
-  return members.find((member) =>
-    (email && member.email.trim().toLowerCase() === email) ||
-    (name && member.name.trim().toLowerCase() === name)
-  );
-};
-
-const upsertGeneric = (existing: any[], incoming: any[], prefix: string) => {
+const upsertGeneric = (existing: any[], incoming: any[]) => {
   const next = [...existing];
-  incoming.forEach((raw) => {
-    const record = { ...raw, id: raw.id || makeId(prefix) };
-    const index = next.findIndex((item) => item.id === record.id || (record.email && item.email?.toLowerCase?.() === String(record.email).toLowerCase()) || (record.name && item.name?.toLowerCase?.() === String(record.name).toLowerCase()));
+  incoming.forEach((record) => {
+    const index = next.findIndex((item) => item.id === record.id || (record.email && item.email?.toLowerCase?.() === String(record.email).toLowerCase()) || (record.name && item.name?.toLowerCase?.() === String(record.name).toLowerCase()) || (record.title && item.title?.toLowerCase?.() === String(record.title).toLowerCase()));
     if (index >= 0) next[index] = { ...next[index], ...record };
     else next.unshift(record);
   });
@@ -271,10 +396,20 @@ export default function ImportExportLive() {
   const { data: userAccounts = [] } = useUserAccounts();
   const { data: meetings = [] } = useMeetings();
   const { data: stickyNotes = [] } = useStickyNotes();
+
+  const createProject = useCreateProject();
+  const updateProject = useUpdateProject();
+  const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
   const createTicket = useCreateTicket();
   const updateTicket = useUpdateTicket();
   const createTeamMember = useCreateTeamMember();
   const updateTeamMember = useUpdateTeamMember();
+  const updateUserAccount = useUpdateUserAccount();
+  const createMeeting = useCreateMeeting();
+  const updateMeeting = useUpdateMeeting();
+  const createStickyNote = useCreateStickyNote();
+  const updateStickyNote = useUpdateStickyNote();
 
   const projectNameById = useMemo(() => new Map(projects.map((project: any) => [project.id, project.name])), [projects]);
   const projectNameToId = useMemo(() => new Map(projects.map((project: any) => [String(project.name).toLowerCase(), project.id])), [projects]);
@@ -295,6 +430,64 @@ export default function ImportExportLive() {
     window.dispatchEvent(new CustomEvent("workspace-data-changed", { detail: { entity: dataset, reason: "live-import-export" } }));
   };
 
+  const importRowsForScope = async (scope: DatasetKey, rawRows: Record<string, unknown>[]) => {
+    let accepted = 0;
+    if (scope === "projects") {
+      for (const row of rawRows.map(normalizeProjectImport).filter((item) => item.name.trim())) {
+        const existing = findExistingProject(row, projects as WorkspaceProject[]);
+        if (existing && mode !== "replace") await updateProject.mutateAsync({ id: existing.id, ...row });
+        else await createProject.mutateAsync(row);
+        accepted += 1;
+      }
+    } else if (scope === "tasks") {
+      for (const row of rawRows.map((item) => normalizeTaskImport(item, projectNameToId)).filter((item) => item.title.trim())) {
+        const existing = findExistingTask(row, tasks as WorkspaceTask[]);
+        if (existing && mode !== "replace") await updateTask.mutateAsync({ id: existing.id, ...row });
+        else await createTask.mutateAsync(row);
+        accepted += 1;
+      }
+    } else if (scope === "tickets") {
+      for (const row of rawRows.map((item) => normalizeTicketImport(item, projectNameToId))) {
+        const existing = findExistingTicket(row, tickets as WorkspaceTicket[]);
+        if (existing && mode !== "replace") await updateTicket.mutateAsync({ id: existing.id, ...row });
+        else await createTicket.mutateAsync(row);
+        accepted += 1;
+      }
+    } else if (scope === "teamMembers") {
+      for (const row of rawRows.map(normalizeTeamMemberImport).filter((item) => item.name.trim())) {
+        const existing = findExistingTeamMember(row, teamMembers as WorkspaceTeamMember[]);
+        if (existing && mode !== "replace") await updateTeamMember.mutateAsync({ id: existing.id, ...row });
+        else await createTeamMember.mutateAsync(row);
+        accepted += 1;
+      }
+    } else if (scope === "userAccounts") {
+      for (const raw of rawRows) {
+        const email = String(raw.email ?? "").trim().toLowerCase();
+        const fullName = String(raw.fullName ?? raw.name ?? "").trim();
+        const existing = (userAccounts as WorkspaceUserAccount[]).find((item) => item.email.trim().toLowerCase() === email || item.fullName.trim().toLowerCase() === fullName.toLowerCase());
+        if (existing) {
+          await updateUserAccount.mutateAsync({ id: existing.id, fullName: fullName || existing.fullName, email: email || existing.email, roleId: String(raw.roleId ?? raw.role ?? existing.roleId), status: String(raw.status ?? existing.status), title: String(raw.title ?? existing.title ?? ""), department: String(raw.department ?? existing.department ?? ""), notes: String(raw.notes ?? existing.notes ?? "") });
+          accepted += 1;
+        }
+      }
+    } else if (scope === "meetings") {
+      for (const row of rawRows.map(normalizeMeetingImport).filter((item) => item.title.trim())) {
+        const existing = findExistingMeeting(row, meetings as WorkspaceMeeting[]);
+        if (existing && mode !== "replace") await updateMeeting.mutateAsync({ id: existing.id, ...row });
+        else await createMeeting.mutateAsync(row);
+        accepted += 1;
+      }
+    } else if (scope === "stickyNotes") {
+      for (const row of rawRows.map(normalizeStickyImport).filter((item) => item.content.trim())) {
+        const existing = findExistingSticky(row, stickyNotes as WorkspaceStickyNote[]);
+        if (existing && mode !== "replace") await updateStickyNote.mutateAsync({ id: existing.id, ...row });
+        else await createStickyNote.mutateAsync(row);
+        accepted += 1;
+      }
+    }
+    return accepted;
+  };
+
   const handleImport = async (file: File) => {
     setBusy(true);
     try {
@@ -303,45 +496,21 @@ export default function ImportExportLive() {
       const parsed = ext === "json" ? JSON.parse(text) : parseTableText(text);
       let accepted = 0;
 
-      if (dataset === "tickets") {
-        const rawRows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.tickets) ? parsed.tickets : [];
-        const normalized = rawRows.map((row: Record<string, unknown>) => normalizeTicketImport(row, projectNameToId));
-        for (const ticket of normalized) {
-          const existing = findExistingTicket(ticket, tickets as WorkspaceTicket[]);
-          if (existing && mode !== "replace") await updateTicket.mutateAsync({ id: existing.id, ...ticket });
-          else await createTicket.mutateAsync(ticket);
-          accepted += 1;
-        }
-      } else if (dataset === "teamMembers") {
-        const rawRows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [];
-        const normalized = rawRows.map((row: Record<string, unknown>) => normalizeTeamMemberImport(row)).filter((member: Partial<WorkspaceTeamMember> & { name: string }) => member.name.trim());
-        for (const member of normalized) {
-          const existing = findExistingTeamMember(member, teamMembers as WorkspaceTeamMember[]);
-          if (existing && mode !== "replace") await updateTeamMember.mutateAsync({ id: existing.id, ...member });
-          else await createTeamMember.mutateAsync(member);
-          accepted += 1;
-        }
-      } else if (dataset === "all") {
+      if (dataset === "all") {
         if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("All System Data import requires JSON backup exported from this page.");
-        updateWorkspaceData((current: WorkspaceData) => {
-          const next = { ...current } as any;
-          datasets.forEach((item) => {
-            const incoming = Array.isArray(parsed[item.key]) ? parsed[item.key] : [];
-            accepted += incoming.length;
-            next[item.key] = mode === "replace" ? incoming : upsertGeneric(next[item.key] ?? [], incoming, item.key);
-          });
-          return next as WorkspaceData;
-        });
+        for (const item of datasets) {
+          const rows = Array.isArray(parsed[item.key]) ? parsed[item.key] : [];
+          accepted += await importRowsForScope(item.key as DatasetKey, rows);
+        }
+        updateWorkspaceData((current: WorkspaceData) => ({ ...current, auditLogs: current.auditLogs }));
       } else {
-        if (!selectedDataset) throw new Error("Select a dataset first.");
         const rawRows = Array.isArray(parsed) ? parsed : Array.isArray(parsed[dataset]) ? parsed[dataset] : [];
-        accepted = rawRows.length;
-        updateWorkspaceData((current: WorkspaceData) => ({ ...current, [dataset]: mode === "replace" ? rawRows : upsertGeneric((current as any)[dataset] ?? [], rawRows, selectedDataset.key) }));
+        accepted = await importRowsForScope(dataset, rawRows);
       }
 
       await refreshWorkspace();
-      setLastResult(`Imported / updated ${accepted} records`);
-      toast.success(`Imported / updated ${accepted} records`);
+      setLastResult(`Live imported / updated ${accepted} records`);
+      toast.success(`Live imported / updated ${accepted} records`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import failed";
       setLastResult(message);
@@ -367,7 +536,7 @@ export default function ImportExportLive() {
       downloadText(`tickets-register-${stamp}.${format}`, format === "json" ? JSON.stringify(exportRows, null, 2) : ticketRowsToCsv(exportRows), format === "json" ? "application/json" : "text/csv;charset=utf-8");
       return;
     }
-    const liveRecords = dataset === "teamMembers" ? teamMembers : undefined;
+    const liveRecords = dataset === "projects" ? projects : dataset === "tasks" ? tasks : dataset === "teamMembers" ? teamMembers : dataset === "meetings" ? meetings : dataset === "stickyNotes" ? stickyNotes : undefined;
     const records = ((liveRecords?.length ? liveRecords : (current as any)[dataset]) as Record<string, unknown>[]) ?? [];
     if (!records.length) return toast.error("No records to export.");
     downloadText(`${dataset}-${stamp}.${format}`, format === "json" ? JSON.stringify(records, null, 2) : genericCsv(records), format === "json" ? "application/json" : "text/csv;charset=utf-8");
@@ -382,9 +551,9 @@ export default function ImportExportLive() {
 
   return (
     <AppLayout>
-      <AppHeader title="Import / Export" subtitle="Live import/export. Ticket and team uploads now use real create/update actions." />
+      <AppHeader title="Import / Export" subtitle="Live import/export. All imports now use create/update system actions where available." />
       <div className="space-y-6 p-4 sm:p-6">
-        <PageSection title="System Data Import / Export Center" description="Use this page for all import and export actions. Tickets and team members now write through the live system and refresh their pages." />
+        <PageSection title="System Data Import / Export Center" description="Use this page for all import and export actions. Imports now write through the live system for projects, tasks, tickets, team, meetings, sticky notes and existing user accounts." />
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card className="glass border-primary/20 shadow-xl">
             <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><UploadCloud className="h-5 w-5 text-primary" /> Import Data</CardTitle></CardHeader>
@@ -397,7 +566,7 @@ export default function ImportExportLive() {
               <div className="rounded-2xl border bg-muted/20 p-4"><Badge>{busy ? "Processing" : lastResult}</Badge></div>
             </CardContent>
           </Card>
-          <Card className="glass border-accent/20 shadow-xl"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-accent" /> Export Data</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Team member uploads now update the Team page and database using email/name matching.</p><div className="grid gap-2"><Button className="justify-start gap-2" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="h-4 w-4" /> Export Selected Scope as CSV</Button><Button variant="outline" className="justify-start gap-2" onClick={() => exportData("json")}><Download className="h-4 w-4" /> Export Selected Scope as JSON</Button><Button variant="secondary" className="justify-start gap-2" onClick={exportAllSystemData}><Download className="h-4 w-4" /> Export All System Data Backup</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
+          <Card className="glass border-accent/20 shadow-xl"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><FileArchive className="h-5 w-5 text-accent" /> Export Data</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Exports use live records first, then local fallback data.</p><div className="grid gap-2"><Button className="justify-start gap-2" onClick={() => exportData("csv")} disabled={dataset === "all"}><Download className="h-4 w-4" /> Export Selected Scope as CSV</Button><Button variant="outline" className="justify-start gap-2" onClick={() => exportData("json")}><Download className="h-4 w-4" /> Export Selected Scope as JSON</Button><Button variant="secondary" className="justify-start gap-2" onClick={exportAllSystemData}><Download className="h-4 w-4" /> Export All System Data Backup</Button></div><Button variant="ghost" className="w-full" onClick={() => void refreshWorkspace()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh all pages</Button></CardContent></Card>
         </div>
         <Card className="glass overflow-hidden"><CardHeader><CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> System counts</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Dataset</TableHead><TableHead>Export fields</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader><TableBody>{datasets.map((item) => <TableRow key={item.key}><TableCell className="font-semibold">{item.label}</TableCell><TableCell className="text-muted-foreground">{item.key === "tickets" ? ticketRegisterExportColumns.join(" | ") : item.required}</TableCell><TableCell className="text-right font-black">{counts[item.key]}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
       </div>
