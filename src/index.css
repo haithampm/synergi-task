@@ -8,34 +8,24 @@
   :root {
     --background: 220 20% 97%;
     --foreground: 222 47% 11%;
-
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-
     --primary: 221 83% 53%;
     --primary-foreground: 210 40% 98%;
-
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
-
     --muted: 220 14% 96%;
     --muted-foreground: 220 9% 46%;
-
     --accent: 173 58% 39%;
     --accent-foreground: 0 0% 100%;
-
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-
     --border: 220 13% 91%;
     --input: 220 13% 91%;
     --ring: 221 83% 53%;
-
     --radius: 0.75rem;
-
     --sidebar-background: 222 47% 11%;
     --sidebar-foreground: 213 31% 91%;
     --sidebar-primary: 221 83% 53%;
@@ -45,18 +35,19 @@
     --sidebar-border: 217 33% 17%;
     --sidebar-ring: 221 83% 53%;
     --sidebar-muted: 220 9% 46%;
-
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
     --info: 199 89% 48%;
     --info-foreground: 0 0% 100%;
-
+    --workspace-font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    --page-gap: clamp(1rem, 1.7vw, 1.5rem);
+    --card-pad: clamp(1rem, 1.6vw, 1.35rem);
+    --metric-card-min: 15rem;
     --gradient-primary: linear-gradient(135deg, hsl(221 83% 53%), hsl(173 58% 39%));
     --gradient-hero: linear-gradient(135deg, hsl(222 47% 11%), hsl(221 83% 53%));
     --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(220 20% 97%));
-
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
     --shadow-lg: 0 10px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.04);
@@ -66,32 +57,23 @@
   .dark {
     --background: 222 47% 6%;
     --foreground: 210 40% 98%;
-
     --card: 222 47% 9%;
     --card-foreground: 210 40% 98%;
-
     --popover: 222 47% 9%;
     --popover-foreground: 210 40% 98%;
-
     --primary: 221 83% 53%;
     --primary-foreground: 210 40% 98%;
-
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
-
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
-
     --accent: 173 58% 39%;
     --accent-foreground: 0 0% 100%;
-
     --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
-
     --border: 217 33% 17%;
     --input: 217 33% 17%;
     --ring: 221 83% 53%;
-
     --sidebar-background: 222 47% 6%;
     --sidebar-foreground: 213 31% 91%;
     --sidebar-primary: 221 83% 53%;
@@ -109,15 +91,103 @@
     @apply border-border;
   }
 
+  html {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: var(--workspace-font-family);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+
+  button, input, textarea, select {
+    font-family: inherit;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-[1800px];
+    padding: var(--page-gap);
+  }
+
+  .page-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--page-gap);
+  }
+
+  .responsive-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--metric-card-min)), 1fr));
+    gap: var(--page-gap);
+  }
+
+  .responsive-content-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: var(--page-gap);
+  }
+
+  .workspace-card {
+    @apply rounded-2xl border border-border/60 bg-card/90 shadow-sm backdrop-blur transition-shadow duration-200;
+  }
+
+  .workspace-card:hover {
+    @apply shadow-md;
+  }
+
+  .metric-card {
+    @apply workspace-card min-h-[132px] p-5;
+  }
+
+  .metric-card-title {
+    @apply text-xs font-black uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .metric-card-value {
+    @apply mt-2 text-2xl font-black leading-none text-foreground sm:text-3xl;
+  }
+
+  .metric-card-subtitle {
+    @apply mt-2 text-sm text-muted-foreground;
+  }
+
+  .section-toolbar {
+    @apply flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/80 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .filter-row {
+    @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-4;
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm;
+  }
+
+  .table-scroll {
+    @apply w-full overflow-auto;
+    max-height: min(72vh, 760px);
+  }
+
+  .action-cluster {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .admin-control-panel {
+    @apply rounded-3xl border border-primary/20 bg-card/95 p-4 shadow-xl backdrop-blur sm:p-6;
   }
 }
 
 @layer utilities {
   .glass {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    @apply bg-card/85 backdrop-blur-xl border border-border/55 shadow-sm;
   }
 
   .gradient-primary {
@@ -143,6 +213,14 @@
   .animate-scale-in {
     animation: scaleIn 0.2s ease-out;
   }
+
+  .balanced-grid > * {
+    min-width: 0;
+  }
+
+  .uniform-card-height > * {
+    height: 100%;
+  }
 }
 
 @keyframes slideIn {
@@ -160,7 +238,6 @@
   to { opacity: 1; transform: scale(1); }
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -173,6 +250,78 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-muted-foreground/30;
+}
+
+/* Global polish for dense PMO pages */
+main > div > .p-6,
+main > div > .space-y-6.p-4,
+main > div > .space-y-6.p-6,
+main > div > .animate-fade-in.p-6 {
+  padding: var(--page-gap) !important;
+}
+
+main .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: var(--page-gap) !important;
+}
+
+main .grid {
+  min-width: 0;
+}
+
+main .grid > *,
+main .flex > * {
+  min-width: 0;
+}
+
+main .rounded-3xl,
+main .rounded-2xl {
+  box-shadow: var(--shadow-sm);
+}
+
+main .glass,
+main [class*='bg-card'] {
+  backdrop-filter: blur(14px);
+}
+
+main table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+main th {
+  white-space: nowrap;
+}
+
+main td {
+  vertical-align: middle;
+}
+
+main input,
+main textarea,
+main button,
+main [role='combobox'] {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-gap: 0.85rem;
+    --card-pad: 0.9rem;
+    --metric-card-min: 100%;
+  }
+
+  main h1 {
+    font-size: clamp(1.45rem, 7vw, 2rem);
+  }
+
+  main h2 {
+    font-size: clamp(1.2rem, 5.5vw, 1.6rem);
+  }
+
+  main .recharts-responsive-container {
+    min-height: 240px;
+  }
 }
 
 /* Export actions belong on /import-export only; hide legacy global quick-bar export button. */
