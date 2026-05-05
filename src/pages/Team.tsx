@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CheckCircle, Clock, FolderPlus, LayoutGrid, Mail, Pencil, Plus, Table as TableIcon, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Clock, FolderPlus, LayoutGrid, Mail, Pencil, Plus, Table as TableIcon, UserMinus, UserPlus } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
 import PageSection from '@/components/layout/PageSection';
@@ -58,6 +58,7 @@ const emptyForm = {
 };
 
 const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+const isInactiveMember = (member: WorkspaceTeamMember) => member.status === 'offline' || member.customFieldValues?.deactivated === true;
 
 const Team = () => {
   const [view, setView] = useState<'cards' | 'table'>('cards');
@@ -65,6 +66,8 @@ const Team = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [assignTaskOpen, setAssignTaskOpen] = useState(false);
   const [assignProjectOpen, setAssignProjectOpen] = useState(false);
+  const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [reassignToMemberId, setReassignToMemberId] = useState('');
   const [editingMember, setEditingMember] = useState<WorkspaceTeamMember | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -83,10 +86,10 @@ const Team = () => {
   const taskStats = useMemo(() => {
     return members.map((member) => {
       const aliases = [member.name, member.name.split(' ')[0]];
-      const assignedTasks = tasks.filter((task) => aliases.includes(task.assignee));
+      const assignedTasks = tasks.filter((task) => aliases.includes(task.assignee) || task.assignee_id === member.id || task.assignees?.includes(member.id));
       const completed = assignedTasks.filter((task) => task.status === 'done').length;
-      const assignedHours = assignedTasks.reduce((sum, task) => sum + (task.workloadHours ?? 0), 0);
-      const capacity = member.capacityHours ?? 40;
+      const assignedHours = isInactiveMember(member) ? 0 : assignedTasks.reduce((sum, task) => sum + (task.workloadHours ?? 0), 0);
+      const capacity = isInactiveMember(member) ? 0 : member.capacityHours ?? 40;
       const assignedProjectIds = new Set([
         ...(member.assignedProjectIds ?? []),
         ...assignedTasks.map((task) => task.project_id).filter(Boolean) as string[],
@@ -98,12 +101,13 @@ const Team = () => {
         tasksCompleted: completed,
         assignedTasks,
         assignedHours,
-        utilizationPct: Math.round((assignedHours / Math.max(1, capacity)) * 100),
+        utilizationPct: isInactiveMember(member) ? 0 : Math.round((assignedHours / Math.max(1, capacity)) * 100),
         assignedProjects: projects.filter((project) => assignedProjectIds.has(project.id)),
       };
     });
   }, [members, projects, tasks]);
   const activeMember = selectedMember ? taskStats.find((member) => member.id === selectedMember.id) ?? null : null;
+  const activeMembersForReassign = taskStats.filter((member) => activeMember?.id !== member.id && !isInactiveMember(member));
   const currentProfileMember =
     taskStats.find((member) => member.id === settings?.currentUser.teamMemberId) ??
     taskStats.find((member) => normalizeText(member.email) === normalizeText(settings?.profile.email));
@@ -146,6 +150,7 @@ const Team = () => {
       toast.success('Team member added');
     }
 
+    window.dispatchEvent(new CustomEvent('workspace-data-changed', { detail: { entity: 'teamMembers', reason: 'team-member-save' } }));
     setFormOpen(false);
   };
 
@@ -153,11 +158,12 @@ const Team = () => {
     if (!activeMember || !selectedTaskId) return;
     await updateTask.mutateAsync({
       id: selectedTaskId,
-      assignee: activeMember.name.split(' ')[0],
+      assignee: activeMember.name,
       assignee_id: activeMember.id,
       assignees: [activeMember.id],
     });
     toast.success('Task assigned');
+    window.dispatchEvent(new CustomEvent('workspace-data-changed', { detail: { entity: 'tasks', reason: 'team-task-assignment' } }));
     setAssignTaskOpen(false);
     setSelectedTaskId('');
   };
@@ -168,8 +174,54 @@ const Team = () => {
     ids.add(selectedProjectId);
     await updateMember.mutateAsync({ id: activeMember.id, assignedProjectIds: [...ids] });
     toast.success('Project assigned');
+    window.dispatchEvent(new CustomEvent('workspace-data-changed', { detail: { entity: 'teamMembers', reason: 'team-project-assignment' } }));
     setAssignProjectOpen(false);
     setSelectedProjectId('');
+  };
+
+  const deactivateMember = async () => {
+    if (!activeMember) return;
+    if (activeMember.assignedTasks.length > 0 && !reassignToMemberId) {
+      toast.error('Reassign active tasks before deactivating this member.');
+      return;
+    }
+
+    const targetMember = activeMembersForReassign.find((member) => member.id === reassignToMemberId);
+    if (targetMember) {
+      for (const task of activeMember.assignedTasks) {
+        await updateTask.mutateAsync({
+          id: task.id,
+          assignee: targetMember.name,
+          assignee_id: targetMember.id,
+          assignees: [targetMember.id],
+          customFieldValues: {
+            ...(task.customFieldValues ?? {}),
+            reassignedFromMemberId: activeMember.id,
+            reassignedFromMemberName: activeMember.name,
+            reassignedAt: new Date().toISOString(),
+          },
+        } as any);
+      }
+    }
+
+    await updateMember.mutateAsync({
+      id: activeMember.id,
+      status: 'offline',
+      assignedProjectIds: [],
+      capacityHours: 0,
+      customFieldValues: {
+        ...(activeMember.customFieldValues ?? {}),
+        deactivated: true,
+        deactivatedAt: new Date().toISOString(),
+        deactivationMode: activeMember.assignedTasks.length > 0 ? 'reassigned-and-deactivated' : 'deactivated-no-active-tasks',
+      },
+    });
+
+    window.dispatchEvent(new CustomEvent('workspace-data-changed', { detail: { entity: 'teamMembers', reason: 'team-member-deactivate' } }));
+    toast.success(`${activeMember.name} deactivated${targetMember ? ` and tasks reassigned to ${targetMember.name}` : ''}.`);
+    setDeactivateOpen(false);
+    setSelectedMember(null);
+    setReassignToMemberId('');
   };
 
   return (
@@ -205,11 +257,12 @@ const Team = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Total Capacity', value: `${taskStats.reduce((sum, member) => sum + (member.capacityHours ?? 40), 0)}h` },
+                  { label: 'Active Members', value: `${taskStats.filter((member) => !isInactiveMember(member)).length}` },
+                  { label: 'Total Capacity', value: `${taskStats.reduce((sum, member) => sum + (isInactiveMember(member) ? 0 : member.capacityHours ?? 40), 0)}h` },
                   { label: 'Assigned Hours', value: `${taskStats.reduce((sum, member) => sum + member.assignedHours, 0)}h` },
-                  { label: 'Average Utilization', value: `${Math.round(taskStats.reduce((sum, member) => sum + member.utilizationPct, 0) / Math.max(1, taskStats.length))}%` },
+                  { label: 'Average Utilization', value: `${Math.round(taskStats.filter((member) => !isInactiveMember(member)).reduce((sum, member) => sum + member.utilizationPct, 0) / Math.max(1, taskStats.filter((member) => !isInactiveMember(member)).length))}%` },
                 ].map((metric) => (
                   <div key={metric.label} className="rounded-xl border p-4 bg-card/40">
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.label}</p>
@@ -221,7 +274,7 @@ const Team = () => {
               {view === 'cards' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {taskStats.map((member) => (
-                    <Card key={member.id} className="glass hover:shadow-lg transition-all duration-300 group cursor-pointer" onClick={() => setSelectedMember(member)}>
+                    <Card key={member.id} className={`glass hover:shadow-lg transition-all duration-300 group cursor-pointer ${isInactiveMember(member) ? 'opacity-60' : ''}`} onClick={() => setSelectedMember(member)}>
                       <CardContent className="p-5">
                         <div className="flex items-start justify-between mb-4">
                           <div className="flex items-center gap-3">
@@ -235,6 +288,7 @@ const Team = () => {
                               <p className="font-semibold text-sm">{member.name}</p>
                               <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                 <p className="text-xs text-muted-foreground">{member.role}</p>
+                                {isInactiveMember(member) ? <Badge variant="destructive" className="text-[10px]">Inactive</Badge> : null}
                                 {currentProfileMember?.id === member.id ? (
                                   <Badge className="text-[10px]">Profile Access</Badge>
                                 ) : null}
@@ -252,7 +306,7 @@ const Team = () => {
                           </div>
                           <Progress value={member.utilizationPct} className="h-1.5" />
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>{member.assignedHours}/{member.capacityHours ?? 40}h</span>
+                            <span>{member.assignedHours}/{isInactiveMember(member) ? 0 : member.capacityHours ?? 40}h</span>
                             <Badge variant="outline" className="text-[10px]">{member.privilegeRole}</Badge>
                           </div>
                         </div>
@@ -275,17 +329,18 @@ const Team = () => {
                     </TableHeader>
                     <TableBody>
                       {taskStats.map((member) => (
-                        <TableRow key={member.id} className="cursor-pointer" onClick={() => setSelectedMember(member)}>
+                        <TableRow key={member.id} className={`cursor-pointer ${isInactiveMember(member) ? 'opacity-60' : ''}`} onClick={() => setSelectedMember(member)}>
                           <TableCell className="font-medium">
                             <div className="flex flex-wrap items-center gap-2">
                               <span>{member.name}</span>
+                              {isInactiveMember(member) ? <Badge variant="destructive" className="text-[10px]">Inactive</Badge> : null}
                               {currentProfileMember?.id === member.id ? (
                                 <Badge className="text-[10px]">Profile Access</Badge>
                               ) : null}
                             </div>
                           </TableCell>
                           <TableCell>{member.role}</TableCell>
-                          <TableCell>{member.assignedHours}/{member.capacityHours ?? 40}h</TableCell>
+                          <TableCell>{member.assignedHours}/{isInactiveMember(member) ? 0 : member.capacityHours ?? 40}h</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <Progress value={member.utilizationPct} className="h-2 w-20" />
@@ -320,11 +375,11 @@ const Team = () => {
             </div>
             <div className="space-y-3">
               {taskStats.map((member) => (
-                <div key={member.id} className="rounded-lg border p-3 bg-card/40">
+                <div key={member.id} className={`rounded-lg border p-3 bg-card/40 ${isInactiveMember(member) ? 'opacity-60' : ''}`}>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <p className="text-sm font-medium">{member.name}</p>
-                    <Badge variant={member.utilizationPct > (member.utilizationTarget ?? 85) ? 'destructive' : 'outline'} className="text-[10px]">
-                      {member.utilizationPct}% / target {member.utilizationTarget ?? 85}%
+                    <Badge variant={member.utilizationPct > (member.utilizationTarget ?? 85) ? 'destructive' : isInactiveMember(member) ? 'secondary' : 'outline'} className="text-[10px]">
+                      {isInactiveMember(member) ? 'Inactive' : `${member.utilizationPct}% / target ${member.utilizationTarget ?? 85}%`}
                     </Badge>
                   </div>
                   {member.assignedTasks.length === 0 ? (
@@ -395,7 +450,7 @@ const Team = () => {
                   <SelectContent>
                     <SelectItem value="online">Online</SelectItem>
                     <SelectItem value="away">Away</SelectItem>
-                    <SelectItem value="offline">Offline</SelectItem>
+                    <SelectItem value="offline">Offline / Inactive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -451,7 +506,7 @@ const Team = () => {
                     <SheetTitle className="text-lg">{activeMember.name}</SheetTitle>
                     <p className="text-sm text-muted-foreground">{activeMember.role}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className="text-xs capitalize">{activeMember.status}</Badge>
+                      <Badge variant={isInactiveMember(activeMember) ? 'destructive' : 'outline'} className="text-xs capitalize">{isInactiveMember(activeMember) ? 'inactive' : activeMember.status}</Badge>
                       <Badge variant="secondary" className="text-xs">{activeMember.privilegeRole}</Badge>
                       {currentProfileMember?.id === activeMember.id ? (
                         <Badge className="text-xs">Linked Profile Access</Badge>
@@ -472,7 +527,7 @@ const Team = () => {
                   </div>
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-1">Capacity</p>
-                    <p className="text-sm">{activeMember.capacityHours ?? 40}h / target {activeMember.utilizationTarget ?? 85}%</p>
+                    <p className="text-sm">{isInactiveMember(activeMember) ? 0 : activeMember.capacityHours ?? 40}h / target {activeMember.utilizationTarget ?? 85}%</p>
                   </div>
                 </div>
 
@@ -486,11 +541,24 @@ const Team = () => {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedTaskId(''); setAssignTaskOpen(true); }}>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedTaskId(''); setAssignTaskOpen(true); }} disabled={isInactiveMember(activeMember)}>
                     <UserPlus className="h-3.5 w-3.5" /> Assign Task
                   </Button>
-                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedProjectId(''); setAssignProjectOpen(true); }}>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => { setSelectedProjectId(''); setAssignProjectOpen(true); }} disabled={isInactiveMember(activeMember)}>
                     <FolderPlus className="h-3.5 w-3.5" /> Assign Project
+                  </Button>
+                </div>
+
+                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold">Safe member lifecycle</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Deactivate keeps history, preserves auditability, and prevents deleting project/timesheet history. Active tasks must be reassigned before deactivation.</p>
+                    </div>
+                  </div>
+                  <Button variant="destructive" size="sm" className="mt-3 gap-2" onClick={() => setDeactivateOpen(true)} disabled={isInactiveMember(activeMember)}>
+                    <UserMinus className="h-4 w-4" /> Deactivate / Reassign
                   </Button>
                 </div>
 
@@ -581,6 +649,38 @@ const Team = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignProjectOpen(false)}>Cancel</Button>
             <Button onClick={assignProject} disabled={!selectedProjectId}>Assign</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deactivateOpen} onOpenChange={setDeactivateOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Deactivate Team Member Safely</DialogTitle></DialogHeader>
+          {activeMember ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm">
+                <p className="font-semibold">{activeMember.name} has {activeMember.assignedTasks.length} assigned task(s).</p>
+                <p className="mt-1 text-muted-foreground">Deactivation preserves historical data. If tasks exist, choose a replacement owner before continuing.</p>
+              </div>
+              {activeMember.assignedTasks.length > 0 ? (
+                <div className="grid gap-2">
+                  <Label>Reassign active tasks to</Label>
+                  <Select value={reassignToMemberId || '__none__'} onValueChange={(value) => setReassignToMemberId(value === '__none__' ? '' : value)}>
+                    <SelectTrigger><SelectValue placeholder="Select replacement member" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select replacement member</SelectItem>
+                      {activeMembersForReassign.map((member) => (
+                        <SelectItem key={member.id} value={member.id}>{member.name} - {member.role}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeactivateOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={deactivateMember} disabled={!!activeMember?.assignedTasks.length && !reassignToMemberId}>Deactivate Member</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
