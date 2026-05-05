@@ -58,6 +58,8 @@ const nextOption = (label: string, index: number): WorkspaceConfigOption => ({
   order: index + 1,
 });
 
+const splitOptionsText = (value: string) => value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
+
 export default function AdminExperienceControls() {
   const { data: settings } = useWorkspaceSettings();
   const updateSettings = useUpdateWorkspaceSettings();
@@ -93,8 +95,7 @@ export default function AdminExperienceControls() {
     if (duplicate) return toast.error("This field already exists on the selected form");
 
     const options = fieldDraft.type === "select"
-      ? fieldDraft.optionsText.split(/[,
-]/).map((item) => item.trim()).filter(Boolean).map((label, index) => nextOption(label, index))
+      ? splitOptionsText(fieldDraft.optionsText).map((label, index) => nextOption(label, index))
       : undefined;
 
     const nextField: WorkspaceCustomFieldConfig = {
