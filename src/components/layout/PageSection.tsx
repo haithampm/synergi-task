@@ -7,13 +7,13 @@ interface PageSectionProps {
 }
 
 const PageSection = ({ title, description, actions }: PageSectionProps) => (
-  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">{title}</p>
-      {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+  <section className="section-toolbar">
+    <div className="min-w-0 space-y-1">
+      <p className="text-[11px] font-black uppercase tracking-[0.22em] text-primary">{title}</p>
+      {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
     </div>
-    {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-  </div>
+    {actions ? <div className="action-cluster shrink-0">{actions}</div> : null}
+  </section>
 );
 
 export default PageSection;
