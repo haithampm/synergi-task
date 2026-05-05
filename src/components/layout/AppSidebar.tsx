@@ -14,38 +14,38 @@ const adminEmails = ['haitham.pm@gmail.com', 'haitham.pm@hotmail.com'];
 
 const navSections = [
   {
-    title: 'Executive',
+    title: 'PMO Control Center',
     items: [
-      { icon: LayoutDashboard, label: 'PMO BI Dashboard', path: '/dashboard', permission: 'view_dashboard', important: true },
-      { icon: BarChart3, label: 'Reports & Exports', path: '/reports', permission: 'view_reports' },
-    ],
-  },
-  {
-    title: 'Delivery Management',
-    items: [
-      { icon: FolderKanban, label: 'Projects Portfolio', path: '/projects', permission: 'manage_projects', important: true },
-      { icon: CheckSquare, label: 'Tasks & Activities', path: '/tasks', permission: 'manage_tasks', important: true },
+      { icon: LayoutDashboard, label: 'Executive Dashboard', path: '/dashboard', permission: 'view_dashboard', important: true },
+      { icon: FolderKanban, label: 'Project Portfolio', path: '/projects', permission: 'manage_projects', important: true },
       { icon: GanttChart, label: 'Master Schedule', path: '/schedule', permission: 'manage_schedule', important: true },
-      { icon: Ticket, label: 'Open Points / Tickets', path: '/tickets', permission: 'manage_tasks', important: true },
-      { icon: CalendarDays, label: 'Calendar & Meetings', path: '/calendar', permission: 'manage_schedule' },
-      { icon: Files, label: 'Documents Center', path: '/documents', permission: 'manage_documents' },
-      { icon: BriefcaseBusiness, label: 'Resources & Utilization', path: '/resources', permission: 'manage_resources' },
     ],
   },
   {
-    title: 'Collaboration',
+    title: 'Delivery Execution',
     items: [
-      { icon: Users, label: 'Team Directory', path: '/team', permission: 'manage_team' },
+      { icon: CheckSquare, label: 'Tasks & Activities', path: '/tasks', permission: 'manage_tasks', important: true },
+      { icon: Ticket, label: 'Tickets & Open Points', path: '/tickets', permission: 'manage_tasks', important: true },
+      { icon: CalendarDays, label: 'Meetings & Calendar', path: '/calendar', permission: 'manage_schedule' },
+      { icon: StickyNote, label: 'Action Notes', path: '/sticky-notes', important: true, alwaysVisible: true },
+    ],
+  },
+  {
+    title: 'People & Knowledge',
+    items: [
+      { icon: Users, label: 'Team Directory', path: '/team', permission: 'manage_team', important: true },
+      { icon: BriefcaseBusiness, label: 'Resources & Utilization', path: '/resources', permission: 'manage_resources', important: true },
+      { icon: Files, label: 'Documents Center', path: '/documents', permission: 'manage_documents' },
       { icon: MessageSquare, label: 'Team Chat', path: '/team-chat', permission: 'team_chat' },
       { icon: MessageSquare, label: 'AI PM Assistant', path: '/ai-chat', highlight: true, alwaysVisible: true },
-      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', important: true, alwaysVisible: true },
     ],
   },
   {
-    title: 'Administration',
+    title: 'Reports & Administration',
     items: [
-      { icon: Settings, label: 'Workspace Settings', path: '/settings', important: true, alwaysVisible: true },
-      { icon: FileUp, label: 'Import / Export', path: '/import-export', permission: 'export', important: true },
+      { icon: BarChart3, label: 'Reports & Exports', path: '/reports', permission: 'view_reports', important: true },
+      { icon: FileUp, label: 'Import / Export Center', path: '/import-export', permission: 'export', important: true },
+      { icon: Settings, label: 'Settings & Form Builder', path: '/settings', important: true, alwaysVisible: true },
       { icon: ShieldCheck, label: 'Permissions & Access', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
     ],
