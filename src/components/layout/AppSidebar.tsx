@@ -37,17 +37,17 @@ const navSections = [
     items: [
       { icon: Users, label: 'Team Directory', path: '/team', permission: 'manage_team' },
       { icon: MessageSquare, label: 'Team Chat', path: '/team-chat', permission: 'team_chat' },
-      { icon: MessageSquare, label: 'AI PM Assistant', path: '/ai-chat', highlight: true },
-      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', important: true },
+      { icon: MessageSquare, label: 'AI PM Assistant', path: '/ai-chat', highlight: true, alwaysVisible: true },
+      { icon: StickyNote, label: 'Sticky Notes', path: '/sticky-notes', important: true, alwaysVisible: true },
     ],
   },
   {
     title: 'Administration',
     items: [
+      { icon: Settings, label: 'Workspace Settings', path: '/settings', important: true, alwaysVisible: true },
+      { icon: FileUp, label: 'Import / Export', path: '/import-export', permission: 'export', important: true },
       { icon: ShieldCheck, label: 'Permissions & Access', path: '/settings/permissions', permission: 'manage_privileges', important: true, adminOnly: true },
-      { icon: Settings, label: 'Workspace Settings', path: '/settings', permission: 'manage_privileges', important: true, adminOnly: true },
       { icon: Activity, label: 'App Monitor', path: '/app-monitor', permission: 'manage_integrations', adminOnly: true },
-      { icon: FileUp, label: 'Import / Export', path: '/import-export', permission: 'export' },
     ],
   },
 ];
@@ -83,7 +83,8 @@ const AppSidebar = () => {
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => {
-            if (item.adminOnly && canSeeAdmin) return true;
+            if (item.alwaysVisible) return true;
+            if (item.adminOnly) return canSeeAdmin;
             return hasWorkspacePermission(currentRoleId, settings?.privilegeRoles, item.permission);
           }),
         }))
