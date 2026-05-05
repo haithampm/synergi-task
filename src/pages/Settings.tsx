@@ -1,69 +1,44 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, Palette, Shield, User, Workflow, LayoutDashboard, KeyRound, Building2, MailPlus, Pencil, ShieldCheck, Users } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Bell, Building2, LayoutDashboard, ListPlus, MailPlus, Palette, Pencil, Shield, ShieldCheck, Users, Workflow } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
 import AppHeader from '@/components/layout/AppHeader';
 import PageSection from '@/components/layout/PageSection';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import AdminExperienceControls from '@/components/admin/AdminExperienceControls';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/useAuth';
 import {
   useAuditLogs,
-  useCreateDashboard,
   useCreateUserAccount,
-  useDashboards,
-  useProjectTemplates,
-  useRecordUserInvitation,
-  useRecordUserPasswordReset,
-  useSendUserNotification,
   useTeamMembers,
-  useUpdateDashboard,
   useUpdateUserAccount,
-  useUpdateWorkflow,
   useUpdateWorkspaceSettings,
   useUserAccounts,
-  useWorkflows,
   useWorkspaceSettings,
 } from '@/hooks/useProjects';
-import { useAuth } from '@/hooks/useAuth';
-import { toast } from 'sonner';
 import { languageLabel } from '@/lib/i18n';
-import type { WorkspaceCustomFieldConfig, WorkspaceUserAccount } from '@/lib/workspace-store';
-import { buildDashboardWidgets, dashboardWidgetCatalog } from '@/lib/dashboard-widgets';
-import { customFieldOptionsToStrings, normalizeCustomFieldKey } from '@/lib/custom-fields';
-
-const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+import type { WorkspaceUserAccount } from '@/lib/workspace-store';
+import { toast } from 'sonner';
 
 const emptyUserForm = {
   fullName: '',
   email: '',
   roleId: 'viewer',
-  status: 'invited' as const,
-  authProvider: 'email' as const,
+  status: 'invited' as WorkspaceUserAccount['status'],
+  authProvider: 'email' as WorkspaceUserAccount['authProvider'],
   teamMemberId: '',
   title: '',
   department: '',
   notes: '',
-};
-
-const emptyCustomFieldDraft = {
-  entity: 'project' as WorkspaceCustomFieldConfig['entity'],
-  type: 'text' as WorkspaceCustomFieldConfig['type'],
-  label: '',
-  key: '',
-  placeholder: '',
-  helpText: '',
-  required: false,
-  optionsText: '',
 };
 
 const statusVariant: Record<WorkspaceUserAccount['status'], 'default' | 'secondary' | 'destructive'> = {
@@ -72,39 +47,26 @@ const statusVariant: Record<WorkspaceUserAccount['status'], 'default' | 'seconda
   suspended: 'destructive',
 };
 
-const formatOptionalDateTime = (value?: string) => value ? new Date(value).toLocaleString() : 'Not yet';
+const normalizeText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+const formatOptionalDateTime = (value?: string) => (value ? new Date(value).toLocaleString() : 'Not yet');
 
 const Settings = () => {
   const { user, updatePassword, sendInvitationEmail, sendPasswordResetEmail } = useAuth();
   const { data } = useWorkspaceSettings();
   const { data: members = [] } = useTeamMembers();
   const { data: userAccounts = [] } = useUserAccounts();
-  const { data: projectTemplates = [] } = useProjectTemplates();
   const { data: auditLogs = [] } = useAuditLogs();
-  const { data: workflows = [] } = useWorkflows();
-  const { data: dashboards = [] } = useDashboards();
   const updateSettings = useUpdateWorkspaceSettings();
-  const updateWorkflow = useUpdateWorkflow();
-  const updateDashboard = useUpdateDashboard();
-  const createDashboard = useCreateDashboard();
   const createUserAccount = useCreateUserAccount();
   const updateUserAccount = useUpdateUserAccount();
-  const recordUserInvitation = useRecordUserInvitation();
-  const recordUserPasswordReset = useRecordUserPasswordReset();
-  const sendUserNotification = useSendUserNotification();
   const [draft, setDraft] = useState(data);
+  const [activeTab, setActiveTab] = useState('workspace');
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<WorkspaceUserAccount | null>(null);
   const [userForm, setUserForm] = useState(emptyUserForm);
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
-  const [notificationTarget, setNotificationTarget] = useState<WorkspaceUserAccount | null>(null);
-  const [notificationMessage, setNotificationMessage] = useState('');
   const [selectedMetadataKey, setSelectedMetadataKey] = useState('');
   const [metadataDraftLabel, setMetadataDraftLabel] = useState('');
   const [passwordForm, setPasswordForm] = useState({ next: '', confirm: '' });
-  const [newDashboardName, setNewDashboardName] = useState('');
-  const [dashboardSourceId, setDashboardSourceId] = useState('');
-  const [customFieldDraft, setCustomFieldDraft] = useState(emptyCustomFieldDraft);
 
   useEffect(() => {
     setDraft(data);
@@ -112,32 +74,17 @@ const Settings = () => {
 
   useEffect(() => {
     if (!data?.metadata.length) return;
-    setSelectedMetadataKey((current) =>
-      current && data.metadata.some((field) => field.key === current) ? current : data.metadata[0].key,
-    );
+    setSelectedMetadataKey((current) => current && data.metadata.some((field) => field.key === current) ? current : data.metadata[0].key);
   }, [data]);
-
-  useEffect(() => {
-    if (!dashboards.length) return;
-    setDashboardSourceId((current) => (current && dashboards.some((dashboard) => dashboard.id === current) ? current : dashboards[0].id));
-  }, [dashboards]);
 
   const linkedTeamMember = useMemo(() => {
     if (!draft) return undefined;
-
-    return (
-      members.find((member) => member.id === draft.currentUser.teamMemberId) ??
-      members.find((member) => normalizeText(member.email) === normalizeText(user?.email ?? draft.profile.email))
-    );
+    return members.find((member) => member.id === draft.currentUser.teamMemberId) ?? members.find((member) => normalizeText(member.email) === normalizeText(user?.email ?? draft.profile.email));
   }, [draft, members, user?.email]);
 
   const linkedUserAccount = useMemo(() => {
     if (!draft) return undefined;
-
-    return (
-      userAccounts.find((account) => account.id === draft.currentUser.userAccountId) ??
-      userAccounts.find((account) => normalizeText(account.email) === normalizeText(user?.email ?? draft.profile.email))
-    );
+    return userAccounts.find((account) => account.id === draft.currentUser.userAccountId) ?? userAccounts.find((account) => normalizeText(account.email) === normalizeText(user?.email ?? draft.profile.email));
   }, [draft, user?.email, userAccounts]);
 
   const linkedRole = useMemo(
@@ -156,39 +103,22 @@ const Settings = () => {
     [userAccounts],
   );
 
-  const recentUserLogs = useMemo(
-    () => auditLogs.filter((log) => log.entityType === 'user').slice(0, 8),
-    [auditLogs],
-  );
-
-  const currentActorName = linkedUserAccount?.fullName ?? draft?.currentUser.displayName ?? 'Admin User';
-
   if (!draft) return null;
 
   const selectedMetadata = draft.metadata.find((field) => field.key === selectedMetadataKey) ?? draft.metadata[0];
-
   const isAdminUser = (linkedUserAccount?.roleId ?? draft.currentUser.roleId) === 'admin';
 
   const save = async () => {
     await updateSettings.mutateAsync(draft);
-    if (draft.appearance.darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    if (draft.appearance.darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+    window.dispatchEvent(new CustomEvent('workspace-theme-changed', { detail: draft.appearance }));
     toast.success('Workspace settings updated');
   };
 
   const savePassword = async () => {
-    if (!passwordForm.next.trim() || passwordForm.next.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
-    }
-    if (passwordForm.next !== passwordForm.confirm) {
-      toast.error('Password confirmation does not match');
-      return;
-    }
-
+    if (!passwordForm.next.trim() || passwordForm.next.length < 6) return toast.error('Password must be at least 6 characters');
+    if (passwordForm.next !== passwordForm.confirm) return toast.error('Password confirmation does not match');
     await updatePassword(passwordForm.next);
     setDraft((prev) => prev ? ({ ...prev, security: { ...prev.security, passwordLastChangedAt: new Date().toISOString() } }) : prev);
     setPasswordForm({ next: '', confirm: '' });
@@ -218,84 +148,32 @@ const Settings = () => {
   };
 
   const saveUser = async () => {
-    if (!userForm.fullName.trim() || !userForm.email.trim()) {
-      toast.error('User name and email are required');
-      return;
-    }
-
+    if (!userForm.fullName.trim() || !userForm.email.trim()) return toast.error('User name and email are required');
     if (editingUser) {
       await updateUserAccount.mutateAsync({ id: editingUser.id, ...userForm });
       toast.success('User access updated');
     } else {
-      const created = await createUserAccount.mutateAsync({
-        ...userForm,
-        invitedBy: linkedUserAccount?.fullName ?? draft.currentUser.displayName,
-      });
-      if (created && created.authProvider !== 'google') {
+      const created = await createUserAccount.mutateAsync({ ...userForm, invitedBy: linkedUserAccount?.fullName ?? draft.currentUser.displayName });
+      if (created?.email) {
         try {
           await sendInvitationEmail(created.email, created.fullName);
-          await recordUserInvitation.mutateAsync({ id: created.id, actorName: currentActorName });
           toast.success('User profile created and invitation email sent');
-        } catch (error) {
-          console.warn('Invitation email failed', error);
-          toast.warning('User profile created, but the invitation email could not be sent. Check Supabase email auth.');
+        } catch {
+          toast.warning('User profile created, but the invitation email could not be sent.');
         }
-      } else {
-        toast.success('User profile created');
       }
     }
-
     setUserDialogOpen(false);
-  };
-
-  const sendAccessInvitation = async (account: WorkspaceUserAccount) => {
-    try {
-      await sendInvitationEmail(account.email, account.fullName);
-      await recordUserInvitation.mutateAsync({ id: account.id, actorName: currentActorName });
-      toast.success(`Invitation email sent to ${account.fullName}`);
-    } catch (error) {
-      console.warn('Invitation email failed', error);
-      toast.error('Invitation email could not be sent. Check Supabase email auth settings.');
-    }
   };
 
   const sendResetPasswordLink = async (account: WorkspaceUserAccount) => {
     try {
       await sendPasswordResetEmail(account.email);
-      await recordUserPasswordReset.mutateAsync({ id: account.id, actorName: currentActorName });
       toast.success(`Password reset email sent to ${account.fullName}`);
-    } catch (error) {
-      console.warn('Password reset email failed', error);
+    } catch {
       toast.error('Password reset email could not be sent. Check Supabase auth configuration.');
     }
   };
-
-  const openNotificationComposer = (account: WorkspaceUserAccount) => {
-    setNotificationTarget(account);
-    setNotificationMessage(`Please review your assigned work in ${draft?.namespace.organization ?? 'the workspace'}.`);
-    setNotificationDialogOpen(true);
-  };
-
-  const postUserNotification = async () => {
-    if (!notificationTarget || !notificationMessage.trim()) {
-      toast.error('Notification message is required');
-      return;
-    }
-
-    await sendUserNotification.mutateAsync({
-      id: notificationTarget.id,
-      message: notificationMessage.trim(),
-      actorName: currentActorName,
-    });
-
-    toast.success(`Notification sent to ${notificationTarget.fullName} in the app activity feed`);
-    setNotificationDialogOpen(false);
-    setNotificationTarget(null);
-    setNotificationMessage('');
-  };
-
-  const linkedMemberForAccount = (account: WorkspaceUserAccount) =>
-    members.find((member) => member.id === account.teamMemberId);
 
   const toggleAccountStatus = async (account: WorkspaceUserAccount) => {
     const nextStatus = account.status === 'suspended' ? 'active' : 'suspended';
@@ -315,88 +193,16 @@ const Settings = () => {
       ...prev,
       metadata: prev.metadata.map((field) => field.key === selectedMetadata.key ? {
         ...field,
-        options: [
-          ...field.options,
-          {
-            id: `${field.key}-${Date.now()}`,
-            label: metadataDraftLabel.trim(),
-            value: metadataDraftLabel.trim().toLowerCase().replace(/\s+/g, '-'),
-            active: true,
-            order: field.options.length + 1,
-          },
-        ],
+        options: [...field.options, {
+          id: `${field.key}-${Date.now()}`,
+          label: metadataDraftLabel.trim(),
+          value: metadataDraftLabel.trim().toLowerCase().replace(/\s+/g, '-'),
+          active: true,
+          order: field.options.length + 1,
+        }],
       } : field),
     }) : prev);
     setMetadataDraftLabel('');
-  };
-
-  const addCustomField = () => {
-    if (!isAdminUser) {
-      toast.error('Only administrators can add custom fields');
-      return;
-    }
-
-    if (!customFieldDraft.label.trim()) {
-      toast.error('Field label is required');
-      return;
-    }
-
-    const key = normalizeCustomFieldKey(customFieldDraft.key || customFieldDraft.label);
-    if (!key) {
-      toast.error('Field key is required');
-      return;
-    }
-
-    const duplicate = draft.customFields.some(
-      (field) => field.entity === customFieldDraft.entity && field.key === key,
-    );
-    if (duplicate) {
-      toast.error('A custom field with this key already exists for the selected form');
-      return;
-    }
-
-    setDraft((prev) => prev ? ({
-      ...prev,
-      customFields: [
-        ...prev.customFields,
-        {
-          id: `custom-${customFieldDraft.entity}-${Date.now()}`,
-          entity: customFieldDraft.entity,
-          key,
-          label: customFieldDraft.label.trim(),
-          type: customFieldDraft.type,
-          placeholder: customFieldDraft.placeholder.trim(),
-          helpText: customFieldDraft.helpText.trim(),
-          required: customFieldDraft.required,
-          active: true,
-          options: customFieldDraft.type === 'select'
-            ? customFieldDraft.optionsText
-                .split(',')
-                .map((option) => option.trim())
-                .filter(Boolean)
-                .map((option, index) => ({
-                  id: `${key}-${index + 1}`,
-                  label: option,
-                  value: option.toLowerCase().replace(/\s+/g, '-'),
-                  active: true,
-                  order: index + 1,
-                }))
-            : undefined,
-        },
-      ],
-    }) : prev);
-    setCustomFieldDraft(emptyCustomFieldDraft);
-    toast.success('Custom field added to the form catalog');
-  };
-
-  const toggleCustomField = (fieldId: string) => {
-    if (!isAdminUser) return;
-    setDraft((prev) => prev ? ({
-      ...prev,
-      customFields: prev.customFields.map((field) =>
-        field.id === fieldId ? { ...field, active: !field.active } : field,
-      ),
-    }) : prev);
   };
 
   const toggleMetadataOption = (fieldKey: string, optionId: string) => {
@@ -409,1076 +215,145 @@ const Settings = () => {
     }) : prev);
   };
 
-  const createCustomDashboard = async () => {
-    if (!newDashboardName.trim()) {
-      toast.error('Dashboard name is required');
-      return;
-    }
-
-    const sourceDashboard = dashboards.find((dashboard) => dashboard.id === dashboardSourceId);
-    await createDashboard.mutateAsync({
-      name: newDashboardName.trim(),
-      widgets: sourceDashboard?.widgets.length ? sourceDashboard.widgets : buildDashboardWidgets(),
-    });
-    setNewDashboardName('');
-    toast.success('Custom dashboard created');
-  };
-
-  const toggleDashboardWidget = async (dashboardId: string, widgetKey: string) => {
-    const dashboard = dashboards.find((item) => item.id === dashboardId);
-    if (!dashboard) return;
-
-    const existingWidget = dashboard.widgets.find((widget) => widget.key === widgetKey);
-    const nextWidgets = existingWidget
-      ? dashboard.widgets.map((widget) =>
-          widget.key === widgetKey ? { ...widget, enabled: !widget.enabled } : widget,
-        )
-      : [...dashboard.widgets, ...buildDashboardWidgets([widgetKey])];
-
-    await updateDashboard.mutateAsync({
-      id: dashboardId,
-      widgets: nextWidgets,
-    });
-    toast.success('Dashboard layout updated');
-  };
-
-  const duplicateDashboard = async (dashboardId: string) => {
-    const sourceDashboard = dashboards.find((dashboard) => dashboard.id === dashboardId);
-    if (!sourceDashboard) return;
-
-    await createDashboard.mutateAsync({
-      name: `${sourceDashboard.name} Copy`,
-      widgets: sourceDashboard.widgets,
-      isDefault: false,
-    });
-    toast.success('Dashboard duplicated');
-  };
+  const appearanceFont = String((draft.appearance as any).fontFamily ?? 'inter');
 
   return (
     <AppLayout>
-      <AppHeader title="Professional Settings" subtitle="Namespace, privileges, workflows, dashboard configuration, AI, and MS Project controls." />
-      <div className="p-6 max-w-5xl space-y-6 animate-fade-in">
-        <Tabs defaultValue="workspace" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-4">
-            <TabsTrigger value="workspace">Workspace</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="administration">Administration</TabsTrigger>
-            <TabsTrigger value="governance">Governance</TabsTrigger>
+      <AppHeader title="Settings & Form Builder" subtitle="Workspace configuration, user access, lists, governance, branding, and future form fields." />
+      <div className="page-shell page-stack">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/50 p-1 md:grid-cols-3 xl:grid-cols-5">
+            <TabsTrigger value="workspace" className="rounded-xl">Workspace</TabsTrigger>
+            <TabsTrigger value="users" className="rounded-xl">Users</TabsTrigger>
+            <TabsTrigger value="administration" className="rounded-xl">Administration</TabsTrigger>
+            <TabsTrigger value="governance" className="rounded-xl">Governance</TabsTrigger>
+            <TabsTrigger value="form-builder" className="rounded-xl">Form Builder</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="workspace" className="space-y-6">
-        <PageSection
-          title="Identity & Workspace"
-          description="Manage namespace, profile linking, and the active user context for this workspace."
-        />
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Building2 className="h-4 w-4" /> Namespace</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs">Organization</Label>
-                  <Input value={draft.namespace.organization} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, organization: e.target.value } }) : prev)} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs">Namespace Slug</Label>
-                  <Input value={draft.namespace.slug} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, slug: e.target.value } }) : prev)} className="mt-1" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs">Portfolio Office</Label>
-                  <Input value={draft.namespace.portfolioOffice} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, portfolioOffice: e.target.value } }) : prev)} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs">Timezone</Label>
-                  <Input value={draft.namespace.timezone} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, timezone: e.target.value } }) : prev)} className="mt-1" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <TabsContent value="workspace" className="space-y-4">
+            <PageSection title="Identity & Workspace" description="Manage namespace, branding, profile linking, language, theme, and active user context." actions={<Button onClick={save}>Save Settings</Button>} />
+            <div className="responsive-content-grid">
+              <Card className="glass">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" /> Namespace</CardTitle></CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2"><Label>Organization</Label><Input value={draft.namespace.organization} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, organization: event.target.value } }) : prev)} /></div>
+                  <div className="space-y-2"><Label>Namespace Slug</Label><Input value={draft.namespace.slug} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, slug: event.target.value } }) : prev)} /></div>
+                  <div className="space-y-2"><Label>Portfolio Office</Label><Input value={draft.namespace.portfolioOffice} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, portfolioOffice: event.target.value } }) : prev)} /></div>
+                  <div className="space-y-2"><Label>Timezone</Label><Input value={draft.namespace.timezone} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, namespace: { ...prev.namespace, timezone: event.target.value } }) : prev)} /></div>
+                </CardContent>
+              </Card>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><User className="h-4 w-4" /> Current User</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs">Display Name</Label>
-                  <Input value={draft.currentUser.displayName} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, currentUser: { ...prev.currentUser, displayName: e.target.value } }) : prev)} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs">Role</Label>
-                  <Select value={draft.currentUser.roleId} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, currentUser: { ...prev.currentUser, roleId: value } }) : prev)}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {draft.privilegeRoles.map((role) => (
-                        <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">Email</Label>
-                <Input value={draft.profile.email} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, profile: { ...prev.profile, email: e.target.value } }) : prev)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Profile Image URL</Label>
-                <Input value={draft.profile.avatarUrl ?? ''} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, profile: { ...prev.profile, avatarUrl: e.target.value } }) : prev)} className="mt-1" placeholder="https://..." />
-              </div>
-              <div>
-                <Label className="text-xs">Authenticated Account</Label>
-                <Input value={user?.email ?? 'No active sign-in detected'} readOnly className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Linked Team Account</Label>
-                <Select
-                  value={draft.currentUser.teamMemberId || '__none__'}
-                  onValueChange={(value) =>
-                    setDraft((prev) => {
-                      if (!prev) return prev;
-                      if (value === '__none__') {
-                        return {
-                          ...prev,
-                          currentUser: { ...prev.currentUser, teamMemberId: '' },
-                        };
-                      }
-
-                      const member = members.find((item) => item.id === value);
-                      return {
-                        ...prev,
-                        profile: {
-                          ...prev.profile,
-                          email: user?.email ?? member?.email ?? prev.profile.email,
-                        },
-                        currentUser: {
-                          ...prev.currentUser,
-                          teamMemberId: value,
-                          displayName: member?.name ?? prev.currentUser.displayName,
-                          roleId: member?.privilegeRole ?? prev.currentUser.roleId,
-                        },
-                      };
-                    })
-                  }
-                >
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Not linked</SelectItem>
-                    {members.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>{member.name} - {member.role}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="rounded-xl border p-4 bg-card/40 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-medium">{linkedTeamMember ? linkedTeamMember.name : 'Unlinked profile access'}</p>
-                  <Badge variant={linkedTeamMember ? 'default' : 'outline'}>
-                    {linkedTeamMember ? 'Linked Team Profile' : 'Manual Link Needed'}
-                  </Badge>
-                  {linkedUserAccount ? <Badge variant="secondary">{linkedUserAccount.email}</Badge> : null}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {linkedTeamMember
-                    ? `Access privileges now follow ${linkedTeamMember.role} and the ${linkedRole?.name ?? draft.currentUser.roleId} role policy.`
-                    : 'Sign in with a matching team-member email or choose a team account here to bind app access to an internal profile.'}
-                </p>
-                {linkedTeamMember ? (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <Badge variant="outline">{linkedTeamMember.department || 'Team Workspace'}</Badge>
-                    <Badge variant="secondary">{linkedRole?.name ?? draft.currentUser.roleId}</Badge>
-                    <Badge variant="outline">{linkedTeamMember.email}</Badge>
+              <Card className="glass">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Palette className="h-4 w-4" /> Appearance</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><Label>Language</Label><Select value={draft.appearance.language} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, language: value as any } }) : prev)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="en">{languageLabel('en')}</SelectItem><SelectItem value="ar">{languageLabel('ar')}</SelectItem></SelectContent></Select></div>
+                    <div className="space-y-2"><Label>Font mode</Label><Input value={appearanceFont} readOnly /></div>
                   </div>
-                ) : null}
-              </div>
-              <div className="rounded-xl border p-4 bg-card/40 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Password & Access Security</p>
-                    <p className="text-xs text-muted-foreground">Change the signed-in user password and track when it was updated.</p>
-                  </div>
-                  <Badge variant="outline">{draft.security.passwordLastChangedAt ? new Date(draft.security.passwordLastChangedAt).toLocaleDateString() : 'Not changed yet'}</Badge>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Input type="password" value={passwordForm.next} onChange={(e) => setPasswordForm((prev) => ({ ...prev, next: e.target.value }))} placeholder="New password" />
-                  <Input type="password" value={passwordForm.confirm} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirm: e.target.value }))} placeholder="Confirm password" />
-                </div>
-                <Button variant="outline" onClick={savePassword} disabled={!user}>Update Password</Button>
-                {!user ? <p className="text-xs text-muted-foreground">Password changes require a signed-in account session.</p> : null}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                  <div className="flex items-center justify-between rounded-xl border p-3"><div><p className="font-medium">Dark mode</p><p className="text-xs text-muted-foreground">Switch application appearance.</p></div><Switch checked={draft.appearance.darkMode} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, darkMode: checked } }) : prev)} /></div>
+                  <div className="flex items-center justify-between rounded-xl border p-3"><div><p className="font-medium">In-app notifications</p><p className="text-xs text-muted-foreground">Show notifications in the header.</p></div><Switch checked={draft.notifications.inApp} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, notifications: { ...prev.notifications, inApp: checked } }) : prev)} /></div>
+                </CardContent>
+              </Card>
 
+              <Card className="glass md:col-span-2">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Current User & Security</CardTitle></CardHeader>
+                <CardContent className="grid gap-4 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2"><Label>Display Name</Label><Input value={draft.currentUser.displayName} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, currentUser: { ...prev.currentUser, displayName: event.target.value } }) : prev)} /></div>
+                      <div className="space-y-2"><Label>Email</Label><Input value={draft.profile.email} onChange={(event) => setDraft((prev) => prev ? ({ ...prev, profile: { ...prev.profile, email: event.target.value } }) : prev)} /></div>
+                    </div>
+                    <div className="space-y-2"><Label>Linked Team Account</Label><Select value={draft.currentUser.teamMemberId || '__none__'} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, currentUser: { ...prev.currentUser, teamMemberId: value === '__none__' ? '' : value } }) : prev)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">Not linked</SelectItem>{members.map((member) => <SelectItem key={member.id} value={member.id}>{member.name} - {member.role}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="rounded-xl border bg-card/40 p-4"><p className="font-medium">{linkedTeamMember ? linkedTeamMember.name : 'Unlinked profile access'}</p><p className="text-sm text-muted-foreground">Role policy: {linkedRole?.name ?? draft.currentUser.roleId}</p></div>
+                  </div>
+                  <div className="space-y-4 rounded-xl border bg-card/40 p-4">
+                    <div className="flex items-center justify-between"><div><p className="font-medium">Password & Access Security</p><p className="text-xs text-muted-foreground">Change the signed-in user password.</p></div><Badge variant="outline">{draft.security.passwordLastChangedAt ? new Date(draft.security.passwordLastChangedAt).toLocaleDateString() : 'Not changed'}</Badge></div>
+                    <div className="grid gap-3 md:grid-cols-2"><Input type="password" value={passwordForm.next} onChange={(event) => setPasswordForm((prev) => ({ ...prev, next: event.target.value }))} placeholder="New password" /><Input type="password" value={passwordForm.confirm} onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirm: event.target.value }))} placeholder="Confirm password" /></div>
+                    <Button variant="outline" onClick={savePassword} disabled={!user}>Update Password</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
-          <TabsContent value="users" className="space-y-6">
-        <Card className="glass">
-          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4" /> User Access Control</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Manage mail users, admin access, linked team profiles, and workspace permissions from one directory.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="gap-1">
-                <ShieldCheck className="h-3.5 w-3.5" /> Admin mailbox: admin@company.com
-              </Badge>
-              <Button size="sm" className="gap-2" onClick={openAddUser} disabled={!isAdminUser}>
-                <MailPlus className="h-4 w-4" /> Add User
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+
+          <TabsContent value="users" className="space-y-4">
+            <PageSection title="User Access Control" description="Manage app users, admin access, linked team profiles, and account lifecycle." actions={<Button className="gap-2" onClick={openAddUser} disabled={!isAdminUser}><MailPlus className="h-4 w-4" /> Add User</Button>} />
+            <div className="responsive-card-grid">
               {[
                 { label: 'Total Users', value: userStats.total },
                 { label: 'Admins', value: userStats.admins },
                 { label: 'Active', value: userStats.active },
                 { label: 'Invited', value: userStats.invited },
                 { label: 'Suspended', value: userStats.suspended },
-              ].map((metric) => (
-                <div key={metric.label} className="rounded-xl border p-4 bg-card/40">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">{metric.label}</p>
-                  <p className="mt-1 text-2xl font-semibold">{metric.value}</p>
-                </div>
-              ))}
+              ].map((metric) => <div key={metric.label} className="metric-card"><p className="metric-card-title">{metric.label}</p><p className="metric-card-value">{metric.value}</p></div>)}
             </div>
-
-            {!isAdminUser ? (
-              <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-                Only admin users can create or update user access profiles.
-              </div>
-            ) : (
-              <div className="rounded-xl border overflow-hidden bg-card/40">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Provider</TableHead>
-                      <TableHead>Linked Team</TableHead>
-                      <TableHead>Access</TableHead>
-                      <TableHead>Lifecycle</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {userAccounts.map((account) => {
-                      const role = draft.privilegeRoles.find((item) => item.id === account.roleId);
-                      const member = linkedMemberForAccount(account);
-
-                      return (
-                        <TableRow key={account.id}>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium">{account.fullName}</span>
-                                {account.roleId === 'admin' ? <Badge variant="secondary">Admin</Badge> : null}
-                              </div>
-                              <p className="text-xs text-muted-foreground">{account.email}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{role?.name ?? account.roleId}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusVariant[account.status]}>{account.status}</Badge>
-                          </TableCell>
-                          <TableCell className="capitalize">{account.authProvider}</TableCell>
-                          <TableCell>{member?.name ?? 'Not linked'}</TableCell>
-                          <TableCell className="max-w-[220px]">
-                            <p className="text-xs text-muted-foreground">
-                              {role?.permissions.slice(0, 3).join(', ') || 'No permissions configured'}
-                            </p>
-                          </TableCell>
-                          <TableCell className="min-w-[220px]">
-                            <div className="space-y-1 text-xs text-muted-foreground">
-                              <p>Created: {formatOptionalDateTime(account.createdAt)}</p>
-                              <p>Invited: {formatOptionalDateTime(account.invitationSentAt)}</p>
-                              <p>Last access: {formatOptionalDateTime(account.lastAccessAt)}</p>
-                              <p>Reset email: {formatOptionalDateTime(account.passwordResetSentAt)}</p>
-                              <p>Notifications: {account.notificationCount ?? 0}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openEditUser(account)}>
-                                <Pencil className="h-3.5 w-3.5" /> Edit
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => void sendAccessInvitation(account)}>
-                                Invite
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => void sendResetPasswordLink(account)}>
-                                Reset Password
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => openNotificationComposer(account)}>
-                                Notify
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => void toggleAccountStatus(account)}>
-                                {account.status === 'suspended' ? 'Activate' : 'Suspend'}
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => void toggleAdminRole(account)}>
-                                {account.roleId === 'admin' ? 'Set Viewer' : 'Grant Admin'}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-            <div className="rounded-xl border bg-card/40 p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium">Access & Notification Log</p>
-                  <p className="text-xs text-muted-foreground">
-                    User invitations, access events, password resets, and manual notifications are recorded here and in App Monitor.
-                  </p>
+            <Card className="glass overflow-hidden">
+              <CardContent className="p-0">
+                <div className="table-scroll">
+                  <Table>
+                    <TableHeader><TableRow><TableHead>User</TableHead><TableHead>Role</TableHead><TableHead>Status</TableHead><TableHead>Linked Team</TableHead><TableHead>Lifecycle</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {userAccounts.map((account) => {
+                        const role = draft.privilegeRoles.find((item) => item.id === account.roleId);
+                        const member = members.find((item) => item.id === account.teamMemberId);
+                        return <TableRow key={account.id}><TableCell><div><p className="font-medium">{account.fullName}</p><p className="text-xs text-muted-foreground">{account.email}</p></div></TableCell><TableCell><Badge variant="outline">{role?.name ?? account.roleId}</Badge></TableCell><TableCell><Badge variant={statusVariant[account.status]}>{account.status}</Badge></TableCell><TableCell>{member?.name ?? 'Not linked'}</TableCell><TableCell className="text-xs text-muted-foreground"><p>Created: {formatOptionalDateTime(account.createdAt)}</p><p>Invited: {formatOptionalDateTime(account.invitationSentAt)}</p><p>Last access: {formatOptionalDateTime(account.lastAccessAt)}</p></TableCell><TableCell className="text-right"><div className="action-cluster justify-end"><Button variant="outline" size="sm" className="gap-1.5" onClick={() => openEditUser(account)}><Pencil className="h-3.5 w-3.5" /> Edit</Button><Button variant="outline" size="sm" onClick={() => void sendResetPasswordLink(account)}>Reset</Button><Button variant="outline" size="sm" onClick={() => void toggleAccountStatus(account)}>{account.status === 'suspended' ? 'Activate' : 'Suspend'}</Button><Button variant="outline" size="sm" onClick={() => void toggleAdminRole(account)}>{account.roleId === 'admin' ? 'Set Viewer' : 'Grant Admin'}</Button></div></TableCell></TableRow>;
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/app-monitor?tab=history">Open Full History</Link>
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {recentUserLogs.length ? recentUserLogs.map((log) => (
-                  <div key={log.id} className="rounded-lg border bg-background/60 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">user</Badge>
-                        <p className="text-sm font-medium">{log.action}</p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{log.actorName}</p>
-                    <p className="mt-2 text-sm text-muted-foreground">{log.detail}</p>
-                  </div>
-                )) : (
-                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                    No user-access audit events recorded yet.
-                  </div>
-                )}
-              </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="administration" className="space-y-4">
+            <PageSection title="Administration Lists" description="Manage dropdown lists and metadata values used across PMO forms." actions={<Button onClick={save}>Save Changes</Button>} />
+            <Card className="glass">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ListPlus className="h-4 w-4" /> Metadata Lists</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                  <div className="space-y-2"><Label>List</Label><Select value={selectedMetadataKey} onValueChange={setSelectedMetadataKey}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{draft.metadata.map((field) => <SelectItem key={field.key} value={field.key}>{field.label}</SelectItem>)}</SelectContent></Select></div>
+                  <div className="space-y-2"><Label>New option</Label><Input value={metadataDraftLabel} onChange={(event) => setMetadataDraftLabel(event.target.value)} placeholder="Example: On Hold" /></div>
+                  <div className="flex items-end"><Button className="gap-2" onClick={addMetadataOption}><ListPlus className="h-4 w-4" /> Add</Button></div>
+                </div>
+                <div className="flex flex-wrap gap-2">{selectedMetadata?.options.map((option) => <Button key={option.id} variant={option.active ? 'secondary' : 'outline'} size="sm" onClick={() => toggleMetadataOption(selectedMetadata.key, option.id)}>{option.label}</Button>)}</div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="governance" className="space-y-4">
+            <PageSection title="Governance & Permissions" description="Review roles, role permissions, and recent governance activity." />
+            <div className="responsive-content-grid">
+              <Card className="glass">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Shield className="h-4 w-4" /> Privilege Roles</CardTitle></CardHeader>
+                <CardContent className="space-y-3">{draft.privilegeRoles.map((role) => <div key={role.id} className="rounded-xl border p-3"><p className="font-semibold">{role.name}</p><p className="mt-1 text-xs text-muted-foreground">{role.permissions.length} permissions</p><div className="mt-2 flex flex-wrap gap-1">{role.permissions.slice(0, 8).map((permission) => <Badge key={permission} variant="secondary" className="text-[10px]">{permission}</Badge>)}</div></div>)}</CardContent>
+              </Card>
+              <Card className="glass">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Bell className="h-4 w-4" /> Recent User Audit</CardTitle></CardHeader>
+                <CardContent className="space-y-3">{auditLogs.filter((log) => log.entityType === 'user').slice(0, 8).map((log) => <div key={log.id} className="rounded-xl border p-3"><p className="text-sm font-semibold">{log.action}</p><p className="text-xs text-muted-foreground">{log.detail}</p><p className="mt-1 text-[10px] text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</p></div>)}{!auditLogs.length ? <p className="text-sm text-muted-foreground">No audit logs yet.</p> : null}</CardContent>
+              </Card>
             </div>
-          </CardContent>
-        </Card>
-
           </TabsContent>
-          <TabsContent value="administration" className="space-y-6">
-        <PageSection
-          title="Administration"
-          description="User access, integrations, metadata, templates, and audit visibility for administrators."
-        />
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4" /> Integrations</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.entries(draft.integrations).map(([key, integration]) => (
-                <div key={key} className="rounded-xl border p-4 bg-card/40 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{integration.providerLabel}</p>
-                      <p className="text-xs text-muted-foreground">{integration.status}</p>
-                    </div>
-                    <Badge variant={integration.connected ? 'default' : 'outline'}>{integration.connected ? 'Connected' : 'Ready'}</Badge>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Enabled</span>
-                    <Switch checked={integration.enabled} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, integrations: { ...prev.integrations, [key]: { ...integration, enabled: checked } } }) : prev)} />
-                  </div>
-                  <Select value={integration.syncMode} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, integrations: { ...prev.integrations, [key]: { ...integration, syncMode: value as typeof integration.syncMode } } }) : prev)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="read">Read</SelectItem>
-                      <SelectItem value="write">Write</SelectItem>
-                      <SelectItem value="two-way">Two-way</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="rounded-xl border p-3 bg-background/60 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Scopes</span>
-                      <span>{integration.scopes.length}</span>
-                    </div>
-                    <div className="grid gap-2">
-                      <Input
-                        value={integration.configuration?.clientId ?? ''}
-                        onChange={(e) => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              configuration: { ...integration.configuration, clientId: e.target.value },
-                            },
-                          },
-                        }) : prev)}
-                        placeholder="Client ID / App ID"
-                      />
-                      <Input
-                        value={integration.configuration?.tenantId ?? ''}
-                        onChange={(e) => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              configuration: { ...integration.configuration, tenantId: e.target.value },
-                            },
-                          },
-                        }) : prev)}
-                        placeholder="Tenant / Workspace ID"
-                      />
-                      <Input
-                        value={integration.configuration?.redirectUri ?? ''}
-                        onChange={(e) => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              configuration: { ...integration.configuration, redirectUri: e.target.value },
-                            },
-                          },
-                        }) : prev)}
-                        placeholder="Redirect URI"
-                      />
-                      <Input
-                        value={integration.configuration?.resourceUrl ?? ''}
-                        onChange={(e) => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              configuration: { ...integration.configuration, resourceUrl: e.target.value },
-                            },
-                          },
-                        }) : prev)}
-                        placeholder="API / Resource URL"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {integration.scopes.map((scope) => (
-                        <Badge key={scope} variant="outline" className="text-[10px]">{scope}</Badge>
-                      ))}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Last sync: {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : 'Not synced yet'}
-                    </p>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              connected: !integration.connected,
-                              status: integration.connected ? `${integration.providerLabel} disconnected for this workspace.` : `${integration.providerLabel} connected for this workspace.`,
-                              lastSyncAt: integration.connected ? integration.lastSyncAt : new Date().toISOString(),
-                            },
-                          },
-                        }) : prev)}
-                      >
-                        {integration.connected ? 'Disconnect' : 'Connect'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setDraft((prev) => prev ? ({
-                          ...prev,
-                          integrations: {
-                            ...prev.integrations,
-                            [key]: {
-                              ...integration,
-                              connected: true,
-                              status: `${integration.providerLabel} configuration verified and ready for sync.`,
-                              lastSyncAt: new Date().toISOString(),
-                            },
-                          },
-                        }) : prev)}
-                      >
-                        Validate Config
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><KeyRound className="h-4 w-4" /> Configurable Dropdowns</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {draft.metadata.map((field) => (
-                <div key={field.key} className="rounded-xl border p-4 bg-card/40 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{field.label}</p>
-                      <p className="text-xs text-muted-foreground">{field.options.length} values</p>
-                    </div>
-                    <Badge variant="outline">{field.key}</Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {field.options.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => toggleMetadataOption(field.key, option.id)}
-                        className={`rounded-full border px-3 py-1 text-xs ${option.active ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-muted/40 text-muted-foreground'}`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <div className="rounded-xl border border-dashed p-4 space-y-3">
-                <p className="text-sm font-medium">Add metadata value</p>
-                <Select value={selectedMetadata?.key ?? ''} onValueChange={setSelectedMetadataKey}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose dropdown" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {draft.metadata.map((field) => (
-                      <SelectItem key={field.key} value={field.key}>{field.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input value={metadataDraftLabel} onChange={(e) => setMetadataDraftLabel(e.target.value)} placeholder="New dropdown value" />
-                <Button variant="outline" onClick={addMetadataOption}>Add Option</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Pencil className="h-4 w-4" /> Custom Form Fields</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-xl border p-4 bg-card/40">
-                <p className="text-sm font-medium">Admin Form Builder</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Add frontend-only custom fields for Projects, Tasks, Team, and Tickets without code changes. These fields appear only for active definitions and remain editable in the app forms.
-                </p>
-              </div>
-              {!isAdminUser ? (
-                <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                  Custom field management is restricted to administrators.
-                </div>
-              ) : null}
-              <div className="space-y-3">
-                {draft.customFields.map((field) => (
-                  <div key={field.id} className="rounded-xl border p-4 bg-card/40 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{field.label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {field.entity} form • {field.type} • key <span className="font-mono">{field.key}</span>
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {field.required ? <Badge variant="outline">Required</Badge> : null}
-                        <Button variant={field.active ? 'default' : 'outline'} size="sm" disabled={!isAdminUser} onClick={() => toggleCustomField(field.id)}>
-                          {field.active ? 'Active' : 'Inactive'}
-                        </Button>
-                      </div>
-                    </div>
-                    {field.helpText ? <p className="text-xs text-muted-foreground">{field.helpText}</p> : null}
-                    {field.type === 'select' && field.options?.length ? (
-                      <div className="flex flex-wrap gap-2">
-                        {customFieldOptionsToStrings(field.options).map((option) => (
-                          <Badge key={`${field.id}-${option}`} variant="secondary">{option}</Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <div className="rounded-xl border border-dashed p-4 space-y-3">
-                <p className="text-sm font-medium">Add custom field</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Target Form</Label>
-                    <Select value={customFieldDraft.entity} onValueChange={(value) => setCustomFieldDraft((prev) => ({ ...prev, entity: value as WorkspaceCustomFieldConfig['entity'] }))} disabled={!isAdminUser}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="project">Projects</SelectItem>
-                        <SelectItem value="task">Tasks</SelectItem>
-                        <SelectItem value="teamMember">Team</SelectItem>
-                        <SelectItem value="ticket">Tickets</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Field Type</Label>
-                    <Select value={customFieldDraft.type} onValueChange={(value) => setCustomFieldDraft((prev) => ({ ...prev, type: value as WorkspaceCustomFieldConfig['type'] }))} disabled={!isAdminUser}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="text">Text</SelectItem>
-                        <SelectItem value="textarea">Textarea</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="date">Date</SelectItem>
-                        <SelectItem value="select">Dropdown</SelectItem>
-                        <SelectItem value="checkbox">Checkbox</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Field Label</Label>
-                    <Input value={customFieldDraft.label} disabled={!isAdminUser} onChange={(e) => setCustomFieldDraft((prev) => ({ ...prev, label: e.target.value, key: prev.key || normalizeCustomFieldKey(e.target.value) }))} placeholder="Client reference" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Field Key</Label>
-                    <Input value={customFieldDraft.key} disabled={!isAdminUser} onChange={(e) => setCustomFieldDraft((prev) => ({ ...prev, key: normalizeCustomFieldKey(e.target.value) }))} placeholder="client-reference" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Placeholder</Label>
-                    <Input value={customFieldDraft.placeholder} disabled={!isAdminUser} onChange={(e) => setCustomFieldDraft((prev) => ({ ...prev, placeholder: e.target.value }))} placeholder="Shown in the form" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Options</Label>
-                    <Input value={customFieldDraft.optionsText} disabled={!isAdminUser || customFieldDraft.type !== 'select'} onChange={(e) => setCustomFieldDraft((prev) => ({ ...prev, optionsText: e.target.value }))} placeholder="Option A, Option B, Option C" />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Help Text</Label>
-                    <Textarea rows={2} value={customFieldDraft.helpText} disabled={!isAdminUser} onChange={(e) => setCustomFieldDraft((prev) => ({ ...prev, helpText: e.target.value }))} placeholder="Guidance shown under the field in the form" />
-                  </div>
-                  <label className="flex items-center gap-3 rounded-xl border p-3 md:col-span-2">
-                    <Switch checked={customFieldDraft.required} disabled={!isAdminUser} onCheckedChange={(checked) => setCustomFieldDraft((prev) => ({ ...prev, required: checked }))} />
-                    <span className="text-sm">Mark field as required in forms</span>
-                  </label>
-                </div>
-                <Button variant="outline" onClick={addCustomField} disabled={!isAdminUser}>Add Custom Field</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><LayoutDashboard className="h-4 w-4" /> Templates & Audit</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-xl border p-4 bg-card/40">
-                <p className="font-medium">Project Templates</p>
-                <div className="mt-3 space-y-2">
-                  {projectTemplates.map((template) => (
-                    <div key={template.id} className="rounded-lg border p-3 bg-background/60">
-                      <p className="text-sm font-medium">{template.name}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{template.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-xl border p-4 bg-card/40">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-medium">Audit Trail</p>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to="/app-monitor">Open Monitor</Link>
-                  </Button>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {auditLogs.slice(0, 4).map((log) => (
-                    <div key={log.id} className="rounded-lg border p-3 bg-background/60">
-                      <p className="text-sm font-medium">{log.action}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{log.actorName} • {new Date(log.createdAt).toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{log.detail}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-          </TabsContent>
-          <TabsContent value="governance" className="space-y-6">
-        <PageSection
-          title="Governance & Automation"
-          description="Privilege design, notifications, workflow rules, dashboards, appearance, and security controls."
-        />
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><KeyRound className="h-4 w-4" /> Privilege Matrix</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {draft.privilegeRoles.map((role) => (
-                <div key={role.id} className="rounded-xl border p-4 bg-card/40">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium">{role.name}</p>
-                    <span className="text-xs text-muted-foreground">{role.id}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {role.permissions.map((permission) => (
-                      <span key={permission} className="text-[10px] px-2 py-1 rounded-full bg-primary/10 text-primary">
-                        {permission}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4" /> Notifications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                {[
-                  ['Email notifications', 'email'],
-                  ['Push notifications', 'push'],
-                  ['Task reminders', 'reminders'],
-                  ['Weekly digest', 'digest'],
-                  ['In-app notification feed', 'inApp'],
-                ].map(([label, key]) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <span className="text-sm">{label}</span>
-                    <Switch
-                    checked={draft.notifications[key as keyof typeof draft.notifications]}
-                    onCheckedChange={(checked) =>
-                      setDraft((prev) => prev ? ({ ...prev, notifications: { ...prev.notifications, [key]: checked } }) : prev)
-                    }
-                  />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Workflow className="h-4 w-4" /> Workflow Studio</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {workflows.map((workflow) => (
-                <div key={workflow.id} className="rounded-xl border p-4 bg-card/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{workflow.name}</p>
-                      <p className="text-xs text-muted-foreground">{workflow.description}</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        await updateWorkflow.mutateAsync({
-                          id: workflow.id,
-                          automationRules: [...workflow.automationRules, 'Escalate when workload exceeds target utilization.'],
-                        });
-                        toast.success('Workflow automation rule added');
-                      }}
-                    >
-                      Add automation
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {workflow.stages.map((stage) => (
-                      <span key={stage.id} className="text-[10px] px-2 py-1 rounded-full bg-muted text-foreground">
-                        {stage.name} - {stage.slaHours}h
-                      </span>
-                    ))}
-                  </div>
-                  <Textarea value={workflow.automationRules.join('\n')} readOnly className="min-h-[110px] text-xs" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><LayoutDashboard className="h-4 w-4" /> Dashboard Builder</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-xl border border-dashed p-4 bg-card/40 space-y-3">
-                <p className="font-medium">Create Custom Dashboard</p>
-                <div className="grid gap-3 md:grid-cols-[1.4fr,1fr,auto]">
-                  <Input
-                    value={newDashboardName}
-                    onChange={(e) => setNewDashboardName(e.target.value)}
-                    placeholder="Dashboard name"
-                  />
-                  <Select value={dashboardSourceId || dashboards[0]?.id || ''} onValueChange={setDashboardSourceId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Source dashboard" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {dashboards.map((dashboard) => (
-                        <SelectItem key={dashboard.id} value={dashboard.id}>{dashboard.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={createCustomDashboard} disabled={createDashboard.isPending}>Create</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Start from an existing dashboard, then toggle widgets and set the one you want as default.
-                </p>
-              </div>
-              {dashboards.map((dashboard) => (
-                <div key={dashboard.id} className="rounded-xl border p-4 bg-card/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Input
-                        defaultValue={dashboard.name}
-                        onBlur={(e) => {
-                          const nextName = e.target.value.trim();
-                          if (nextName && nextName !== dashboard.name) {
-                            void updateDashboard.mutateAsync({ id: dashboard.id, name: nextName });
-                          }
-                        }}
-                        className="h-9 max-w-xs"
-                      />
-                      <p className="text-xs text-muted-foreground">{dashboard.isDefault ? 'Default dashboard' : 'Alternate layout'}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant={dashboard.isDefault ? 'default' : 'outline'}
-                        onClick={() => void updateDashboard.mutateAsync({ id: dashboard.id, isDefault: true })}
-                      >
-                        {dashboard.isDefault ? 'Default' : 'Set Default'}
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => void duplicateDashboard(dashboard.id)}>
-                        Duplicate
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {dashboardWidgetCatalog.map((widgetTemplate) => {
-                      const widget = dashboard.widgets.find((item) => item.key === widgetTemplate.key);
-                      return (
-                        <button
-                          key={widgetTemplate.key}
-                          type="button"
-                          onClick={() => void toggleDashboardWidget(dashboard.id, widgetTemplate.key)}
-                          className={`rounded-full px-2 py-1 text-[10px] border ${
-                            widget?.enabled
-                              ? 'border-primary/30 bg-primary/10 text-primary'
-                              : 'border-border bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {widgetTemplate.title}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Palette className="h-4 w-4" /> Appearance & AI</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Dark mode</span>
-                <Switch checked={draft.appearance.darkMode} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, darkMode: checked } }) : prev)} />
-              </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Compact view</span>
-                  <Switch checked={draft.appearance.compactView} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, compactView: checked } }) : prev)} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Collapsed desktop sidebar</span>
-                  <Switch checked={draft.appearance.sidebarCollapsed} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, sidebarCollapsed: checked } }) : prev)} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Auto-hide sidebar on mobile</span>
-                  <Switch checked={draft.appearance.sidebarAutoHide} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, sidebarAutoHide: checked } }) : prev)} />
-                </div>
-                <div>
-                  <Label className="text-xs">Language</Label>
-                  <Select value={draft.appearance.language} onValueChange={(value) => setDraft((prev) => prev ? ({ ...prev, appearance: { ...prev.appearance, language: value as 'en' | 'ar' } }) : prev)}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(['en', 'ar'] as const).map((language) => (
-                      <SelectItem key={language} value={language}>{languageLabel(language)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <span className="text-sm">AI risk scan</span>
-                <Switch checked={draft.ai.autoRiskScan} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, ai: { ...prev.ai, autoRiskScan: checked } }) : prev)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">AI schedule advisor</span>
-                <Switch checked={draft.ai.scheduleAdvisor} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, ai: { ...prev.ai, scheduleAdvisor: checked } }) : prev)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Narrative reports</span>
-                <Switch checked={draft.ai.reportNarratives} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, ai: { ...prev.ai, reportNarratives: checked } }) : prev)} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4" /> Security & MS Project</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Two-factor authentication</span>
-                <Switch checked={draft.security.twoFactor} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, security: { ...prev.security, twoFactor: checked } }) : prev)} />
-              </div>
-              <Separator />
-              <div>
-                <Label className="text-xs">Default project calendar</Label>
-                <Input value={draft.msProject.defaultCalendar} onChange={(e) => setDraft((prev) => prev ? ({ ...prev, msProject: { ...prev.msProject, defaultCalendar: e.target.value } }) : prev)} className="mt-1" />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Auto sync project dates</span>
-                <Switch checked={draft.msProject.autoSyncProjectDates} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, msProject: { ...prev.msProject, autoSyncProjectDates: checked } }) : prev)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Export dependencies to MS Project</span>
-                <Switch checked={draft.msProject.includeDependenciesInExport} onCheckedChange={(checked) => setDraft((prev) => prev ? ({ ...prev, msProject: { ...prev.msProject, includeDependenciesInExport: checked } }) : prev)} />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
+          <TabsContent value="form-builder" className="space-y-4">
+            <PageSection title="Admin Experience & Form Builder" description="Add fields, manage lists, control visual theme, and define document/report branding from one organized settings tab." />
+            <AdminExperienceControls embedded />
           </TabsContent>
         </Tabs>
-        <Button size="sm" className="gradient-primary text-primary-foreground" onClick={save}>Save Changes</Button>
       </div>
 
-      <Dialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Send User Notification</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="rounded-xl border bg-card/40 p-4">
-              <p className="text-sm font-medium">{notificationTarget?.fullName ?? 'No user selected'}</p>
-              <p className="text-xs text-muted-foreground">{notificationTarget?.email ?? 'Choose a user from the directory'}</p>
-            </div>
-            <div className="grid gap-2">
-              <Label>Message</Label>
-              <Textarea
-                value={notificationMessage}
-                onChange={(e) => setNotificationMessage(e.target.value)}
-                className="min-h-[120px]"
-                placeholder="Write the notification you want the user to receive in the app activity feed."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNotificationDialogOpen(false)}>Cancel</Button>
-            <Button onClick={postUserNotification}>Send Notification</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editingUser ? 'Edit User Access' : 'Add User Profile'}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label>Full Name</Label>
-                <Input value={userForm.fullName} onChange={(e) => setUserForm((prev) => ({ ...prev, fullName: e.target.value }))} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Email</Label>
-                <Input type="email" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label>Role</Label>
-                <Select value={userForm.roleId} onValueChange={(value) => setUserForm((prev) => ({ ...prev, roleId: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {draft.privilegeRoles.map((role) => (
-                      <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Status</Label>
-                <Select value={userForm.status} onValueChange={(value) => setUserForm((prev) => ({ ...prev, status: value as WorkspaceUserAccount['status'] }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="invited">Invited</SelectItem>
-                    <SelectItem value="suspended">Suspended</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label>Auth Provider</Label>
-                <Select value={userForm.authProvider} onValueChange={(value) => setUserForm((prev) => ({ ...prev, authProvider: value as WorkspaceUserAccount['authProvider'] }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="google">Google</SelectItem>
-                    <SelectItem value="hybrid">Hybrid</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Linked Team Member</Label>
-                <Select value={userForm.teamMemberId || '__none__'} onValueChange={(value) => setUserForm((prev) => ({ ...prev, teamMemberId: value === '__none__' ? '' : value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Not linked</SelectItem>
-                    {members.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>{member.name} - {member.role}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label>Title</Label>
-                <Input value={userForm.title} onChange={(e) => setUserForm((prev) => ({ ...prev, title: e.target.value }))} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Department</Label>
-                <Input value={userForm.department} onChange={(e) => setUserForm((prev) => ({ ...prev, department: e.target.value }))} />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label>Access Notes</Label>
-              <Textarea value={userForm.notes} onChange={(e) => setUserForm((prev) => ({ ...prev, notes: e.target.value }))} className="min-h-[96px]" />
-            </div>
-            {!editingUser && userForm.authProvider !== 'google' ? (
-              <p className="text-xs text-muted-foreground">
-                A workspace invitation email will be sent automatically after the user profile is created.
-              </p>
-            ) : null}
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>{editingUser ? 'Edit User Access' : 'Add User Access'}</DialogTitle></DialogHeader>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2"><Label>Full Name</Label><Input value={userForm.fullName} onChange={(event) => setUserForm((prev) => ({ ...prev, fullName: event.target.value }))} /></div>
+            <div className="space-y-2"><Label>Email</Label><Input type="email" value={userForm.email} onChange={(event) => setUserForm((prev) => ({ ...prev, email: event.target.value }))} /></div>
+            <div className="space-y-2"><Label>Role</Label><Select value={userForm.roleId} onValueChange={(value) => setUserForm((prev) => ({ ...prev, roleId: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{draft.privilegeRoles.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Status</Label><Select value={userForm.status} onValueChange={(value) => setUserForm((prev) => ({ ...prev, status: value as WorkspaceUserAccount['status'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="invited">Invited</SelectItem><SelectItem value="suspended">Suspended</SelectItem></SelectContent></Select></div>
+            <div className="space-y-2"><Label>Linked Team Member</Label><Select value={userForm.teamMemberId || '__none__'} onValueChange={(value) => setUserForm((prev) => ({ ...prev, teamMemberId: value === '__none__' ? '' : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">Not linked</SelectItem>{members.map((member) => <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Title</Label><Input value={userForm.title} onChange={(event) => setUserForm((prev) => ({ ...prev, title: event.target.value }))} /></div>
+            <div className="space-y-2 md:col-span-2"><Label>Notes</Label><Textarea value={userForm.notes} onChange={(event) => setUserForm((prev) => ({ ...prev, notes: event.target.value }))} /></div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUserDialogOpen(false)}>Cancel</Button>
-            <Button onClick={saveUser}>{editingUser ? 'Save Access' : 'Create User'}</Button>
-          </DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setUserDialogOpen(false)}>Cancel</Button><Button onClick={saveUser}>Save User</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </AppLayout>
