@@ -118,63 +118,25 @@ const DashboardDynamic = () => {
   };
 
   const kpiCards = [
-    {
-      label: 'Projects Portfolio',
-      value: projects.length,
-      hint: 'Open project register',
-      to: '/projects',
-      icon: FolderKanban,
-      tone: 'from-blue-600 to-cyan-500',
-    },
-    {
-      label: 'Active Projects',
-      value: activeProjects,
-      hint: 'Review active delivery',
-      to: '/projects?status=active',
-      icon: TrendingUp,
-      tone: 'from-emerald-600 to-teal-500',
-    },
-    {
-      label: 'Tasks & Activities',
-      value: stats?.totalTasks ?? tasks.length,
-      hint: 'Open tasks board',
-      to: '/tasks',
-      icon: ListChecks,
-      tone: 'from-indigo-600 to-violet-500',
-    },
-    {
-      label: 'Open Points / Tickets',
-      value: openTickets,
-      hint: 'Review open points',
-      to: '/tickets',
-      icon: Ticket,
-      tone: 'from-amber-600 to-orange-500',
-    },
-    {
-      label: 'Needs Management Attention',
-      value: atRiskProjects,
-      hint: 'At-risk projects',
-      to: '/projects?status=at-risk',
-      icon: AlertTriangle,
-      tone: 'from-red-600 to-rose-500',
-    },
+    { label: 'Projects Portfolio', value: projects.length, hint: 'Open project register', to: '/projects', icon: FolderKanban, tone: 'from-blue-600 to-cyan-500' },
+    { label: 'Active Projects', value: activeProjects, hint: 'Review active delivery', to: '/projects?status=active', icon: TrendingUp, tone: 'from-emerald-600 to-teal-500' },
+    { label: 'Tasks & Activities', value: stats?.totalTasks ?? tasks.length, hint: 'Open tasks board', to: '/tasks', icon: ListChecks, tone: 'from-indigo-600 to-violet-500' },
+    { label: 'Open Points / Tickets', value: openTickets, hint: 'Review open points', to: '/tickets', icon: Ticket, tone: 'from-amber-600 to-orange-500' },
+    { label: 'Needs Management Attention', value: atRiskProjects, hint: 'At-risk projects', to: '/projects?status=at-risk', icon: AlertTriangle, tone: 'from-red-600 to-rose-500' },
   ];
 
   return (
     <AppLayout>
-      <AppHeader
-        title="PMO BI Dashboard"
-        subtitle={`${settings?.namespace.organization ?? 'Workspace'} PowerBI-style portfolio dashboard with live linked projects, tasks, tickets, and reports.`}
-      />
-      <div className="space-y-6 p-4 sm:p-6">
-        <div className="rounded-[2rem] bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 p-5 text-white shadow-2xl">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
+      <AppHeader title="PMO BI Dashboard" subtitle={`${settings?.namespace.organization ?? 'Workspace'} PowerBI-style portfolio dashboard with live linked projects, tasks, tickets, and reports.`} />
+      <div className="page-shell page-stack">
+        <div className="rounded-[1.5rem] bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 p-5 text-white shadow-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
               <p className="text-[11px] font-black uppercase tracking-[0.28em] text-cyan-300">Executive Portfolio Intelligence</p>
               <h1 className="mt-2 text-2xl font-black">Projects, tasks, open points, and reports are linked to live forms</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-300">Click any KPI count or project name to open the related project, task, ticket, or report view. Export the visible matrix for PowerBI/Excel analysis.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="action-cluster">
               <Button type="button" variant="secondary" className="gap-2" onClick={exportVisibleMatrix}>
                 <Download className="h-4 w-4" /> Export BI CSV
               </Button>
@@ -185,22 +147,22 @@ const DashboardDynamic = () => {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {kpiCards.map((item) => {
             const Icon = item.icon;
             return (
-              <Link key={item.label} to={item.to} className="group block rounded-[1.6rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-                <Card className="overflow-hidden border-0 shadow-xl transition-all group-hover:-translate-y-1 group-hover:shadow-2xl">
-                  <CardContent className={`bg-gradient-to-br ${item.tone} p-5 text-white`}>
+              <Link key={item.label} to={item.to} className="group block h-full rounded-[1.6rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+                <Card className="h-full min-h-[172px] overflow-hidden border-0 shadow-xl transition-all group-hover:-translate-y-1 group-hover:shadow-2xl">
+                  <CardContent className={`flex h-full flex-col justify-between bg-gradient-to-br ${item.tone} p-5 text-white`}>
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-[0.18em] text-white/75">{item.label}</p>
-                        <p className="mt-3 text-4xl font-black tracking-tight">{item.value}</p>
-                        <p className="mt-2 text-xs font-semibold text-white/85">{item.hint}</p>
-                      </div>
-                      <div className="rounded-2xl bg-white/15 p-3 shadow-inner">
+                      <p className="min-h-[34px] text-xs font-black uppercase tracking-[0.18em] text-white/75">{item.label}</p>
+                      <div className="shrink-0 rounded-2xl bg-white/15 p-3 shadow-inner">
                         <Icon className="h-6 w-6" />
                       </div>
+                    </div>
+                    <div>
+                      <p className="mt-3 text-4xl font-black tracking-tight">{item.value}</p>
+                      <p className="mt-2 min-h-[32px] text-xs font-semibold text-white/85">{item.hint}</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -209,17 +171,15 @@ const DashboardDynamic = () => {
           })}
         </div>
 
-        <Card className="glass overflow-hidden border-0 shadow-2xl">
+        <Card className="glass overflow-hidden border-0 shadow-xl">
           <CardHeader className="border-b bg-gradient-to-r from-slate-950 via-blue-950 to-slate-900 text-white">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-300">PMO BI Matrix</p>
                 <CardTitle className="mt-1 text-xl font-black">Implementation Activities Matrix</CardTitle>
-                <p className="mt-2 text-sm text-slate-300">
-                  Showing {projectRows.length}/{projects.length} live projects. Counts and names are clickable through related project and task views.
-                </p>
+                <p className="mt-2 text-sm text-slate-300">Showing {projectRows.length}/{projects.length} live projects. Counts and names are clickable through related project and task views.</p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="action-cluster">
                 <Badge variant="outline" className="border-white/20 bg-white/10 text-white">Live list</Badge>
                 <Button type="button" size="sm" variant="secondary" className="gap-2" onClick={exportVisibleMatrix}>
                   <Download className="h-4 w-4" /> Export Visible
@@ -235,13 +195,11 @@ const DashboardDynamic = () => {
               </label>
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
                 <option value="all">All project statuses</option>
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>{status.replace('-', ' ')}</option>
-                ))}
+                {statusOptions.map((status) => <option key={status} value={status}>{status.replace('-', ' ')}</option>)}
               </select>
             </div>
 
-            <div className="max-h-[68vh] overflow-auto rounded-2xl border">
+            <div className="table-scroll rounded-2xl border">
               <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
                 <thead>
                   <tr>
@@ -258,40 +216,17 @@ const DashboardDynamic = () => {
                   {projectRows.map((project) => (
                     <tr key={project.id || project.name} className="odd:bg-muted/20 hover:bg-primary/5">
                       <td className="border-b px-3 py-2 text-xs font-black text-muted-foreground">{project.rank}</td>
-                      <td className="border-b px-3 py-2 font-semibold">
-                        <Link to={`/projects?projectId=${project.id}`} className="text-primary underline-offset-4 hover:underline">
-                          {project.name}
-                        </Link>
-                      </td>
-                      <td className="border-b px-3 py-2">
-                        <Link to={`/projects?status=${project.status}`}>
-                          <Badge variant="outline" className={statusBadgeClass[project.status] ?? 'bg-muted text-muted-foreground border-border'}>
-                            {project.status.replace('-', ' ')}
-                          </Badge>
-                        </Link>
-                      </td>
+                      <td className="border-b px-3 py-2 font-semibold"><Link to={`/projects?projectId=${project.id}`} className="text-primary underline-offset-4 hover:underline">{project.name}</Link></td>
+                      <td className="border-b px-3 py-2"><Link to={`/projects?status=${project.status}`}><Badge variant="outline" className={statusBadgeClass[project.status] ?? 'bg-muted text-muted-foreground border-border'}>{project.status.replace('-', ' ')}</Badge></Link></td>
                       <td className="border-b px-3 py-2 text-muted-foreground"><CalendarDays className="mr-1 inline h-3.5 w-3.5" />{formatDate(project.startDate)}</td>
                       <td className="border-b px-3 py-2 text-muted-foreground">{formatDate(project.endDate)}</td>
-                      <td className="border-b px-3 py-2">
-                        <Link to={`/tasks?projectId=${project.id}`} className="font-black text-primary underline-offset-4 hover:underline">
-                          {project.doneTasks}/{project.tasks}
-                        </Link>
-                      </td>
-                      <td className="border-b px-3 py-2">
-                        <div className="flex min-w-[160px] items-center gap-2">
-                          <Progress value={project.progress} className="h-2" />
-                          <Link to={`/projects?projectId=${project.id}`} className="w-10 text-xs font-black text-primary underline-offset-4 hover:underline">{project.progress}%</Link>
-                        </div>
-                      </td>
+                      <td className="border-b px-3 py-2"><Link to={`/tasks?projectId=${project.id}`} className="font-black text-primary underline-offset-4 hover:underline">{project.doneTasks}/{project.tasks}</Link></td>
+                      <td className="border-b px-3 py-2"><div className="flex min-w-[160px] items-center gap-2"><Progress value={project.progress} className="h-2" /><Link to={`/projects?projectId=${project.id}`} className="w-10 text-xs font-black text-primary underline-offset-4 hover:underline">{project.progress}%</Link></div></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {projectRows.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  <CheckCircle2 className="mx-auto mb-2 h-5 w-5" /> No projects match the current filter.
-                </div>
-              ) : null}
+              {projectRows.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 h-5 w-5" /> No projects match the current filter.</div> : null}
             </div>
           </CardContent>
         </Card>
