@@ -60,21 +60,24 @@ const nextOption = (label: string, index: number): WorkspaceConfigOption => ({
 
 const splitOptionsText = (value: string) => value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
 
-export default function AdminExperienceControls() {
+type AdminExperienceControlsProps = {
+  embedded?: boolean;
+};
+
+export default function AdminExperienceControls({ embedded = false }: AdminExperienceControlsProps) {
   const { data: settings } = useWorkspaceSettings();
   const updateSettings = useUpdateWorkspaceSettings();
   const [fieldDraft, setFieldDraft] = useState(emptyField);
   const [listDraft, setListDraft] = useState(emptyListOption);
   const [saving, setSaving] = useState(false);
 
-  const visible = typeof window !== "undefined" && window.location.pathname === "/settings";
   const currentFont = String((settings?.appearance as any)?.fontFamily ?? "inter");
   const currentPreset = String((settings?.appearance as any)?.themePreset ?? "pmo-blue");
   const selectedPreset = themePresets.find((preset) => preset.value === currentPreset) ?? themePresets[0];
   const selectedFont = fontOptions.find((font) => font.value === currentFont) ?? fontOptions[0];
   const metadataFields = useMemo(() => settings?.metadata ?? [], [settings]);
 
-  if (!visible || !settings) return null;
+  if (!settings) return null;
 
   const saveSettings = async (nextSettings: typeof settings, message: string) => {
     setSaving(true);
@@ -151,72 +154,72 @@ export default function AdminExperienceControls() {
     }, "Appearance and document branding updated");
   };
 
-  return (
-    <div className="mx-auto max-w-5xl px-6 pb-6 print:hidden">
-      <Card className="glass border-primary/30 shadow-xl">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg"><Settings2 className="h-5 w-5 text-primary" /> Admin Experience & Form Builder</CardTitle>
-          <p className="text-sm text-muted-foreground">Central admin controls for future fields, dropdown lists, report branding, document colors, and font style.</p>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="forms" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="forms">Forms</TabsTrigger>
-              <TabsTrigger value="lists">Lists</TabsTrigger>
-              <TabsTrigger value="theme">Theme</TabsTrigger>
-              <TabsTrigger value="documents">Documents</TabsTrigger>
-            </TabsList>
+  const content = (
+    <Card className="glass border-primary/30 shadow-xl">
+      <CardHeader className="space-y-2">
+        <CardTitle className="flex items-center gap-2 text-lg"><Settings2 className="h-5 w-5 text-primary" /> Admin Experience & Form Builder</CardTitle>
+        <p className="text-sm text-muted-foreground">Central admin controls for future fields, dropdown lists, report branding, document colors, and font style.</p>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="forms" className="space-y-4">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/50 p-1 md:grid-cols-4">
+            <TabsTrigger value="forms" className="rounded-xl">Forms</TabsTrigger>
+            <TabsTrigger value="lists" className="rounded-xl">Lists</TabsTrigger>
+            <TabsTrigger value="theme" className="rounded-xl">Theme</TabsTrigger>
+            <TabsTrigger value="documents" className="rounded-xl">Documents</TabsTrigger>
+          </TabsList>
 
-            <TabsContent value="forms" className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-3">
-                <div className="space-y-2"><Label>Target form</Label><Select value={fieldDraft.entity} onValueChange={(value) => setFieldDraft((prev) => ({ ...prev, entity: value as WorkspaceCustomFieldConfig["entity"] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{formEntities.map((entity) => <SelectItem key={entity.value} value={entity.value}>{entity.label}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-2"><Label>Field type</Label><Select value={fieldDraft.type} onValueChange={(value) => setFieldDraft((prev) => ({ ...prev, type: value as WorkspaceCustomFieldConfig["type"] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldTypes.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-2"><Label>Field label</Label><Input value={fieldDraft.label} onChange={(event) => setFieldDraft((prev) => ({ ...prev, label: event.target.value }))} placeholder="Example: Contract Type" /></div>
-              </div>
-              <div className="grid gap-3 lg:grid-cols-3">
-                <div className="space-y-2"><Label>Field key</Label><Input value={fieldDraft.key} onChange={(event) => setFieldDraft((prev) => ({ ...prev, key: event.target.value }))} placeholder="auto-generated if blank" /></div>
-                <div className="space-y-2"><Label>Placeholder</Label><Input value={fieldDraft.placeholder} onChange={(event) => setFieldDraft((prev) => ({ ...prev, placeholder: event.target.value }))} /></div>
-                <div className="flex items-center justify-between rounded-xl border p-3"><div><Label>Required</Label><p className="text-xs text-muted-foreground">Force entry before save</p></div><Switch checked={fieldDraft.required} onCheckedChange={(checked) => setFieldDraft((prev) => ({ ...prev, required: checked }))} /></div>
-              </div>
-              <div className="space-y-2"><Label>Help text</Label><Input value={fieldDraft.helpText} onChange={(event) => setFieldDraft((prev) => ({ ...prev, helpText: event.target.value }))} placeholder="Short instruction shown under the field" /></div>
-              {fieldDraft.type === "select" ? <div className="space-y-2"><Label>Dropdown values</Label><Textarea value={fieldDraft.optionsText} onChange={(event) => setFieldDraft((prev) => ({ ...prev, optionsText: event.target.value }))} placeholder="One value per line or comma separated" /></div> : null}
-              <Button className="gap-2" onClick={addField} disabled={saving}><Plus className="h-4 w-4" /> Add Field to Form</Button>
-              <div className="grid gap-2 md:grid-cols-2">
-                {settings.customFields.map((field) => <div key={field.id} className="flex items-center justify-between rounded-xl border p-3"><div><p className="font-semibold">{field.label}</p><p className="text-xs text-muted-foreground">{field.entity} · {field.type} · {field.key}</p></div><div className="flex items-center gap-2"><Badge variant={field.active ? "default" : "secondary"}>{field.active ? "Active" : "Hidden"}</Badge><Button size="sm" variant="outline" onClick={() => toggleField(field.id)}>{field.active ? "Hide" : "Show"}</Button></div></div>)}
-              </div>
-            </TabsContent>
+          <TabsContent value="forms" className="space-y-4">
+            <div className="grid gap-3 lg:grid-cols-3">
+              <div className="space-y-2"><Label>Target form</Label><Select value={fieldDraft.entity} onValueChange={(value) => setFieldDraft((prev) => ({ ...prev, entity: value as WorkspaceCustomFieldConfig["entity"] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{formEntities.map((entity) => <SelectItem key={entity.value} value={entity.value}>{entity.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Field type</Label><Select value={fieldDraft.type} onValueChange={(value) => setFieldDraft((prev) => ({ ...prev, type: value as WorkspaceCustomFieldConfig["type"] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldTypes.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Field label</Label><Input value={fieldDraft.label} onChange={(event) => setFieldDraft((prev) => ({ ...prev, label: event.target.value }))} placeholder="Example: Contract Type" /></div>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-3">
+              <div className="space-y-2"><Label>Field key</Label><Input value={fieldDraft.key} onChange={(event) => setFieldDraft((prev) => ({ ...prev, key: event.target.value }))} placeholder="auto-generated if blank" /></div>
+              <div className="space-y-2"><Label>Placeholder</Label><Input value={fieldDraft.placeholder} onChange={(event) => setFieldDraft((prev) => ({ ...prev, placeholder: event.target.value }))} /></div>
+              <div className="flex items-center justify-between rounded-xl border p-3"><div><Label>Required</Label><p className="text-xs text-muted-foreground">Force entry before save</p></div><Switch checked={fieldDraft.required} onCheckedChange={(checked) => setFieldDraft((prev) => ({ ...prev, required: checked }))} /></div>
+            </div>
+            <div className="space-y-2"><Label>Help text</Label><Input value={fieldDraft.helpText} onChange={(event) => setFieldDraft((prev) => ({ ...prev, helpText: event.target.value }))} placeholder="Short instruction shown under the field" /></div>
+            {fieldDraft.type === "select" ? <div className="space-y-2"><Label>Dropdown values</Label><Textarea value={fieldDraft.optionsText} onChange={(event) => setFieldDraft((prev) => ({ ...prev, optionsText: event.target.value }))} placeholder="One value per line or comma separated" /></div> : null}
+            <Button className="gap-2" onClick={addField} disabled={saving}><Plus className="h-4 w-4" /> Add Field to Form</Button>
+            <div className="grid gap-2 md:grid-cols-2">
+              {settings.customFields.map((field) => <div key={field.id} className="flex min-w-0 items-center justify-between gap-3 rounded-xl border p-3"><div className="min-w-0"><p className="truncate font-semibold">{field.label}</p><p className="truncate text-xs text-muted-foreground">{field.entity} - {field.type} - {field.key}</p></div><div className="flex shrink-0 items-center gap-2"><Badge variant={field.active ? "default" : "secondary"}>{field.active ? "Active" : "Hidden"}</Badge><Button size="sm" variant="outline" onClick={() => toggleField(field.id)}>{field.active ? "Hide" : "Show"}</Button></div></div>)}
+            </div>
+          </TabsContent>
 
-            <TabsContent value="lists" className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-                <div className="space-y-2"><Label>List / dropdown</Label><Select value={listDraft.metadataKey} onValueChange={(value) => setListDraft((prev) => ({ ...prev, metadataKey: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{metadataFields.map((field) => <SelectItem key={field.key} value={field.key}>{field.label}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-2"><Label>New option</Label><Input value={listDraft.label} onChange={(event) => setListDraft((prev) => ({ ...prev, label: event.target.value }))} placeholder="Example: On Hold" /></div>
-                <div className="flex items-end"><Button className="gap-2" onClick={addListOption} disabled={saving}><ListPlus className="h-4 w-4" /> Add Option</Button></div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {metadataFields.map((field) => <Card key={field.key} className="border"><CardHeader className="pb-2"><CardTitle className="text-sm">{field.label}</CardTitle></CardHeader><CardContent className="flex flex-wrap gap-2">{field.options.map((option) => <Button key={option.id} variant={option.active ? "secondary" : "outline"} size="sm" onClick={() => toggleListOption(field.key, option.id)}>{option.label}</Button>)}</CardContent></Card>)}
-              </div>
-            </TabsContent>
+          <TabsContent value="lists" className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <div className="space-y-2"><Label>List / dropdown</Label><Select value={listDraft.metadataKey} onValueChange={(value) => setListDraft((prev) => ({ ...prev, metadataKey: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{metadataFields.map((field) => <SelectItem key={field.key} value={field.key}>{field.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>New option</Label><Input value={listDraft.label} onChange={(event) => setListDraft((prev) => ({ ...prev, label: event.target.value }))} placeholder="Example: On Hold" /></div>
+              <div className="flex items-end"><Button className="gap-2" onClick={addListOption} disabled={saving}><ListPlus className="h-4 w-4" /> Add Option</Button></div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {metadataFields.map((field) => <Card key={field.key} className="border"><CardHeader className="pb-2"><CardTitle className="text-sm">{field.label}</CardTitle></CardHeader><CardContent className="flex flex-wrap gap-2">{field.options.map((option) => <Button key={option.id} variant={option.active ? "secondary" : "outline"} size="sm" onClick={() => toggleListOption(field.key, option.id)}>{option.label}</Button>)}</CardContent></Card>)}
+            </div>
+          </TabsContent>
 
-            <TabsContent value="theme" className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card><CardContent className="space-y-3 p-4"><div className="flex items-center gap-2"><Brush className="h-4 w-4 text-primary" /><p className="font-semibold">Color preset</p></div><Select value={currentPreset} onValueChange={(value) => { const preset = themePresets.find((item) => item.value === value) ?? themePresets[0]; void updateAppearance({ themePreset: preset.value, primaryColor: preset.primary, accentColor: preset.accent }); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{themePresets.map((preset) => <SelectItem key={preset.value} value={preset.value}>{preset.label}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Current: {selectedPreset.label}</p></CardContent></Card>
-                <Card><CardContent className="space-y-3 p-4"><div className="flex items-center gap-2"><Type className="h-4 w-4 text-primary" /><p className="font-semibold">Application font</p></div><Select value={currentFont} onValueChange={(value) => { const font = fontOptions.find((item) => item.value === value) ?? fontOptions[0]; void updateAppearance({ fontFamily: font.value, fontCss: font.css }); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fontOptions.map((font) => <SelectItem key={font.value} value={font.value}>{font.label}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground" style={{ fontFamily: selectedFont.css }}>Preview: Project reports and forms use this style.</p></CardContent></Card>
-              </div>
-              <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">Handwritten style is available as an optional visual mode. It is best for informal notes only; formal PMO reports should use Professional Sans or Formal Report Serif.</div>
-            </TabsContent>
+          <TabsContent value="theme" className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card><CardContent className="space-y-3 p-4"><div className="flex items-center gap-2"><Brush className="h-4 w-4 text-primary" /><p className="font-semibold">Color preset</p></div><Select value={currentPreset} onValueChange={(value) => { const preset = themePresets.find((item) => item.value === value) ?? themePresets[0]; void updateAppearance({ themePreset: preset.value, primaryColor: preset.primary, accentColor: preset.accent }); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{themePresets.map((preset) => <SelectItem key={preset.value} value={preset.value}>{preset.label}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Current: {selectedPreset.label}</p></CardContent></Card>
+              <Card><CardContent className="space-y-3 p-4"><div className="flex items-center gap-2"><Type className="h-4 w-4 text-primary" /><p className="font-semibold">Application font</p></div><Select value={currentFont} onValueChange={(value) => { const font = fontOptions.find((item) => item.value === value) ?? fontOptions[0]; void updateAppearance({ fontFamily: font.value, fontCss: font.css }); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fontOptions.map((font) => <SelectItem key={font.value} value={font.value}>{font.label}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground" style={{ fontFamily: selectedFont.css }}>Preview: Project reports and forms use this style.</p></CardContent></Card>
+            </div>
+            <div className="rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">Handwritten style is available as an optional visual mode. It is best for informal notes only; formal PMO reports should use Professional Sans or Formal Report Serif.</div>
+          </TabsContent>
 
-            <TabsContent value="documents" className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2"><Label>Report cover title</Label><Input value={String((settings.appearance as any).documentTitle ?? "PMO Delivery Report")} onChange={(event) => void updateAppearance({ documentTitle: event.target.value })} /></div>
-                <div className="space-y-2"><Label>Document footer</Label><Input value={String((settings.appearance as any).documentFooter ?? "Generated by PMO Workspace")} onChange={(event) => void updateAppearance({ documentFooter: event.target.value })} /></div>
-                <div className="space-y-2"><Label>Primary report color</Label><Input value={String((settings.appearance as any).primaryColor ?? selectedPreset.primary)} onChange={(event) => void updateAppearance({ primaryColor: event.target.value })} /></div>
-                <div className="space-y-2"><Label>Accent report color</Label><Input value={String((settings.appearance as any).accentColor ?? selectedPreset.accent)} onChange={(event) => void updateAppearance({ accentColor: event.target.value })} /></div>
-              </div>
-              <Card className="overflow-hidden border-primary/30"><div className="h-3" style={{ background: `linear-gradient(90deg, hsl(${String((settings.appearance as any).primaryColor ?? selectedPreset.primary)}), hsl(${String((settings.appearance as any).accentColor ?? selectedPreset.accent)}))` }} /><CardContent className="space-y-3 p-5" style={{ fontFamily: selectedFont.css }}><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /><p className="text-lg font-black">{String((settings.appearance as any).documentTitle ?? "PMO Delivery Report")}</p></div><p className="text-sm text-muted-foreground">This branding profile will be used by generated project reports, exports, and future Word/PDF templates.</p><Badge>{String((settings.appearance as any).documentFooter ?? "Generated by PMO Workspace")}</Badge></CardContent></Card>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-    </div>
+          <TabsContent value="documents" className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2"><Label>Report cover title</Label><Input value={String((settings.appearance as any).documentTitle ?? "PMO Delivery Report")} onChange={(event) => void updateAppearance({ documentTitle: event.target.value })} /></div>
+              <div className="space-y-2"><Label>Document footer</Label><Input value={String((settings.appearance as any).documentFooter ?? "Generated by PMO Workspace")} onChange={(event) => void updateAppearance({ documentFooter: event.target.value })} /></div>
+              <div className="space-y-2"><Label>Primary report color</Label><Input value={String((settings.appearance as any).primaryColor ?? selectedPreset.primary)} onChange={(event) => void updateAppearance({ primaryColor: event.target.value })} /></div>
+              <div className="space-y-2"><Label>Accent report color</Label><Input value={String((settings.appearance as any).accentColor ?? selectedPreset.accent)} onChange={(event) => void updateAppearance({ accentColor: event.target.value })} /></div>
+            </div>
+            <Card className="overflow-hidden border-primary/30"><div className="h-3" style={{ background: `linear-gradient(90deg, hsl(${String((settings.appearance as any).primaryColor ?? selectedPreset.primary)}), hsl(${String((settings.appearance as any).accentColor ?? selectedPreset.accent)}))` }} /><CardContent className="space-y-3 p-5" style={{ fontFamily: selectedFont.css }}><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /><p className="text-lg font-black">{String((settings.appearance as any).documentTitle ?? "PMO Delivery Report")}</p></div><p className="text-sm text-muted-foreground">This branding profile will be used by generated project reports, exports, and future Word/PDF templates.</p><Badge>{String((settings.appearance as any).documentFooter ?? "Generated by PMO Workspace")}</Badge></CardContent></Card>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
+
+  return embedded ? content : <div className="page-shell print:hidden">{content}</div>;
 }
