@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Download, FileSpreadsheet, FileText, Palette } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
@@ -44,6 +45,7 @@ const Reports = () => {
   const selectedProject = selectedProjectId === 'all' ? null : projects.find((project) => project.id === selectedProjectId);
   const filteredTasks = selectedProject ? tasks.filter((task) => task.project_id === selectedProject.id || task.projectId === selectedProject.id) : tasks;
   const filteredTickets = selectedProject ? tickets.filter((ticket) => ticket.projectId === selectedProject.id) : tickets;
+  const projectLinkByName = useMemo(() => new Map(projects.map((project) => [project.name, project.id])), [projects]);
 
   const reportRows = useMemo(() => {
     if (!selectedTemplate) return [];
@@ -71,6 +73,7 @@ const Reports = () => {
         const openTickets = tickets.filter((ticket) => ticket.projectId === project.id && ticket.status !== 'closed').length;
         return {
           project: project.name,
+          projectId: project.id,
           risk: project.risk_level ?? 'medium',
           overdueTasks,
           openTickets,
@@ -85,6 +88,7 @@ const Reports = () => {
         const duration = projectTasks.reduce((sum, task) => sum + (task.workloadHours ?? 0), 0) / 8;
         return {
           project: project.name,
+          projectId: project.id,
           start: project.start_date ?? project.startDate,
           end: project.end_date ?? project.endDate,
           duration: `${duration || 0}d`,
@@ -95,6 +99,7 @@ const Reports = () => {
 
     return (selectedProject ? [selectedProject] : projects).map((project) => ({
       project: project.name,
+      projectId: project.id,
       status: project.status,
       progress: `${project.progress}%`,
       budget: `$${project.budget ?? '0'}`,
@@ -161,6 +166,9 @@ const Reports = () => {
         `Stakeholders tracked: ${stakeholders.length}`,
         `Reporting note: ${selectedProject.projectNature || selectedProject.description || 'Project context not defined.'}`,
       ],
+      completedTasks,
+      totalTasks: projectTasks.length,
+      openTickets,
     };
   }, [reportCadence, selectedProject, tasks, tickets]);
 
@@ -185,6 +193,27 @@ const Reports = () => {
     toast.success(`${projectStatusReport.title} exported with branded header`);
   };
 
+  const renderCell = (row: Record<string, unknown>, column: string) => {
+    const value = row[column as keyof typeof row];
+    const projectId = String(row.projectId ?? projectLinkByName.get(String(row.project ?? '')) ?? '');
+    if (column === 'project' && projectId) {
+      return <Link to={`/projects?projectId=${projectId}`} className="font-semibold text-primary underline-offset-4 hover:underline">{String(value ?? '-')}</Link>;
+    }
+    if (column === 'overdueTasks' && projectId) {
+      return <Link to={`/tasks?projectId=${projectId}&filter=overdue`} className="font-black text-primary underline-offset-4 hover:underline">{String(value ?? 0)}</Link>;
+    }
+    if (column === 'openTickets' && projectId) {
+      return <Link to={`/tickets?projectId=${projectId}&status=open`} className="font-black text-primary underline-offset-4 hover:underline">{String(value ?? 0)}</Link>;
+    }
+    if (column === 'duration' && projectId) {
+      return <Link to={`/schedule?projectId=${projectId}`} className="font-semibold text-primary underline-offset-4 hover:underline">{String(value ?? '-')}</Link>;
+    }
+    if (column === 'dependencies' && projectId) {
+      return <Link to={`/schedule?projectId=${projectId}&view=dependencies`} className="font-black text-primary underline-offset-4 hover:underline">{String(value ?? 0)}</Link>;
+    }
+    return String(value ?? '-');
+  };
+
   return (
     <AppLayout>
       <AppHeader title="Reports & Exports" subtitle={`${settings?.namespace.organization ?? 'Workspace'} reporting with admin-controlled document branding, colors, and fonts.`} />
@@ -202,7 +231,7 @@ const Reports = () => {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Badge variant="secondary"><Palette className="mr-1 h-3 w-3" /> Admin branded</Badge>
                   <Badge variant="outline">Font: {String(appearance.fontFamily ?? 'inter')}</Badge>
-                  <Badge variant="outline">Colors from Settings</Badge>
+                  <Badge variant="outline">Linked counts & names</Badge>
                 </div>
               </div>
               <Button variant="outline" onClick={() => window.location.assign('/settings')}>Edit Branding in Settings</Button>
@@ -228,14 +257,20 @@ const Reports = () => {
                 <Download className="h-4 w-4 mr-2" />Export Branded Status Report
               </Button>
             </div>
-            {projectStatusReport ? (
+            {projectStatusReport && selectedProject ? (
               <div className="overflow-hidden rounded-2xl border bg-card">
                 <div className="px-4 py-3 text-primary-foreground" style={{ background: reportGradient }}>
-                  <p className="font-black">{projectStatusReport.title}</p>
-                  <p className="text-xs opacity-90">{selectedProject?.name} · {settings?.namespace.organization ?? 'Workspace'}</p>
+                  <Link to={`/projects?projectId=${selectedProject.id}`} className="font-black underline-offset-4 hover:underline">{projectStatusReport.title}</Link>
+                  <p className="text-xs opacity-90">{selectedProject.name} · {settings?.namespace.organization ?? 'Workspace'}</p>
                 </div>
                 <div className="space-y-1 p-4 text-sm text-muted-foreground">
-                  {projectStatusReport.lines.map((line) => <p key={line}>{line}</p>)}
+                  <p>Project: <Link to={`/projects?projectId=${selectedProject.id}`} className="font-semibold text-primary underline-offset-4 hover:underline">{selectedProject.name}</Link></p>
+                  <p>Cadence: {reportCadence}</p>
+                  <p>Status: <Link to={`/projects?status=${selectedProject.status}`} className="text-primary underline-offset-4 hover:underline">{selectedProject.status}</Link></p>
+                  <p>Progress: <Link to={`/projects?projectId=${selectedProject.id}`} className="text-primary underline-offset-4 hover:underline">{selectedProject.progress}%</Link></p>
+                  <p>Tasks completed: <Link to={`/tasks?projectId=${selectedProject.id}`} className="text-primary underline-offset-4 hover:underline">{projectStatusReport.completedTasks}/{projectStatusReport.totalTasks}</Link></p>
+                  <p>Open tickets: <Link to={`/tickets?projectId=${selectedProject.id}&status=open`} className="text-primary underline-offset-4 hover:underline">{projectStatusReport.openTickets}</Link></p>
+                  {projectStatusReport.lines.slice(6).map((line) => <p key={line}>{line}</p>)}
                 </div>
               </div>
             ) : <p className="text-sm text-muted-foreground">Choose a project to generate a daily, weekly, or monthly status report.</p>}
@@ -261,10 +296,10 @@ const Reports = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card className="glass"><CardHeader><CardTitle className="text-base">Generated Visualization</CardTitle></CardHeader><CardContent><ResponsiveContainer width="100%" height={280}>{selectedTemplate?.focus === 'risk' ? (<BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" /><XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} /><YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="overdue" fill={`hsl(${accentColor})`} radius={[4, 4, 0, 0]} /><Bar dataKey="tickets" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} /></BarChart>) : selectedTemplate?.focus === 'schedule' ? (<AreaChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" /><XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} /><YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} /><Tooltip contentStyle={tooltipStyle} /><Area type="monotone" dataKey="duration" stroke={`hsl(${primaryColor})`} fill={`hsl(${primaryColor} / 0.15)`} /><Area type="monotone" dataKey="dependencies" stroke={`hsl(${accentColor})`} fill={`hsl(${accentColor} / 0.12)`} /></AreaChart>) : (<BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" /><XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} /><YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey={selectedTemplate?.focus === 'resource' ? 'value' : 'progress'} fill={`hsl(${primaryColor})`} radius={[4, 4, 0, 0]} /></BarChart>)}</ResponsiveContainer></CardContent></Card>
 
-          <Card className="glass"><CardHeader><CardTitle className="text-base">Report Summary</CardTitle></CardHeader><CardContent className="space-y-3">{selectedTemplate?.focus === 'resource' && <><p className="text-sm">Average utilization: {Math.round(reportRows.reduce((sum, row) => sum + (Number.parseInt(String(row.utilization).replace('%', ''), 10) || 0), 0) / Math.max(1, reportRows.length))}%</p><p className="text-sm">Members over target: {reportRows.filter((row) => (Number.parseInt(String(row.utilization).replace('%', ''), 10) || 0) > (Number.parseInt(String(row.target).replace('%', ''), 10) || 0)).length}</p></>}{selectedTemplate?.focus === 'risk' && <><p className="text-sm">Projects with open delivery pressure: {reportRows.filter((row) => row.overdueTasks > 0 || row.openTickets > 0).length}</p><p className="text-sm">Highest risk count: {Math.max(...reportRows.map((row) => row.overdueTasks + row.openTickets), 0)}</p></>}{selectedTemplate?.focus === 'schedule' && <><p className="text-sm">Total planned duration: {reportRows.reduce((sum, row) => sum + (Number.parseInt(String(row.duration).replace('d', ''), 10) || 0), 0)} days</p><p className="text-sm">Tracked dependencies: {reportRows.reduce((sum, row) => sum + (row.dependencies || 0), 0)}</p></>}{selectedTemplate?.focus === 'executive' && <><p className="text-sm">Active portfolios: {projects.filter((project) => project.status === 'active').length}</p><p className="text-sm">Average progress: {Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / Math.max(1, projects.length))}%</p></>}</CardContent></Card>
+          <Card className="glass"><CardHeader><CardTitle className="text-base">Report Summary</CardTitle></CardHeader><CardContent className="space-y-3">{selectedTemplate?.focus === 'resource' && <><p className="text-sm">Average utilization: <Link to="/resources" className="font-black text-primary underline-offset-4 hover:underline">{Math.round(reportRows.reduce((sum, row) => sum + (Number.parseInt(String(row.utilization).replace('%', ''), 10) || 0), 0) / Math.max(1, reportRows.length))}%</Link></p><p className="text-sm">Members over target: <Link to="/resources?filter=over-target" className="font-black text-primary underline-offset-4 hover:underline">{reportRows.filter((row) => (Number.parseInt(String(row.utilization).replace('%', ''), 10) || 0) > (Number.parseInt(String(row.target).replace('%', ''), 10) || 0)).length}</Link></p></>}{selectedTemplate?.focus === 'risk' && <><p className="text-sm">Projects with open delivery pressure: <Link to="/projects?status=at-risk" className="font-black text-primary underline-offset-4 hover:underline">{reportRows.filter((row) => row.overdueTasks > 0 || row.openTickets > 0).length}</Link></p><p className="text-sm">Highest risk count: {Math.max(...reportRows.map((row) => row.overdueTasks + row.openTickets), 0)}</p></>}{selectedTemplate?.focus === 'schedule' && <><p className="text-sm">Total planned duration: <Link to="/schedule" className="font-black text-primary underline-offset-4 hover:underline">{reportRows.reduce((sum, row) => sum + (Number.parseInt(String(row.duration).replace('d', ''), 10) || 0), 0)} days</Link></p><p className="text-sm">Tracked dependencies: <Link to="/schedule?view=dependencies" className="font-black text-primary underline-offset-4 hover:underline">{reportRows.reduce((sum, row) => sum + (row.dependencies || 0), 0)}</Link></p></>}{selectedTemplate?.focus === 'executive' && <><p className="text-sm">Active portfolios: <Link to="/projects?status=active" className="font-black text-primary underline-offset-4 hover:underline">{projects.filter((project) => project.status === 'active').length}</Link></p><p className="text-sm">Average progress: {Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / Math.max(1, projects.length))}%</p></>}</CardContent></Card>
         </div>
 
-        <Card className="glass overflow-hidden"><div className="h-2" style={{ background: reportGradient }} /><CardHeader><CardTitle className="text-base">Generated Data Table</CardTitle></CardHeader><CardContent className="overflow-x-auto"><table className="w-full text-left border-collapse"><thead className="border-b bg-muted/20"><tr>{selectedTemplate?.columns.map((column) => <th key={column} className="p-3 text-xs font-black uppercase tracking-widest">{column}</th>)}</tr></thead><tbody>{reportRows.map((row, index) => <tr key={`${selectedTemplateId}-${index}`} className="border-b">{selectedTemplate?.columns.map((column) => <td key={column} className="p-3 text-sm">{String(row[column as keyof typeof row] ?? '-')}</td>)}</tr>)}</tbody></table></CardContent></Card>
+        <Card className="glass overflow-hidden"><div className="h-2" style={{ background: reportGradient }} /><CardHeader><CardTitle className="text-base">Generated Data Table</CardTitle></CardHeader><CardContent className="overflow-x-auto"><table className="w-full text-left border-collapse"><thead className="border-b bg-muted/20"><tr>{selectedTemplate?.columns.map((column) => <th key={column} className="p-3 text-xs font-black uppercase tracking-widest">{column}</th>)}</tr></thead><tbody>{reportRows.map((row, index) => <tr key={`${selectedTemplateId}-${index}`} className="border-b">{selectedTemplate?.columns.map((column) => <td key={column} className="p-3 text-sm">{renderCell(row, column)}</td>)}</tr>)}</tbody></table></CardContent></Card>
       </div>
     </AppLayout>
   );
