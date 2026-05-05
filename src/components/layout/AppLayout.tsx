@@ -577,11 +577,11 @@ const AppLayout = ({ children }: AppLayoutProps) => {
           </Button>
           <Button size="sm" variant={location.pathname === '/sticky-notes' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/sticky-notes')}>
             <StickyNote className="h-4 w-4" />
-            <span className="hidden sm:inline">Sticky Notes</span>
+            <span className="hidden sm:inline">Action Notes</span>
           </Button>
           <Button size="sm" variant={location.pathname === '/tasks' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/tasks')}>
             <CheckSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">To Do</span>
+            <span className="hidden sm:inline">Tasks</span>
           </Button>
           <Button size="sm" variant={location.pathname === '/team-chat' ? 'default' : 'outline'} className="gap-2" onClick={() => navigate('/team-chat')}>
             <MessageSquare className="h-4 w-4" />
