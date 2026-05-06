@@ -36,10 +36,12 @@ const detectDocumentStandard = (documents?: WorkspaceProjectDocument[]): Documen
     .map((document) => `${document.standardTemplate ?? ""} ${document.metadata?.templateTheme ?? ""} ${document.name}`)
     .join(" ")
     .toLowerCase();
-  if (signature.includes("nazaha") || signature.includes("nzaha") || signature.includes("980") || signature.includes("nazaha_980")) return "NAZAHA_980";
+  if (signature.includes("nazaha") || signature.includes("nzaha") || signature.includes("980") || signature.includes("client_branded")) return "NAZAHA_980";
   if (signature.includes("sap")) return "SAP";
   return "PMI";
 };
+
+const templateLabel = (value: string) => value === "NAZAHA_980" ? "Client Branded Template" : value === "SAP" ? "SAP Branded Template" : "PMI Branded Template";
 
 const DocumentsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -183,7 +185,7 @@ const DocumentsPage = () => {
       lastModifiedAt: new Date().toISOString(),
       lastModifiedBy: settings?.currentUser.displayName ?? "Workspace User",
       provider: "workspace",
-      metadata: { extension: "doc", size: "Editable", templateTheme: templateStandard, templateLayout: "branded-project-document" },
+      metadata: { extension: "doc", size: "Editable", templateTheme: templateStandard === "NAZAHA_980" ? "CLIENT_BRANDED" : templateStandard, templateLayout: "branded-project-document" },
       linkedChannelName: `${currentProject.name} Deliverables Review`,
       versions: [],
     };
@@ -216,6 +218,7 @@ const DocumentsPage = () => {
         ...(document.metadata ?? {}),
         extension: document.outputFormat ?? "doc",
         size: "Generated",
+        templateTheme: document.metadata?.templateTheme === "NAZAHA_980" ? "CLIENT_BRANDED" : document.metadata?.templateTheme,
         templateLayout: document.metadata?.templateLayout ?? "branded-project-document",
       },
       versions: [
@@ -233,7 +236,7 @@ const DocumentsPage = () => {
       id: currentProject.id,
       documents: [...generated, ...(currentProject.documents ?? [])],
     });
-    toast.success(`${templateStandard} deliverables generated with approved branded format`);
+    toast.success(`${templateLabel(templateStandard)} deliverables generated with approved branded format`);
   };
 
   return (
@@ -250,13 +253,13 @@ const DocumentsPage = () => {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Select value={templateStandard} onValueChange={(value) => setTemplateStandard(value as DocumentTemplateStandard)}>
-                  <SelectTrigger className="w-[210px] bg-background">
+                  <SelectTrigger className="w-[230px] bg-background">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="PMI">PMI Branded Template</SelectItem>
                     <SelectItem value="SAP">SAP Branded Template</SelectItem>
-                    <SelectItem value="NAZAHA_980">Nazaha 980 Template</SelectItem>
+                    <SelectItem value="NAZAHA_980">Client Branded Template</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button variant="outline" onClick={createDocument}><Plus className="h-4 w-4 mr-2" />Create Document</Button>
@@ -274,7 +277,7 @@ const DocumentsPage = () => {
               <Badge variant="default">Active</Badge>
               <p className="text-sm text-muted-foreground">All generated exports now use the same branded document shell, header, footer, table styling, and font stack.</p>
               <div className="rounded-xl border p-3 bg-card/40 text-xs text-muted-foreground">
-                The renderer applies Leader Group + Nazaha branding and keeps generated document metadata ready for Word, Excel-compatible output, and approval workflow.
+                The renderer applies the approved branding and keeps generated document metadata ready for Word, Excel-compatible output, and approval workflow.
               </div>
             </CardContent>
           </Card>
@@ -351,7 +354,7 @@ const DocumentsPage = () => {
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="secondary">{document.provider || "workspace"}</Badge>
                             <Badge variant="outline">{(document.outputFormat ?? "doc").toUpperCase()}</Badge>
-                            <Badge variant="outline">{document.metadata?.templateTheme ?? document.standardTemplate ?? "PMI"}</Badge>
+                            <Badge variant="outline">{document.metadata?.templateTheme === "CLIENT_BRANDED" ? "Client Branded" : document.metadata?.templateTheme ?? document.standardTemplate ?? "PMI"}</Badge>
                             <Badge variant="outline">{document.reviewStatus ?? "draft"}</Badge>
                             <Badge variant="outline">{document.access || "project"}</Badge>
                           </div>
@@ -397,7 +400,7 @@ const DocumentsPage = () => {
                   <Badge variant="outline">{selectedDocument.provider || "workspace"}</Badge>
                   {selectedDocument.phase ? <Badge variant="outline">{selectedDocument.phase}</Badge> : null}
                   <Badge variant="outline">{(selectedDocument.outputFormat ?? "doc").toUpperCase()}</Badge>
-                  <Badge variant="outline">{selectedDocument.metadata?.templateTheme ?? selectedDocument.standardTemplate ?? "PMI"}</Badge>
+                  <Badge variant="outline">{selectedDocument.metadata?.templateTheme === "CLIENT_BRANDED" ? "Client Branded" : selectedDocument.metadata?.templateTheme ?? selectedDocument.standardTemplate ?? "PMI"}</Badge>
                   <Badge variant="secondary">{selectedDocument.reviewStatus ?? "draft"}</Badge>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
