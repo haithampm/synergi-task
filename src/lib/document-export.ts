@@ -8,22 +8,28 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
-const normalizeLine = (line: string) => line.trim();
-const hasArabic = (value: string) => /[\u0600-\u06FF]/.test(value);
+const englishOnly = (value: string) =>
+  value
+    .replace(/\s*\/\s*[\u0600-\u06FF\s]+/g, "")
+    .replace(/[\u0600-\u06FF]+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const normalizeLine = (line: string) => englishOnly(line.trim());
 
 const standardLabel = (document: WorkspaceProjectDocument) => {
   const raw = `${document.metadata?.templateTheme ?? document.standardTemplate ?? ""}`.toUpperCase();
-  if (raw.includes("NAZAHA") || raw.includes("980")) return "Client Branded Project Template";
+  if (raw.includes("CLIENT") || raw.includes("NAZAHA") || raw.includes("980")) return "Client Branded Project Template";
   if (raw.includes("SAP")) return "SAP Branded Template";
   if (raw.includes("PMI")) return "PMI Branded Template";
-  return "Professional Branded Template";
+  return "Professional Project Template";
 };
 
 const isSectionHeading = (line: string) => {
   if (!line) return false;
   if (/^[-•\d]+[.)]/.test(line)) return false;
   if (line.length > 110) return false;
-  return /^[A-Z][A-Za-z0-9 /&()\-]+$/.test(line) || hasArabic(line);
+  return /^[A-Z][A-Za-z0-9 /&()\-]+$/.test(line);
 };
 
 const renderContentLines = (content: string) => {
@@ -35,8 +41,8 @@ const renderContentLines = (content: string) => {
     if (!tableRows.length) return;
     html.push("<table class='data-table'><tbody>");
     tableRows.forEach((row) => {
-      const parts = row.split(/\s*\|\s*/).filter(Boolean);
-      html.push("<tr>" + parts.map((part) => `<td class='${hasArabic(part) ? "rtl" : ""}'>${escapeHtml(part)}</td>`).join("") + "</tr>");
+      const parts = row.split(/\s*\|\s*/).map(englishOnly).filter((part) => part.length > 0);
+      html.push("<tr>" + parts.map((part) => `<td>${escapeHtml(part)}</td>`).join("") + "</tr>");
     });
     html.push("</tbody></table>");
     tableRows = [];
@@ -49,30 +55,29 @@ const renderContentLines = (content: string) => {
       html.push("<div class='spacer'></div>");
       return;
     }
-    if (line.includes("|") && !line.startsWith("Project:")) {
+    if (line.includes("|")) {
       tableRows.push(line);
       return;
     }
     flushTable();
-    const directionClass = hasArabic(line) ? "rtl" : "";
     if (/^[-•]/.test(line)) {
-      html.push(`<p class='bullet ${directionClass}'>${escapeHtml(line.replace(/^[-•]\s*/, ""))}</p>`);
+      html.push(`<p class='bullet'>${escapeHtml(line.replace(/^[-•]\s*/, ""))}</p>`);
       return;
     }
     if (/^\d+[.)]/.test(line)) {
-      html.push(`<p class='numbered ${directionClass}'>${escapeHtml(line)}</p>`);
+      html.push(`<p class='numbered'>${escapeHtml(line)}</p>`);
       return;
     }
-    if (/^[A-Za-z ]+:/.test(line) || /^[\u0600-\u06FF ]+:/.test(line)) {
+    if (/^[A-Za-z ]+:/.test(line)) {
       const [label, ...rest] = line.split(":");
-      html.push(`<p class='field ${directionClass}'><span>${escapeHtml(label)}:</span> ${escapeHtml(rest.join(":"))}</p>`);
+      html.push(`<p class='field'><span>${escapeHtml(label)}:</span> ${escapeHtml(rest.join(":"))}</p>`);
       return;
     }
     if (isSectionHeading(line)) {
-      html.push(`<h2 class='${directionClass}'>${escapeHtml(line)}</h2>`);
+      html.push(`<h2>${escapeHtml(line)}</h2>`);
       return;
     }
-    html.push(`<p class='${directionClass}'>${escapeHtml(line)}</p>`);
+    html.push(`<p>${escapeHtml(line)}</p>`);
   });
 
   flushTable();
@@ -81,10 +86,10 @@ const renderContentLines = (content: string) => {
 
 export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, projectName?: string) => {
   const generatedAt = new Date().toLocaleString();
-  const project = projectName || "Project";
-  const title = document.name || `${project} Deliverable`;
-  const phase = document.phase || "Project";
-  const deliverable = document.deliverableType || document.type;
+  const project = englishOnly(projectName || "Project");
+  const title = englishOnly(document.name || `${project} Deliverable`);
+  const phase = englishOnly(document.phase || "Project");
+  const deliverable = englishOnly(document.deliverableType || document.type);
   const templateName = standardLabel(document);
 
   return `<!doctype html>
@@ -93,74 +98,69 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
   <meta charset="utf-8" />
   <title>${escapeHtml(title)}</title>
   <style>
-    @page { margin: 22mm 16mm 18mm 16mm; }
+    @page { margin: 18mm 14mm 16mm 14mm; }
     body {
-      font-family: "Aptos", "Segoe UI", "Tahoma", "Arial", sans-serif;
-      color: #1e293b;
+      font-family: "Aptos", "Segoe UI", "Arial", sans-serif;
+      color: #172033;
       margin: 0;
       background: #ffffff;
-      font-size: 10.8pt;
-      line-height: 1.7;
+      font-size: 9.7pt;
+      line-height: 1.48;
     }
-    .page { max-width: 940px; margin: 0 auto; padding: 16px 24px; }
+    .page { max-width: 980px; margin: 0 auto; padding: 14px 20px; }
     .header {
       display: table;
       width: 100%;
-      border-bottom: 5px solid #2f6f3e;
-      padding-bottom: 12px;
-      margin-bottom: 18px;
+      border-bottom: 5px solid #1f4e79;
+      padding-bottom: 11px;
+      margin-bottom: 16px;
     }
     .brand-left, .brand-right { display: table-cell; vertical-align: middle; width: 32%; }
     .brand-center { display: table-cell; text-align: center; vertical-align: middle; width: 36%; }
-    .leader-logo { font-size: 31px; letter-spacing: 5px; color: #315f7a; font-weight: 800; line-height: 1; }
-    .leader-sub { font-size: 10px; letter-spacing: 7px; color: #ef3333; font-weight: 800; margin-top: 7px; }
-    .client-logo { display: inline-block; border: 4px solid #78a943; color: #1f2937; border-radius: 48% 18% 48% 18%; padding: 7px 20px; font-size: 18px; font-weight: 800; }
-    .client-sub { font-size: 10px; color: #475569; margin-top: 7px; }
-    .doc-class { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.18em; }
+    .leader-logo { font-size: 28px; letter-spacing: 4px; color: #315f7a; font-weight: 800; line-height: 1; }
+    .leader-sub { font-size: 9px; letter-spacing: 6px; color: #d92727; font-weight: 800; margin-top: 6px; }
+    .client-logo { display: inline-block; border: 3px solid #6aa84f; color: #1f2937; border-radius: 50px; padding: 6px 18px; font-size: 14px; font-weight: 800; }
+    .client-sub { font-size: 9px; color: #475569; margin-top: 6px; }
+    .doc-class { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.16em; }
     .title-block {
-      background: linear-gradient(135deg, #f8fafc 0%, #f0f7f2 58%, #eef4f8 100%);
-      border: 1px solid #d7e5dc;
-      border-left: 7px solid #315f7a;
-      border-radius: 14px;
-      padding: 18px 20px;
-      margin-bottom: 18px;
+      background: linear-gradient(135deg, #f8fafc 0%, #eef4f8 55%, #f3f8f2 100%);
+      border: 1px solid #cbd5e1;
+      border-left: 7px solid #1f4e79;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
       page-break-inside: avoid;
     }
-    h1 { margin: 0; color: #24485e; font-size: 23px; line-height: 1.3; font-weight: 800; }
+    h1 { margin: 0; color: #1f4e79; font-size: 20px; line-height: 1.25; font-weight: 800; }
     h2 {
-      color: #2f6f3e;
-      font-size: 14px;
-      margin: 18px 0 8px;
-      padding: 8px 10px;
-      border-right: 4px solid #2f6f3e;
-      border-left: 4px solid #315f7a;
-      background: #f5faf6;
-      border-radius: 8px;
+      color: #1f4e79;
+      font-size: 12.2px;
+      margin: 15px 0 7px;
+      padding: 6px 9px;
+      border-left: 4px solid #1f4e79;
+      background: #eef4f8;
+      border-radius: 6px;
       font-weight: 800;
       page-break-after: avoid;
     }
-    h3 { color: #315f7a; font-size: 12.5px; margin: 14px 0 6px; font-weight: 800; }
-    p { margin: 5px 0; }
-    .meta-grid { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 9.8pt; }
-    .meta-grid th { background: #315f7a; color: #ffffff; text-align: left; padding: 7px 9px; border: 1px solid #315f7a; width: 22%; font-weight: 800; }
-    .meta-grid td { padding: 7px 9px; border: 1px solid #cbd5e1; background: #ffffff; }
-    .data-table { width: 100%; border-collapse: collapse; margin: 10px 0 14px; font-size: 9.7pt; page-break-inside: avoid; }
-    .data-table td, .data-table th { border: 1px solid #cbd5e1; padding: 8px 9px; vertical-align: top; }
-    .data-table tr:first-child td { background: #315f7a; color: #ffffff; font-weight: 800; }
+    p { margin: 4px 0; }
+    .meta-grid { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 9pt; }
+    .meta-grid th { background: #1f4e79; color: #ffffff; text-align: left; padding: 6px 8px; border: 1px solid #1f4e79; width: 20%; font-weight: 800; }
+    .meta-grid td { padding: 6px 8px; border: 1px solid #b7c9d8; background: #ffffff; min-height: 18px; }
+    .data-table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 8.9pt; page-break-inside: avoid; }
+    .data-table td, .data-table th { border: 1px solid #b7c9d8; padding: 6px 7px; vertical-align: top; min-height: 18px; }
+    .data-table tr:first-child td { background: #1f4e79; color: #ffffff; font-weight: 800; }
     .data-table tr:nth-child(even) td { background: #f8fafc; }
-    .field span { color: #315f7a; font-weight: 800; }
-    .bullet { margin-left: 18px; }
-    .bullet:before { content: "• "; color: #2f6f3e; font-weight: 900; margin-left: -14px; }
-    .numbered { margin-left: 18px; }
-    .spacer { height: 4px; }
-    .approval { margin-top: 26px; page-break-inside: avoid; }
+    .field span { color: #1f4e79; font-weight: 800; }
+    .bullet { margin-left: 16px; }
+    .bullet:before { content: "• "; color: #6aa84f; font-weight: 900; margin-left: -12px; }
+    .numbered { margin-left: 16px; }
+    .spacer { height: 3px; }
+    .approval { margin-top: 22px; page-break-inside: avoid; }
     .approval table { width: 100%; border-collapse: collapse; }
-    .approval th { background: #2f6f3e; color: white; padding: 9px; border: 1px solid #2f6f3e; font-size: 9.7pt; }
-    .approval td { border: 1px solid #cbd5e1; padding: 16px 9px; height: 34px; }
-    .footer { margin-top: 26px; padding-top: 10px; border-top: 2px solid #e5e7eb; color: #64748b; font-size: 8.8pt; text-align: center; }
-    .rtl { direction: rtl; text-align: right; font-family: "Tahoma", "Arial", "Segoe UI", sans-serif; line-height: 1.85; }
-    .rtl.bullet { margin-left: 0; margin-right: 18px; }
-    .rtl.bullet:before { margin-left: 0; margin-right: -14px; }
+    .approval th { background: #6aa84f; color: white; padding: 7px; border: 1px solid #6aa84f; font-size: 8.9pt; }
+    .approval td { border: 1px solid #b7c9d8; padding: 13px 8px; height: 28px; }
+    .footer { margin-top: 22px; padding-top: 9px; border-top: 2px solid #e5e7eb; color: #64748b; font-size: 8pt; text-align: center; }
   </style>
 </head>
 <body>
@@ -174,8 +174,8 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
         <div class="doc-class">${escapeHtml(templateName)}</div>
       </div>
       <div class="brand-right" style="text-align:right">
-        <div class="client-logo">نزاهة</div>
-        <div class="client-sub">Oversight and Anti-Corruption Authority</div>
+        <div class="client-logo">CLIENT</div>
+        <div class="client-sub">Project Owner</div>
       </div>
     </div>
 
@@ -183,18 +183,18 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
       <h1>${escapeHtml(title)}</h1>
       <table class="meta-grid">
         <tr><th>Project</th><td>${escapeHtml(project)}</td><th>Phase</th><td>${escapeHtml(phase)}</td></tr>
-        <tr><th>Deliverable Type</th><td>${escapeHtml(deliverable)}</td><th>Status</th><td>${escapeHtml(document.reviewStatus || "draft")}</td></tr>
-        <tr><th>Output Type</th><td>${escapeHtml((document.outputFormat || "doc").toUpperCase())}</td><th>Generated</th><td>${escapeHtml(generatedAt)}</td></tr>
-        <tr><th>Template</th><td>${escapeHtml(templateName)}</td><th>Folder</th><td>${escapeHtml(document.folder || "Project")}</td></tr>
+        <tr><th>Deliverable</th><td>${escapeHtml(deliverable)}</td><th>Status</th><td>${escapeHtml(englishOnly(document.reviewStatus || ""))}</td></tr>
+        <tr><th>Output Type</th><td>${escapeHtml(englishOnly((document.outputFormat || "").toUpperCase()))}</td><th>Generated</th><td>${escapeHtml(generatedAt)}</td></tr>
+        <tr><th>Template</th><td>${escapeHtml(templateName)}</td><th>Folder</th><td>${escapeHtml(englishOnly(document.folder || ""))}</td></tr>
       </table>
     </div>
 
     ${renderContentLines(document.content)}
 
     <div class="approval">
-      <h2>Approval / الاعتماد</h2>
+      <h2>Approval</h2>
       <table>
-        <tr><th>Name / الاسم</th><th>Role / الدور</th><th>Signature / التوقيع</th><th>Date / التاريخ</th></tr>
+        <tr><th>Name</th><th>Role</th><th>Signature</th><th>Date</th></tr>
         <tr><td></td><td>Project Manager</td><td></td><td></td></tr>
         <tr><td></td><td>Client Representative</td><td></td><td></td></tr>
         <tr><td></td><td>Authorized Approver</td><td></td><td></td></tr>
@@ -202,7 +202,7 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
     </div>
 
     <div class="footer">
-      Leader Group | ${escapeHtml(project)} | Generated from Synergi Task | Approved branded style, fonts, tables, Arabic layout, and document control.
+      Leader Group | ${escapeHtml(project)} | Generated from Synergi Task | Professional PMI-aligned project deliverable template.
     </div>
   </div>
 </body>
