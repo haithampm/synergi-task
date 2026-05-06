@@ -26,9 +26,34 @@ export type GeneratedScheduleTask = {
   isMilestone: boolean;
 };
 
-const phaseOrder = ["Discovery", "Planning", "Execution", "Testing", "Deployment"];
+const phaseOrder = ["Discovery", "Planning", "Infrastructure", "Design", "Execution", "Integration", "Migration", "Testing", "Training", "Deployment", "Operations"];
+
+const nazaha980Tasks: ScheduleTemplateTask[] = [
+  { title: "Kick-off and site handover", description: "Start the Nazaha 980 project, confirm governance, communication channels, project team, and site handover.", phase: "Discovery", durationDays: 14, workloadHours: 80, priority: "urgent", isMilestone: true },
+  { title: "Business workshops and current-state assessment", description: "Run workshops for incident management, call center operations, call recording, Helpion service desk, secure communications, analytics, integrations, security, and operations.", phase: "Discovery", durationDays: 30, workloadHours: 320, priority: "high" },
+  { title: "BRD, gap analysis, and target operating model", description: "Prepare business requirements, gap analysis, to-be processes, SLA, escalation, reporting, and acceptance criteria for the 980 center.", phase: "Planning", durationDays: 21, workloadHours: 240, priority: "high" },
+  { title: "Solution architecture and HLD/LLD", description: "Design Automax, VoIP/SIP, call recording, Helpion, secure communications, Infora dashboards, integration layer, HA/DR, security, and environments.", phase: "Design", durationDays: 21, workloadHours: 280, priority: "high" },
+  { title: "Procurement, licenses, and infrastructure readiness", description: "Prepare licenses, environments, smart cabinets, UPS, workstations, VMware/VxRail readiness, networking, application VLAN, database VLAN, and DR connectivity.", phase: "Infrastructure", durationDays: 42, workloadHours: 360, priority: "high" },
+  { title: "Automax incident management configuration", description: "Configure incident intake, classification, workflows, escalation rules, SLA, GIS fields, audit trails, roles, reports, and dashboards.", phase: "Execution", durationDays: 35, workloadHours: 420, priority: "high" },
+  { title: "VoIP/SIP and call recording configuration", description: "Configure SIP, PBX integration, call routing, IVR, call recording, recording permissions, call search, CDR, quality monitoring, and call reports.", phase: "Execution", durationDays: 28, workloadHours: 320, priority: "high" },
+  { title: "Helpion service desk configuration", description: "Configure ticketing, service requests, assets, CMDB, change management, SLA, knowledge base, dashboards, and role-based access.", phase: "Execution", durationDays: 28, workloadHours: 300, priority: "high" },
+  { title: "Secure communication platform setup", description: "Install server license, mobile and desktop application configuration, users, groups, encryption controls, certificates, audit logs, and platform policies.", phase: "Execution", durationDays: 21, workloadHours: 220, priority: "high" },
+  { title: "Infora KPI dashboards and analytics", description: "Build executive KPI dashboards for call KPIs, incident KPIs, agent performance, SLA compliance, service performance, trends, and drill-down reports.", phase: "Execution", durationDays: 28, workloadHours: 300, priority: "high" },
+  { title: "Integration implementation", description: "Implement integrations between Automax, VoIP/SIP, call recording, Helpion, Infora, Active Directory, GIS, caller location, internal systems, and data warehouse as required.", phase: "Integration", durationDays: 35, workloadHours: 420, priority: "high" },
+  { title: "Data migration trial", description: "Extract, cleanse, map, load, and reconcile legacy Automax and operational data, including incidents, tasks, escalations, call records, and reporting data.", phase: "Migration", durationDays: 21, workloadHours: 260, priority: "high" },
+  { title: "System integration testing", description: "Run end-to-end SIT for incident lifecycle, calls, recording, service desk, secure communication, dashboards, integrations, security controls, and HA/DR scenarios.", phase: "Testing", durationDays: 21, workloadHours: 300, priority: "high" },
+  { title: "UAT and defect closure", description: "Conduct user acceptance testing with agents, supervisors, managers, IT, and business users, then close defects and obtain UAT sign-off.", phase: "Testing", durationDays: 21, workloadHours: 280, priority: "urgent", isMilestone: true },
+  { title: "Training and knowledge transfer", description: "Deliver training for agents, supervisors, managers, IT administrators, support team, and business users with manuals and operational guides.", phase: "Training", durationDays: 14, workloadHours: 180, priority: "high" },
+  { title: "Go-live readiness and cutover", description: "Confirm readiness gates, production deployment, rollback plan, final migration, smoke test, go/no-go approval, and production activation.", phase: "Deployment", durationDays: 7, workloadHours: 120, priority: "urgent", isMilestone: true },
+  { title: "Hypercare and stabilization", description: "Provide intensive post go-live support, monitor performance, resolve urgent issues, and transition to steady-state operations.", phase: "Deployment", durationDays: 30, workloadHours: 320, priority: "urgent" },
+  { title: "Operations, maintenance, and SLA reporting", description: "Operate and maintain the Nazaha 980 systems for 36 months with monthly SLA reports, preventive maintenance, backups, security checks, improvements, and service reviews.", phase: "Operations", durationDays: 1095, workloadHours: 4320, priority: "high" },
+];
 
 const templateCatalog: Array<{ keywords: string[]; tasks: ScheduleTemplateTask[] }> = [
+  {
+    keywords: ["nazaha", "nzaha", "نزاه", "980"],
+    tasks: nazaha980Tasks,
+  },
   {
     keywords: ["erp", "system", "software", "application", "platform", "digital", "integration", "ai"],
     tasks: [
@@ -91,7 +116,7 @@ export function generateScheduleFromProjectNature({
   projectName: string;
   projectNature?: string;
 }): GeneratedScheduleTask[] {
-  const template = getTemplateTasks(projectNature);
+  const template = getTemplateTasks(`${projectName} ${projectNature ?? ""}`);
   const baseDate = parseISO(startDate);
   const phaseCounter = new Map<string, number>();
   let cursor = baseDate;
@@ -99,7 +124,6 @@ export function generateScheduleFromProjectNature({
   return template.map((task, index) => {
     const phasePosition = (phaseCounter.get(task.phase) ?? 0) + 1;
     phaseCounter.set(task.phase, phasePosition);
-    const wbs = getScheduleWbs(task.phase, phasePosition);
     const start = cursor;
     const end = addDays(start, Math.max(1, task.durationDays) - 1);
     cursor = addDays(end, 1);
@@ -112,22 +136,16 @@ export function generateScheduleFromProjectNature({
       end_date: format(end, "yyyy-MM-dd"),
       due_date: format(end, "yyyy-MM-dd"),
       duration: `${Math.max(1, task.durationDays)}d`,
-      predecessors: index > 0 ? [getScheduleWbs(template[index - 1].phase, (phaseCounter.get(template[index - 1].phase) ?? 1))] : [],
+      predecessors: index > 0 ? [(() => {
+        const previousTemplate = template[index - 1];
+        const previousPosition = template.slice(0, index).filter((item) => item.phase === previousTemplate.phase).length;
+        return getScheduleWbs(previousTemplate.phase, previousPosition);
+      })()] : [],
       priority: task.priority,
       status: "todo",
       progress: task.isMilestone ? 0 : 5,
       workloadHours: task.workloadHours,
       isMilestone: Boolean(task.isMilestone),
     };
-  }).map((task, index) => ({
-    ...task,
-    predecessors: index > 0 ? [(() => {
-      const previousTemplate = template[index - 1];
-      const previousPosition = template
-        .slice(0, index)
-        .filter((item) => item.phase === previousTemplate.phase)
-        .length;
-      return getScheduleWbs(previousTemplate.phase, previousPosition);
-    })()] : [],
-  }));
+  });
 }
