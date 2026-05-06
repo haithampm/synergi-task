@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Textarea } from "@/components/ui/textarea";
 import { useProjects, useTasks, useTickets, useUpdateProject, useWorkspaceSettings } from "@/hooks/useProjects";
 import { getBrandedDownloadPayload } from "@/lib/document-export";
-import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/project-documents";
+import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/professional-project-documents";
 import { makeId, type WorkspaceProjectDocument } from "@/lib/workspace-store";
 import { toast } from "sonner";
 
@@ -36,7 +36,7 @@ const detectDocumentStandard = (documents?: WorkspaceProjectDocument[]): Documen
     .map((document) => `${document.standardTemplate ?? ""} ${document.metadata?.templateTheme ?? ""} ${document.name}`)
     .join(" ")
     .toLowerCase();
-  if (signature.includes("nazaha") || signature.includes("nzaha") || signature.includes("980") || signature.includes("client_branded")) return "NAZAHA_980";
+  if (signature.includes("client_branded")) return "NAZAHA_980";
   if (signature.includes("sap")) return "SAP";
   return "PMI";
 };
@@ -157,10 +157,10 @@ const DocumentsPage = () => {
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement("a");
     anchor.href = url;
-    anchor.download = `${document.name.replace(/[^\w\s\u0600-\u06FF-]/g, "").replace(/\s+/g, "_")}.${extension === "pdf" ? "doc" : extension}`;
+    anchor.download = `${document.name.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_")}.${extension === "pdf" ? "doc" : extension}`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${document.name} with approved branded format`);
+    toast.success(`Downloaded ${document.name} with professional editable format`);
   };
 
   const createDocument = async () => {
@@ -170,7 +170,7 @@ const DocumentsPage = () => {
       name: `${currentProject.name} Working Note`,
       type: "working-note",
       category: "attachment",
-      content: "Start documenting project updates, decisions, and actions here.",
+      content: "Document Control\nField | Value\nProject Name | " + currentProject.name + "\nDocument Type | Working Note\nVersion | 0.1 Draft\n\nNotes\nDate | Topic | Decision | Action Owner | Due Date\n | | | | \n | | | | ",
       uploadedAt: new Date().toISOString(),
       generated: false,
       phase: "Execution",
@@ -185,7 +185,7 @@ const DocumentsPage = () => {
       lastModifiedAt: new Date().toISOString(),
       lastModifiedBy: settings?.currentUser.displayName ?? "Workspace User",
       provider: "workspace",
-      metadata: { extension: "doc", size: "Editable", templateTheme: templateStandard === "NAZAHA_980" ? "CLIENT_BRANDED" : templateStandard, templateLayout: "branded-project-document" },
+      metadata: { extension: "doc", size: "Editable", templateTheme: templateStandard === "NAZAHA_980" ? "CLIENT_BRANDED" : templateStandard, templateLayout: "professional-pmi-editable-template" },
       linkedChannelName: `${currentProject.name} Deliverables Review`,
       versions: [],
     };
@@ -194,7 +194,7 @@ const DocumentsPage = () => {
       id: currentProject.id,
       documents: [newDocument, ...(currentProject.documents ?? [])],
     });
-    toast.success("Project document created with approved format metadata");
+    toast.success("Editable project document created");
   };
 
   const generatePackage = async () => {
@@ -218,15 +218,14 @@ const DocumentsPage = () => {
         ...(document.metadata ?? {}),
         extension: document.outputFormat ?? "doc",
         size: "Generated",
-        templateTheme: document.metadata?.templateTheme === "NAZAHA_980" ? "CLIENT_BRANDED" : document.metadata?.templateTheme,
-        templateLayout: document.metadata?.templateLayout ?? "branded-project-document",
+        templateLayout: "professional-pmi-editable-template",
       },
       versions: [
         {
           id: makeId("version"),
           editedAt: new Date().toISOString(),
           editedBy: settings?.currentUser.displayName ?? "AI Assistant",
-          summary: "Initial generated version with approved branding, fonts, tables, and layout",
+          summary: "Initial professional English-only editable PMI document template",
           content: document.content,
         },
       ],
@@ -236,12 +235,12 @@ const DocumentsPage = () => {
       id: currentProject.id,
       documents: [...generated, ...(currentProject.documents ?? [])],
     });
-    toast.success(`${templateLabel(templateStandard)} deliverables generated with approved branded format`);
+    toast.success(`${templateLabel(templateStandard)} professional editable deliverables generated`);
   };
 
   return (
     <AppLayout>
-      <AppHeader title="Document Drive" subtitle="Branded project deliverables, templates, review workflow, approval, and export-ready documents." />
+      <AppHeader title="Document Drive" subtitle="Professional English-only editable PMI deliverables, registers, approvals, and export-ready templates." />
       <div className="p-6 space-y-6">
         <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
           <Card className="glass">
@@ -249,7 +248,7 @@ const DocumentsPage = () => {
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Project Deliverables Drive</p>
                 <h2 className="text-2xl font-semibold mt-1">{currentProject?.name ?? "Select project"}</h2>
-                <p className="text-sm text-muted-foreground mt-1">Generated documents use the approved logos, fonts, tables, styling, and bilingual project format.</p>
+                <p className="text-sm text-muted-foreground mt-1">Generated documents are English-only, PMI-aligned, table-based, editable, and populated only from available project data.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Select value={templateStandard} onValueChange={(value) => setTemplateStandard(value as DocumentTemplateStandard)}>
@@ -272,12 +271,12 @@ const DocumentsPage = () => {
             <CardContent className="p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-primary" />
-                <p className="font-medium">Unified Formatting Engine</p>
+                <p className="font-medium">Professional Template Engine</p>
               </div>
               <Badge variant="default">Active</Badge>
-              <p className="text-sm text-muted-foreground">All generated exports now use the same branded document shell, header, footer, table styling, and font stack.</p>
+              <p className="text-sm text-muted-foreground">Generated files use editable Word/Excel-compatible layouts with structured tables and blanks where data is unavailable.</p>
               <div className="rounded-xl border p-3 bg-card/40 text-xs text-muted-foreground">
-                The renderer applies the approved branding and keeps generated document metadata ready for Word, Excel-compatible output, and approval workflow.
+                Suitable for solution implementation and systems delivery projects: analysis, design, configuration, integration, migration, testing, training, go-live, and operations.
               </div>
             </CardContent>
           </Card>
@@ -379,7 +378,7 @@ const DocumentsPage = () => {
                 </div>
               ))}
               <div className="rounded-xl border p-4 bg-muted/10 text-sm text-muted-foreground">
-                Standard phase deliverables stay linked to the project and use the same branded output when downloaded or regenerated.
+                Deliverables are editable, grouped by phase, and exported with the same professional template format.
               </div>
             </CardContent>
           </Card>
