@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useProjects, useTasks, useTickets, useUpdateProject, useWorkspaceSettings } from "@/hooks/useProjects";
+import { getBrandedDownloadPayload } from "@/lib/document-export";
 import { generateProjectTemplateDocuments, type DocumentTemplateStandard } from "@/lib/project-documents";
 import { makeId, type WorkspaceProjectDocument } from "@/lib/workspace-store";
 import { toast } from "sonner";
@@ -25,16 +26,20 @@ const defaultFolders = [
   "03 Execution",
   "04 Monitoring",
   "05 Closing",
+  "06 Operations",
 ];
 
-const formatMime: Record<string, string> = {
-  doc: "application/msword",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  pdf: "application/pdf",
-  txt: "text/plain",
-};
-
 type DriveDocument = WorkspaceProjectDocument & { projectId: string; projectName: string };
+
+const detectDocumentStandard = (documents?: WorkspaceProjectDocument[]): DocumentTemplateStandard => {
+  const signature = (documents ?? [])
+    .map((document) => `${document.standardTemplate ?? ""} ${document.metadata?.templateTheme ?? ""} ${document.name}`)
+    .join(" ")
+    .toLowerCase();
+  if (signature.includes("nazaha") || signature.includes("nzaha") || signature.includes("980") || signature.includes("nazaha_980")) return "NAZAHA_980";
+  if (signature.includes("sap")) return "SAP";
+  return "PMI";
+};
 
 const DocumentsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,9 +66,7 @@ const DocumentsPage = () => {
   const currentProject = useMemo(() => projects.find((project) => project.id === projectId) ?? projects[0], [projectId, projects]);
 
   useEffect(() => {
-    const standard = currentProject?.documents?.find((document) => document.category === "template")?.standardTemplate;
-    if (standard === "SAP") setTemplateStandard("SAP");
-    else if (standard === "PMI") setTemplateStandard("PMI");
+    setTemplateStandard(detectDocumentStandard(currentProject?.documents));
   }, [currentProject]);
 
   const documents = useMemo<DriveDocument[]>(
@@ -86,15 +89,7 @@ const DocumentsPage = () => {
       if (formatFilter !== "all" && document.outputFormat !== formatFilter) return false;
       if (reviewFilter !== "all" && document.reviewStatus !== reviewFilter) return false;
       if (!q) return true;
-      return [
-        document.name,
-        document.type,
-        document.folder,
-        document.content,
-        document.projectName,
-        document.phase,
-        document.deliverableType,
-      ]
+      return [document.name, document.type, document.folder, document.content, document.projectName, document.phase, document.deliverableType]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -122,7 +117,7 @@ const DocumentsPage = () => {
     if (!selectedDocument) return;
     const project = projects.find((entry) => entry.id === selectedDocument.projectId);
     if (!project) return;
-    const { projectId: selectedProjectId, projectName: selectedProjectName, ...documentRecord } = selectedDocument;
+    const { projectId: _selectedProjectId, projectName: _selectedProjectName, ...documentRecord } = selectedDocument;
 
     const nextDocument: WorkspaceProjectDocument = {
       ...documentRecord,
@@ -155,17 +150,15 @@ const DocumentsPage = () => {
     toast.success("Document saved with version history");
   };
 
-  const downloadDocument = (document: DriveDocument | WorkspaceProjectDocument) => {
-    const extension = document.outputFormat ?? document.metadata?.extension ?? "txt";
-    const mime = formatMime[extension] ?? "text/plain";
-    const blob = new Blob([document.content], { type: mime });
+  const downloadDocument = (document: DriveDocument | WorkspaceProjectDocument, projectName?: string) => {
+    const { blob, extension } = getBrandedDownloadPayload(document, projectName ?? ("projectName" in document ? document.projectName : currentProject?.name));
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement("a");
     anchor.href = url;
-    anchor.download = `${document.name.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_")}.${extension}`;
+    anchor.download = `${document.name.replace(/[^\w\s\u0600-\u06FF-]/g, "").replace(/\s+/g, "_")}.${extension === "pdf" ? "doc" : extension}`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${document.name} as ${extension.toUpperCase()}`);
+    toast.success(`Downloaded ${document.name} with approved branded format`);
   };
 
   const createDocument = async () => {
@@ -182,7 +175,7 @@ const DocumentsPage = () => {
       deliverableType: "Working Note",
       documentNature: "narrative",
       outputFormat: "doc",
-      standardTemplate: "Custom",
+      standardTemplate: templateStandard === "NAZAHA_980" ? "Custom" : templateStandard,
       reviewStatus: "draft",
       folder: "Working Docs",
       access: "project",
@@ -190,7 +183,7 @@ const DocumentsPage = () => {
       lastModifiedAt: new Date().toISOString(),
       lastModifiedBy: settings?.currentUser.displayName ?? "Workspace User",
       provider: "workspace",
-      metadata: { extension: "doc", size: "Editable" },
+      metadata: { extension: "doc", size: "Editable", templateTheme: templateStandard, templateLayout: "branded-project-document" },
       linkedChannelName: `${currentProject.name} Deliverables Review`,
       versions: [],
     };
@@ -199,7 +192,7 @@ const DocumentsPage = () => {
       id: currentProject.id,
       documents: [newDocument, ...(currentProject.documents ?? [])],
     });
-    toast.success("Project document created");
+    toast.success("Project document created with approved format metadata");
   };
 
   const generatePackage = async () => {
@@ -223,13 +216,14 @@ const DocumentsPage = () => {
         ...(document.metadata ?? {}),
         extension: document.outputFormat ?? "doc",
         size: "Generated",
+        templateLayout: document.metadata?.templateLayout ?? "branded-project-document",
       },
       versions: [
         {
           id: makeId("version"),
           editedAt: new Date().toISOString(),
           editedBy: settings?.currentUser.displayName ?? "AI Assistant",
-          summary: "Initial generated version",
+          summary: "Initial generated version with approved branding, fonts, tables, and layout",
           content: document.content,
         },
       ],
@@ -239,12 +233,12 @@ const DocumentsPage = () => {
       id: currentProject.id,
       documents: [...generated, ...(currentProject.documents ?? [])],
     });
-    toast.success(`${templateStandard} lifecycle deliverables generated and linked to the project drive`);
+    toast.success(`${templateStandard} deliverables generated with approved branded format`);
   };
 
   return (
     <AppLayout>
-      <AppHeader title="Document Drive" subtitle="Phase deliverables, PMI templates, sign-off workflow, document review, and export-ready project documents." />
+      <AppHeader title="Document Drive" subtitle="Branded project deliverables, templates, review workflow, approval, and export-ready documents." />
       <div className="p-6 space-y-6">
         <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
           <Card className="glass">
@@ -252,16 +246,17 @@ const DocumentsPage = () => {
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Project Deliverables Drive</p>
                 <h2 className="text-2xl font-semibold mt-1">{currentProject?.name ?? "Select project"}</h2>
-                <p className="text-sm text-muted-foreground mt-1">Each project phase can generate standard PMI deliverables with document type, format, and review status.</p>
+                <p className="text-sm text-muted-foreground mt-1">Generated documents use the approved logos, fonts, tables, styling, and bilingual project format.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Select value={templateStandard} onValueChange={(value) => setTemplateStandard(value as DocumentTemplateStandard)}>
-                  <SelectTrigger className="w-[160px] bg-background">
+                  <SelectTrigger className="w-[210px] bg-background">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="PMI">PMI Template</SelectItem>
-                    <SelectItem value="SAP">SAP Template</SelectItem>
+                    <SelectItem value="PMI">PMI Branded Template</SelectItem>
+                    <SelectItem value="SAP">SAP Branded Template</SelectItem>
+                    <SelectItem value="NAZAHA_980">Nazaha 980 Template</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button variant="outline" onClick={createDocument}><Plus className="h-4 w-4 mr-2" />Create Document</Button>
@@ -274,14 +269,12 @@ const DocumentsPage = () => {
             <CardContent className="p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-primary" />
-                <p className="font-medium">OneDrive Integration</p>
+                <p className="font-medium">Unified Formatting Engine</p>
               </div>
-              <Badge variant={settings?.integrations.onedrive.connected ? "default" : "outline"}>
-                {settings?.integrations.onedrive.connected ? "Connected" : "Ready"}
-              </Badge>
-              <p className="text-sm text-muted-foreground">{settings?.integrations.onedrive.status}</p>
+              <Badge variant="default">Active</Badge>
+              <p className="text-sm text-muted-foreground">All generated exports now use the same branded document shell, header, footer, table styling, and font stack.</p>
               <div className="rounded-xl border p-3 bg-card/40 text-xs text-muted-foreground">
-                Deliverables are modeled with document nature and output format so they can later sync to Word, Excel, PDF, and OneDrive-backed project folders.
+                The renderer applies Leader Group + Nazaha branding and keeps generated document metadata ready for Word, Excel-compatible output, and approval workflow.
               </div>
             </CardContent>
           </Card>
@@ -358,7 +351,7 @@ const DocumentsPage = () => {
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="secondary">{document.provider || "workspace"}</Badge>
                             <Badge variant="outline">{(document.outputFormat ?? "doc").toUpperCase()}</Badge>
-                            <Badge variant="outline">{document.standardTemplate ?? "PMI"}</Badge>
+                            <Badge variant="outline">{document.metadata?.templateTheme ?? document.standardTemplate ?? "PMI"}</Badge>
                             <Badge variant="outline">{document.reviewStatus ?? "draft"}</Badge>
                             <Badge variant="outline">{document.access || "project"}</Badge>
                           </div>
@@ -383,7 +376,7 @@ const DocumentsPage = () => {
                 </div>
               ))}
               <div className="rounded-xl border p-4 bg-muted/10 text-sm text-muted-foreground">
-                Standard phase deliverables stay linked to the project and to the related communication stream for review, approval, and sign-off.
+                Standard phase deliverables stay linked to the project and use the same branded output when downloaded or regenerated.
               </div>
             </CardContent>
           </Card>
@@ -404,14 +397,14 @@ const DocumentsPage = () => {
                   <Badge variant="outline">{selectedDocument.provider || "workspace"}</Badge>
                   {selectedDocument.phase ? <Badge variant="outline">{selectedDocument.phase}</Badge> : null}
                   <Badge variant="outline">{(selectedDocument.outputFormat ?? "doc").toUpperCase()}</Badge>
-                  <Badge variant="outline">{selectedDocument.standardTemplate ?? "PMI"}</Badge>
+                  <Badge variant="outline">{selectedDocument.metadata?.templateTheme ?? selectedDocument.standardTemplate ?? "PMI"}</Badge>
                   <Badge variant="secondary">{selectedDocument.reviewStatus ?? "draft"}</Badge>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl border p-3 bg-card/40">
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">Deliverable</p>
                     <p className="mt-1 text-sm font-medium">{selectedDocument.deliverableType || selectedDocument.type}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{selectedDocument.documentNature || "narrative"} | {selectedDocument.standardTemplate || "PMI"} template</p>
+                    <p className="text-xs text-muted-foreground mt-1">{selectedDocument.documentNature || "narrative"} | {selectedDocument.metadata?.templateLayout || selectedDocument.standardTemplate || "PMI"}</p>
                   </div>
                   <div className="rounded-xl border p-3 bg-card/40">
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">Communication</p>
@@ -425,7 +418,7 @@ const DocumentsPage = () => {
                   <Button variant="outline" onClick={() => void updateSelectedDocument({ reviewStatus: "in-review" }, "Moved document to review")}>Send for Review</Button>
                   <Button variant="outline" onClick={() => void updateSelectedDocument({ reviewStatus: "approved" }, "Approved deliverable document")}>Approve</Button>
                   <Button variant="outline" onClick={() => void updateSelectedDocument({ reviewStatus: "signed" }, "Signed-off deliverable document")}>Sign Off</Button>
-                  <Button variant="outline" onClick={() => downloadDocument(selectedDocument)}><Download className="h-4 w-4 mr-2" />Download</Button>
+                  <Button variant="outline" onClick={() => downloadDocument(selectedDocument, selectedDocument.projectName)}><Download className="h-4 w-4 mr-2" />Download</Button>
                   <Button variant="outline"><Share2 className="h-4 w-4 mr-2" />Share</Button>
                   {selectedDocument.externalUrl ? <Button variant="outline" onClick={() => window.open(selectedDocument.externalUrl, "_blank", "noopener,noreferrer")}>Open Linked File</Button> : null}
                 </div>
