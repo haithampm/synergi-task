@@ -18,8 +18,6 @@ import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEn
 import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
 import ImplementationActivitiesMatrix from "@/components/ImplementationActivitiesMatrix";
 import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
-import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
-import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
 import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
 import WorkspaceInteractionPolish from "@/components/WorkspaceInteractionPolish";
 import WorkspaceThemeRuntime from "@/components/theme/WorkspaceThemeRuntime";
@@ -102,8 +100,6 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
       <ProjectExperienceEnhancer />
       <ImplementationActivitiesMatrix />
       <ProjectOwnerTaskPanel />
-      <ProjectTaskBulkActionsPanel />
-      <ProjectScheduleImporter />
       <PMODeliveryCyclePanel />
       <Suspense fallback={null}><CommandPalette /></Suspense>
       <Suspense fallback={<AppLoader />}>
