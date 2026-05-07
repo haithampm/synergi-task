@@ -16,6 +16,10 @@ const priorities = ["low", "medium", "high", "urgent"];
 const today = new Date().toISOString().slice(0, 10);
 const headerTemplate = "Task Name\tPhase\tStart Date\tEnd Date\tDuration\tStatus\tPriority\tProgress\tAssignee\tMilestone";
 
+type ProjectScheduleImporterProps = {
+  embedded?: boolean;
+};
+
 const splitLine = (line: string, delimiter: "," | "\t") => {
   const out: string[] = [];
   let current = "";
@@ -108,7 +112,7 @@ const parseSchedule = (text: string) => {
   });
 };
 
-export default function ProjectScheduleImporter() {
+export default function ProjectScheduleImporter({ embedded = false }: ProjectScheduleImporterProps) {
   const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [rawText, setRawText] = useState("");
@@ -116,7 +120,7 @@ export default function ProjectScheduleImporter() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { data: projects = [] } = useProjects();
   const createTask = useCreateTask();
-  const visible = typeof window !== "undefined" && window.location.pathname === "/schedule";
+  const visible = typeof window !== "undefined" && (embedded || window.location.pathname === "/tasks");
   const selectedProject = projects.find((project: any) => project.id === projectId);
   const parsedRows = useMemo(() => parseSchedule(rawText), [rawText]);
   const validRows = parsedRows.filter((row) => row.title);
@@ -159,7 +163,7 @@ export default function ProjectScheduleImporter() {
         const days = durationDays(row.startDate, row.endDate);
         await createTask.mutateAsync({
           title: row.title,
-          description: "Imported from Master Schedule page",
+          description: "Imported from Tasks page",
           project_id: selectedProject.id,
           projectId: selectedProject.id,
           projectName: selectedProject.name,
@@ -174,15 +178,15 @@ export default function ProjectScheduleImporter() {
           workloadHours: row.isMilestone ? 0 : days * 8,
           isMilestone: row.isMilestone,
           assignee: row.assignee,
-          customFieldValues: { source: "master-schedule-import", importedAt: new Date().toISOString() },
+          customFieldValues: { source: "tasks-page-import", importedAt: new Date().toISOString() },
         } as any);
       }
-      window.dispatchEvent(new CustomEvent("workspace-data-changed", { detail: { entity: "tasks", reason: "project-schedule-import" } }));
-      toast.success(`Imported ${validRows.length} schedule rows to ${selectedProject.name}`);
+      window.dispatchEvent(new CustomEvent("workspace-data-changed", { detail: { entity: "tasks", reason: "project-task-import" } }));
+      toast.success(`Imported ${validRows.length} tasks to ${selectedProject.name}`);
       setRawText("");
       setOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Schedule import failed");
+      toast.error(error instanceof Error ? error.message : "Task import failed");
     } finally {
       setImporting(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -190,19 +194,19 @@ export default function ProjectScheduleImporter() {
   };
 
   return (
-    <div className="sticky top-24 z-20 mx-4 mb-3 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur print:hidden sm:mx-6">
+    <div className="mx-4 mb-3 rounded-2xl border bg-card/95 p-3 shadow-sm print:hidden sm:mx-6">
       <Dialog open={open} onOpenChange={setOpen}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-black uppercase tracking-widest text-primary">Master Schedule Import</p>
-            <p className="text-sm text-muted-foreground">Import activities, milestones, dates, priority, progress, and assignee for one selected project.</p>
+            <p className="text-xs font-black uppercase tracking-widest text-primary">Task Import</p>
+            <p className="text-sm text-muted-foreground">Import activities, milestones, dates, priority, progress, and assignee directly from the Tasks page.</p>
           </div>
           <DialogTrigger asChild>
-            <Button className="gap-2 shadow-sm" variant="secondary"><UploadCloud className="h-4 w-4" /> Import Project Schedule</Button>
+            <Button className="gap-2 shadow-sm" variant="secondary"><UploadCloud className="h-4 w-4" /> Import Tasks</Button>
           </DialogTrigger>
         </div>
         <DialogContent className="max-w-6xl">
-          <DialogHeader><DialogTitle>Import Schedule for Specific Project</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Import Tasks for Specific Project</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-[1fr_auto]">
               <div className="space-y-2">
@@ -219,7 +223,7 @@ export default function ProjectScheduleImporter() {
             </div>
             <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed bg-background p-5 text-sm hover:bg-muted/20">
               <input ref={inputRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} />
-              <span className="flex items-center gap-2"><FileUp className="h-4 w-4" /> Upload CSV / TSV Schedule File</span>
+              <span className="flex items-center gap-2"><FileUp className="h-4 w-4" /> Upload CSV / TSV Task File</span>
             </label>
             <Textarea rows={8} value={rawText} onChange={(event) => setRawText(event.target.value)} className="font-mono text-xs" placeholder={headerTemplate} />
             <div className="grid gap-3 md:grid-cols-4">
@@ -228,10 +232,10 @@ export default function ProjectScheduleImporter() {
               <div className="rounded-xl border p-3"><p className="text-[10px] uppercase text-muted-foreground">Activities</p><p className="text-xl font-bold">{validRows.length - milestones}</p></div>
               <div className="rounded-xl border p-3"><p className="text-[10px] uppercase text-muted-foreground">Project</p><p className="truncate text-sm font-bold">{selectedProject?.name ?? "Not selected"}</p></div>
             </div>
-            {validationIssues.length ? <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold text-destructive"><AlertTriangle className="h-4 w-4" /> Validation issues</div><ul className="space-y-1 text-xs text-muted-foreground">{validationIssues.slice(0, 8).map((issue) => <li key={issue}>- {issue}</li>)}</ul></div> : rawText.trim() ? <div className="flex items-center gap-2 rounded-2xl border border-success/40 bg-success/5 p-3 text-sm"><CheckCircle2 className="h-4 w-4 text-success" /> Schedule import preview is valid.</div> : null}
+            {validationIssues.length ? <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold text-destructive"><AlertTriangle className="h-4 w-4" /> Validation issues</div><ul className="space-y-1 text-xs text-muted-foreground">{validationIssues.slice(0, 8).map((issue) => <li key={issue}>- {issue}</li>)}</ul></div> : rawText.trim() ? <div className="flex items-center gap-2 rounded-2xl border border-success/40 bg-success/5 p-3 text-sm"><CheckCircle2 className="h-4 w-4 text-success" /> Task import preview is valid.</div> : null}
             {validRows.length ? <div className="max-h-52 overflow-auto rounded-2xl border"><Table><TableHeader><TableRow><TableHead>Task</TableHead><TableHead>Phase</TableHead><TableHead>Start</TableHead><TableHead>End</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead></TableRow></TableHeader><TableBody>{validRows.slice(0, 20).map((row) => <TableRow key={`${row.rowNumber}-${row.title}`}><TableCell className="font-medium">{row.title}</TableCell><TableCell><Badge variant="outline">{row.phase}</Badge></TableCell><TableCell>{row.startDate}</TableCell><TableCell>{row.endDate}</TableCell><TableCell>{row.status}</TableCell><TableCell>{row.priority}</TableCell></TableRow>)}</TableBody></Table></div> : null}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={runImport} disabled={importing || !selectedProject || !validRows.length || validationIssues.length > 0}>{importing ? "Importing..." : "Validate & Import to Project Schedule"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={runImport} disabled={importing || !selectedProject || !validRows.length || validationIssues.length > 0}>{importing ? "Importing..." : "Validate & Import Tasks"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
