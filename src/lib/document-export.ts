@@ -16,6 +16,7 @@ const englishOnly = (value: string) =>
     .trim();
 
 const normalizeLine = (line: string) => englishOnly(line.trim());
+const slug = (value: string) => englishOnly(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const standardLabel = (document: WorkspaceProjectDocument) => {
   const raw = `${document.metadata?.templateTheme ?? document.standardTemplate ?? ""}`.toUpperCase();
@@ -39,10 +40,14 @@ const renderContentLines = (content: string) => {
 
   const flushTable = () => {
     if (!tableRows.length) return;
-    html.push("<table class='data-table'><tbody>");
-    tableRows.forEach((row) => {
-      const parts = row.split(/\s*\|\s*/).map(englishOnly).filter((part) => part.length > 0);
-      html.push("<tr>" + parts.map((part) => `<td>${escapeHtml(part)}</td>`).join("") + "</tr>");
+    const headers = tableRows[0].split(/\s*\|\s*/).map(englishOnly).filter((part) => part.length > 0);
+    const bodyRows = tableRows.slice(1).map((row) => row.split(/\s*\|\s*/).map(englishOnly));
+    const columnCount = Math.max(headers.length, ...bodyRows.map((row) => row.length), 1);
+    html.push(`<table class='data-table cols-${columnCount}'>`);
+    html.push("<thead><tr>" + Array.from({ length: columnCount }, (_, index) => `<th>${escapeHtml(headers[index] ?? "")}</th>`).join("") + "</tr></thead>");
+    html.push("<tbody>");
+    bodyRows.forEach((row) => {
+      html.push("<tr>" + Array.from({ length: columnCount }, (_, index) => `<td>${escapeHtml(row[index] ?? "")}</td>`).join("") + "</tr>");
     });
     html.push("</tbody></table>");
     tableRows = [];
@@ -74,7 +79,7 @@ const renderContentLines = (content: string) => {
       return;
     }
     if (isSectionHeading(line)) {
-      html.push(`<h2>${escapeHtml(line)}</h2>`);
+      html.push(`<h2 id='${slug(line)}'><span>${escapeHtml(line)}</span></h2>`);
       return;
     }
     html.push(`<p>${escapeHtml(line)}</p>`);
@@ -84,7 +89,57 @@ const renderContentLines = (content: string) => {
   return html.join("\n");
 };
 
+const baseStyles = (isExcel: boolean) => `
+  @page { margin: ${isExcel ? "10mm 8mm" : "16mm 13mm 15mm 13mm"}; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Aptos", "Segoe UI", "Arial", sans-serif;
+    color: #1f2937;
+    margin: 0;
+    background: #ffffff;
+    font-size: ${isExcel ? "8.6pt" : "9.2pt"};
+    line-height: ${isExcel ? "1.28" : "1.42"};
+  }
+  .page { max-width: ${isExcel ? "1240px" : "980px"}; margin: 0 auto; padding: ${isExcel ? "8px 10px" : "12px 18px"}; }
+  .header { display: table; width: 100%; border-bottom: 4px solid #17365d; padding-bottom: 9px; margin-bottom: 12px; }
+  .brand-left, .brand-right { display: table-cell; vertical-align: middle; width: 31%; }
+  .brand-center { display: table-cell; text-align: center; vertical-align: middle; width: 38%; }
+  .leader-logo { font-size: 25px; letter-spacing: 4px; color: #315f7a; font-weight: 800; line-height: 1; }
+  .leader-sub { font-size: 8px; letter-spacing: 5px; color: #c00000; font-weight: 800; margin-top: 5px; }
+  .client-logo { display: inline-block; border: 2px solid #70ad47; color: #1f2937; border-radius: 36px; padding: 5px 15px; font-size: 12px; font-weight: 800; }
+  .client-sub { font-size: 8px; color: #475569; margin-top: 5px; }
+  .doc-class { font-size: 8px; color: #64748b; text-transform: uppercase; letter-spacing: 0.14em; }
+  .title-block { background: #f3f6fa; border: 1px solid #a9c4dc; border-left: 6px solid #17365d; padding: 12px 14px; margin-bottom: 12px; page-break-inside: avoid; }
+  h1 { margin: 0 0 4px 0; color: #17365d; font-size: ${isExcel ? "16px" : "18px"}; line-height: 1.2; font-weight: 800; }
+  h2 { color: #17365d; font-size: ${isExcel ? "11px" : "12px"}; margin: 14px 0 6px; padding: 7px 9px; border-left: 5px solid #17365d; border-top: 1px solid #a9c4dc; border-right: 1px solid #a9c4dc; border-bottom: 1px solid #a9c4dc; background: #d9eaf7; font-weight: 800; page-break-after: avoid; text-transform: uppercase; letter-spacing: 0.02em; }
+  h2 span { display: inline-block; }
+  p { margin: 3px 0; }
+  .meta-grid { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: ${isExcel ? "8.4pt" : "8.7pt"}; table-layout: fixed; }
+  .meta-grid th { background: #17365d; color: #ffffff; text-align: left; padding: 6px 7px; border: 1px solid #17365d; width: 18%; font-weight: 800; }
+  .meta-grid td { padding: 6px 7px; border: 1px solid #a9c4dc; background: #ffffff; min-height: 18px; width: 32%; }
+  .data-table { width: 100%; border-collapse: collapse; margin: 6px 0 11px; font-size: ${isExcel ? "8.2pt" : "8.5pt"}; page-break-inside: auto; table-layout: ${isExcel ? "auto" : "fixed"}; border: 1px solid #7f9db9; }
+  .data-table thead { display: table-header-group; }
+  .data-table th { background: #17365d; color: #ffffff; border: 1px solid #17365d; padding: 6px 7px; text-align: left; font-weight: 800; vertical-align: middle; }
+  .data-table td { border: 1px solid #9eb6ce; padding: 5px 7px; vertical-align: top; min-height: 20px; height: ${isExcel ? "22px" : "auto"}; }
+  .data-table tbody tr:nth-child(even) td { background: #f3f6fa; }
+  .data-table tbody tr:nth-child(odd) td { background: #ffffff; }
+  .data-table tbody tr:hover td { background: #eaf2f8; }
+  .data-table.cols-2 td:first-child, .data-table.cols-3 td:first-child { font-weight: 700; color: #17365d; background: #eef4fb; }
+  .field span { color: #17365d; font-weight: 800; }
+  .bullet { margin-left: 14px; }
+  .bullet:before { content: "• "; color: #70ad47; font-weight: 900; margin-left: -11px; }
+  .numbered { margin-left: 14px; }
+  .spacer { height: 2px; }
+  .approval { margin-top: 18px; page-break-inside: avoid; }
+  .approval table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .approval th { background: #70ad47; color: white; padding: 7px; border: 1px solid #548235; font-size: 8.6pt; text-align: left; }
+  .approval td { border: 1px solid #9eb6ce; padding: 11px 8px; height: 26px; }
+  .footer { margin-top: 18px; padding-top: 8px; border-top: 2px solid #d9e2f3; color: #64748b; font-size: 7.8pt; text-align: center; }
+`;
+
 export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, projectName?: string) => {
+  const outputFormat = document.outputFormat ?? document.metadata?.extension ?? "doc";
+  const isExcel = outputFormat === "xlsx";
   const generatedAt = new Date().toLocaleString();
   const project = englishOnly(projectName || "Project");
   const title = englishOnly(document.name || `${project} Deliverable`);
@@ -97,71 +152,7 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
 <head>
   <meta charset="utf-8" />
   <title>${escapeHtml(title)}</title>
-  <style>
-    @page { margin: 18mm 14mm 16mm 14mm; }
-    body {
-      font-family: "Aptos", "Segoe UI", "Arial", sans-serif;
-      color: #172033;
-      margin: 0;
-      background: #ffffff;
-      font-size: 9.7pt;
-      line-height: 1.48;
-    }
-    .page { max-width: 980px; margin: 0 auto; padding: 14px 20px; }
-    .header {
-      display: table;
-      width: 100%;
-      border-bottom: 5px solid #1f4e79;
-      padding-bottom: 11px;
-      margin-bottom: 16px;
-    }
-    .brand-left, .brand-right { display: table-cell; vertical-align: middle; width: 32%; }
-    .brand-center { display: table-cell; text-align: center; vertical-align: middle; width: 36%; }
-    .leader-logo { font-size: 28px; letter-spacing: 4px; color: #315f7a; font-weight: 800; line-height: 1; }
-    .leader-sub { font-size: 9px; letter-spacing: 6px; color: #d92727; font-weight: 800; margin-top: 6px; }
-    .client-logo { display: inline-block; border: 3px solid #6aa84f; color: #1f2937; border-radius: 50px; padding: 6px 18px; font-size: 14px; font-weight: 800; }
-    .client-sub { font-size: 9px; color: #475569; margin-top: 6px; }
-    .doc-class { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.16em; }
-    .title-block {
-      background: linear-gradient(135deg, #f8fafc 0%, #eef4f8 55%, #f3f8f2 100%);
-      border: 1px solid #cbd5e1;
-      border-left: 7px solid #1f4e79;
-      border-radius: 10px;
-      padding: 14px 16px;
-      margin-bottom: 16px;
-      page-break-inside: avoid;
-    }
-    h1 { margin: 0; color: #1f4e79; font-size: 20px; line-height: 1.25; font-weight: 800; }
-    h2 {
-      color: #1f4e79;
-      font-size: 12.2px;
-      margin: 15px 0 7px;
-      padding: 6px 9px;
-      border-left: 4px solid #1f4e79;
-      background: #eef4f8;
-      border-radius: 6px;
-      font-weight: 800;
-      page-break-after: avoid;
-    }
-    p { margin: 4px 0; }
-    .meta-grid { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 9pt; }
-    .meta-grid th { background: #1f4e79; color: #ffffff; text-align: left; padding: 6px 8px; border: 1px solid #1f4e79; width: 20%; font-weight: 800; }
-    .meta-grid td { padding: 6px 8px; border: 1px solid #b7c9d8; background: #ffffff; min-height: 18px; }
-    .data-table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 8.9pt; page-break-inside: avoid; }
-    .data-table td, .data-table th { border: 1px solid #b7c9d8; padding: 6px 7px; vertical-align: top; min-height: 18px; }
-    .data-table tr:first-child td { background: #1f4e79; color: #ffffff; font-weight: 800; }
-    .data-table tr:nth-child(even) td { background: #f8fafc; }
-    .field span { color: #1f4e79; font-weight: 800; }
-    .bullet { margin-left: 16px; }
-    .bullet:before { content: "• "; color: #6aa84f; font-weight: 900; margin-left: -12px; }
-    .numbered { margin-left: 16px; }
-    .spacer { height: 3px; }
-    .approval { margin-top: 22px; page-break-inside: avoid; }
-    .approval table { width: 100%; border-collapse: collapse; }
-    .approval th { background: #6aa84f; color: white; padding: 7px; border: 1px solid #6aa84f; font-size: 8.9pt; }
-    .approval td { border: 1px solid #b7c9d8; padding: 13px 8px; height: 28px; }
-    .footer { margin-top: 22px; padding-top: 9px; border-top: 2px solid #e5e7eb; color: #64748b; font-size: 8pt; text-align: center; }
-  </style>
+  <style>${baseStyles(isExcel)}</style>
 </head>
 <body>
   <div class="page">
@@ -191,7 +182,7 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
 
     ${renderContentLines(document.content)}
 
-    <div class="approval">
+    ${isExcel ? "" : `<div class="approval">
       <h2>Approval</h2>
       <table>
         <tr><th>Name</th><th>Role</th><th>Signature</th><th>Date</th></tr>
@@ -199,7 +190,7 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
         <tr><td></td><td>Client Representative</td><td></td><td></td></tr>
         <tr><td></td><td>Authorized Approver</td><td></td><td></td></tr>
       </table>
-    </div>
+    </div>`}
 
     <div class="footer">
       Leader Group | ${escapeHtml(project)} | Generated from Synergi Task | Professional PMI-aligned project deliverable template.
