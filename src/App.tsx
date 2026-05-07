@@ -21,6 +21,7 @@ import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
 import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
 import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
 import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
+import WorkspaceInteractionPolish from "@/components/WorkspaceInteractionPolish";
 import WorkspaceThemeRuntime from "@/components/theme/WorkspaceThemeRuntime";
 import type { User } from "@supabase/supabase-js";
 
@@ -97,6 +98,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
     <>
       <WorkspaceThemeRuntime />
       <ActiveProjectDataSanitizer />
+      <WorkspaceInteractionPolish />
       <ProjectExperienceEnhancer />
       <ImplementationActivitiesMatrix />
       <ProjectOwnerTaskPanel />
