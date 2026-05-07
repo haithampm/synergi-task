@@ -135,6 +135,12 @@ const globalPolishCss = `
 const normalize = (value?: string | null) => value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
 const compact = (value?: string | null) => normalize(value).replace(/[^a-z0-9]+/g, "");
 
+const taskProjectId = (task?: Partial<WorkspaceTask> | null) => task?.project_id ?? task?.projectId ?? "";
+const taskDueDate = (task?: Partial<WorkspaceTask> | null) => task?.due_date ?? task?.dueDate ?? "";
+const taskEndDate = (task?: Partial<WorkspaceTask> | null) => task?.end_date ?? taskDueDate(task);
+
+type TaskFormMode = "quick" | "full";
+
 const WorkspaceInteractionPolish = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -145,11 +151,14 @@ const WorkspaceInteractionPolish = () => {
   const updateTask = useUpdateTask();
   const [projectOpen, setProjectOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [taskFormMode, setTaskFormMode] = useState<TaskFormMode>("quick");
   const [projectDraft, setProjectDraft] = useState<WorkspaceProject | null>(null);
   const [taskDraft, setTaskDraft] = useState<WorkspaceTask | null>(null);
 
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const taskProjectOptions = useMemo(() => projects.filter((project) => project.status !== "archived"), [projects]);
+  const parentTaskOptions = useMemo(() => tasks.filter((task) => task.id !== taskDraft?.id && (!taskDraft || !taskProjectId(taskDraft) || taskProjectId(task) === taskProjectId(taskDraft))), [taskDraft, tasks]);
 
   const openProject = (id: string) => {
     const project = projectById.get(id);
@@ -158,10 +167,11 @@ const WorkspaceInteractionPolish = () => {
     setProjectOpen(true);
   };
 
-  const openTask = (id: string) => {
+  const openTask = (id: string, mode: TaskFormMode = "quick") => {
     const task = taskById.get(id);
     if (!task) return;
     setTaskDraft({ ...task });
+    setTaskFormMode(mode);
     setTaskOpen(true);
   };
 
@@ -177,7 +187,7 @@ const WorkspaceInteractionPolish = () => {
     const projectId = new URLSearchParams(location.search).get("projectId");
     const taskId = new URLSearchParams(location.search).get("taskId");
     if (location.pathname === "/projects" && projectId) openProject(projectId);
-    if (location.pathname === "/tasks" && taskId) openTask(taskId);
+    if (location.pathname === "/tasks" && taskId) openTask(taskId, "full");
   }, [location.pathname, location.search, projectById, taskById]);
 
   useEffect(() => {
@@ -197,7 +207,7 @@ const WorkspaceInteractionPolish = () => {
       if (url.pathname === "/tasks" && taskId) {
         event.preventDefault();
         event.stopPropagation();
-        openTask(taskId);
+        openTask(taskId, "full");
       }
     };
 
@@ -219,11 +229,11 @@ const WorkspaceInteractionPolish = () => {
         if (!projectId && !taskId) return;
         node.dataset.workspacePolished = "true";
         node.classList.add("workspace-clickable-record");
-        node.title = projectId ? "Open project quick form" : "Open task quick form";
+        node.title = projectId ? "Open project quick form" : "Open task form";
         node.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          projectId ? openProject(projectId) : openTask(taskId as string);
+          projectId ? openProject(projectId) : openTask(taskId as string, "quick");
         });
       });
     };
@@ -243,10 +253,13 @@ const WorkspaceInteractionPolish = () => {
   const saveTask = async () => {
     if (!taskDraft) return;
     await updateTask.mutateAsync(taskDraft);
-    toast.success("Task saved and quick form closed");
+    toast.success("Task saved and form closed");
     setTaskOpen(false);
     setTaskDraft(null);
+    setTaskFormMode("quick");
   };
+
+  const updateTaskDraft = (updates: Partial<WorkspaceTask>) => setTaskDraft((current) => current ? { ...current, ...updates } : current);
 
   return (
     <>
@@ -297,32 +310,118 @@ const WorkspaceInteractionPolish = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={taskOpen} onOpenChange={setTaskOpen}>
-        <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0">
+      <Dialog open={taskOpen} onOpenChange={(open) => { setTaskOpen(open); if (!open) setTaskFormMode("quick"); }}>
+        <DialogContent className={`${taskFormMode === "full" ? "max-w-6xl" : "max-w-3xl"} gap-0 overflow-hidden p-0`}>
           {taskDraft ? (
             <>
               <DialogHeader className="border-b bg-muted/30 px-6 py-4">
-                <DialogTitle className="flex items-center gap-2 text-xl"><SquareCheckBig className="h-5 w-5 text-primary" /> Task Quick Form</DialogTitle>
+                <DialogTitle className="flex items-center justify-between gap-3 text-xl">
+                  <span className="flex items-center gap-2"><SquareCheckBig className="h-5 w-5 text-primary" /> {taskFormMode === "full" ? "Task Full Form" : "Task Quick Form"}</span>
+                  <Badge variant="outline">{taskDraft.id?.slice(0, 8)}</Badge>
+                </DialogTitle>
               </DialogHeader>
-              <div className="grid max-h-[70vh] gap-4 overflow-y-auto p-6 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Task Name</label>
-                  <Input value={taskDraft.title ?? ""} onChange={(event) => setTaskDraft((current) => current ? { ...current, title: event.target.value } : current)} />
+              <div className="max-h-[76vh] overflow-y-auto p-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Task Name</label>
+                    <Input value={taskDraft.title ?? ""} onChange={(event) => updateTaskDraft({ title: event.target.value })} />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Description</label>
+                    <Textarea rows={taskFormMode === "full" ? 6 : 4} value={taskDraft.description ?? ""} onChange={(event) => updateTaskDraft({ description: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Status</label>
+                    <Select value={taskDraft.status ?? "todo"} onValueChange={(value) => updateTaskDraft({ status: value as WorkspaceTask["status"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="backlog">Backlog</SelectItem><SelectItem value="todo">To Do</SelectItem><SelectItem value="in-progress">In Progress</SelectItem><SelectItem value="review">Review</SelectItem><SelectItem value="done">Done</SelectItem></SelectContent></Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Priority</label>
+                    <Select value={taskDraft.priority ?? "medium"} onValueChange={(value) => updateTaskDraft({ priority: value as WorkspaceTask["priority"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="urgent">Urgent</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent></Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Due Date</label>
+                    <Input type="date" value={taskDueDate(taskDraft)} onChange={(event) => updateTaskDraft({ due_date: event.target.value, dueDate: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Assignee</label>
+                    <Select value={taskDraft.assignee || "__unassigned__"} onValueChange={(value) => updateTaskDraft({ assignee: value === "__unassigned__" ? "" : value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{teamMembers.map((member) => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}</SelectContent></Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Phase</label>
+                    <Input placeholder="Phase" value={taskDraft.phase ?? ""} onChange={(event) => updateTaskDraft({ phase: event.target.value })} />
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border bg-muted/20 px-3 py-2 text-sm"><Timer className="h-4 w-4 text-primary" /> Actual Hours: {taskDraft.actualHours ?? 0}</div>
                 </div>
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Description</label>
-                  <Textarea rows={4} value={taskDraft.description ?? ""} onChange={(event) => setTaskDraft((current) => current ? { ...current, description: event.target.value } : current)} />
-                </div>
-                <Select value={taskDraft.status ?? "todo"} onValueChange={(value) => setTaskDraft((current) => current ? { ...current, status: value as WorkspaceTask["status"] } : current)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="backlog">Backlog</SelectItem><SelectItem value="todo">To Do</SelectItem><SelectItem value="in-progress">In Progress</SelectItem><SelectItem value="review">Review</SelectItem><SelectItem value="done">Done</SelectItem></SelectContent></Select>
-                <Select value={taskDraft.priority ?? "medium"} onValueChange={(value) => setTaskDraft((current) => current ? { ...current, priority: value as WorkspaceTask["priority"] } : current)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="urgent">Urgent</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent></Select>
-                <Input type="date" value={taskDraft.due_date ?? taskDraft.dueDate ?? ""} onChange={(event) => setTaskDraft((current) => current ? { ...current, due_date: event.target.value, dueDate: event.target.value } : current)} />
-                <Select value={taskDraft.assignee || "__unassigned__"} onValueChange={(value) => setTaskDraft((current) => current ? { ...current, assignee: value === "__unassigned__" ? "" : value } : current)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{teamMembers.map((member) => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}</SelectContent></Select>
-                <Input placeholder="Phase" value={taskDraft.phase ?? ""} onChange={(event) => setTaskDraft((current) => current ? { ...current, phase: event.target.value } : current)} />
-                <div className="flex items-center gap-2 rounded-xl border bg-muted/20 px-3 py-2 text-sm"><Timer className="h-4 w-4 text-primary" /> Actual Hours: {taskDraft.actualHours ?? 0}</div>
+
+                {taskFormMode === "full" ? (
+                  <div className="mt-6 space-y-5 border-t pt-5">
+                    <div>
+                      <p className="text-sm font-black uppercase tracking-[0.16em] text-muted-foreground">Full Task Planning</p>
+                      <p className="text-xs text-muted-foreground">Edit the complete task record here without leaving the current page.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Project</label>
+                        <Select value={taskProjectId(taskDraft) || "__none__"} onValueChange={(value) => {
+                          const project = projectById.get(value);
+                          updateTaskDraft({ project_id: value === "__none__" ? "" : value, projectId: value === "__none__" ? "" : value, projectName: project?.name ?? "", parentTaskId: undefined });
+                        }}>
+                          <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
+                          <SelectContent><SelectItem value="__none__">Unassigned project</SelectItem>{taskProjectOptions.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Main / Subtask</label>
+                        <Select value={taskDraft.parentTaskId || "__main__"} onValueChange={(value) => updateTaskDraft({ parentTaskId: value === "__main__" ? undefined : value })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="__main__">Main task</SelectItem>{parentTaskOptions.map((task) => <SelectItem key={task.id} value={task.id}>Subtask of: {task.title}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Start Date</label>
+                        <Input type="date" value={taskDraft.start_date ?? ""} onChange={(event) => updateTaskDraft({ start_date: event.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">End Date</label>
+                        <Input type="date" value={taskEndDate(taskDraft)} onChange={(event) => updateTaskDraft({ end_date: event.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Duration</label>
+                        <Input placeholder="Example: 5d" value={taskDraft.duration ?? ""} onChange={(event) => updateTaskDraft({ duration: event.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Workload Hours</label>
+                        <Input type="number" min="0" value={taskDraft.workloadHours ?? 0} onChange={(event) => updateTaskDraft({ workloadHours: Number(event.target.value || 0) })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Progress %</label>
+                        <Input type="number" min="0" max="100" value={taskDraft.progress ?? 0} onChange={(event) => updateTaskDraft({ progress: Number(event.target.value || 0) })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Milestone</label>
+                        <Select value={taskDraft.isMilestone ? "yes" : "no"} onValueChange={(value) => updateTaskDraft({ isMilestone: value === "yes" })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="no">Task</SelectItem><SelectItem value="yes">Milestone</SelectItem></SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Predecessors</label>
+                        <Textarea rows={3} value={(taskDraft.predecessors ?? []).join(", ")} onChange={(event) => updateTaskDraft({ predecessors: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="Enter predecessor IDs separated by commas" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Tags</label>
+                        <Textarea rows={3} value={(taskDraft.tags ?? []).join(", ")} onChange={(event) => updateTaskDraft({ tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="Enter tags separated by commas" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <DialogFooter className="border-t bg-muted/20 px-6 py-4">
-                <Button variant="outline" onClick={() => navigate(`/tasks?taskId=${taskDraft.id}&projectId=${taskDraft.project_id ?? taskDraft.projectId ?? ""}`)}>Open Full Task Form</Button>
-                <Button variant="outline" onClick={() => setTaskOpen(false)}>Cancel</Button>
+                {taskFormMode === "quick" ? <Button variant="outline" onClick={() => setTaskFormMode("full")}>Open Full Task Form</Button> : <Button variant="outline" onClick={() => setTaskFormMode("quick")}>Back to Quick Form</Button>}
+                <Button variant="outline" onClick={() => { setTaskOpen(false); setTaskFormMode("quick"); }}>Cancel</Button>
                 <Button onClick={saveTask} disabled={updateTask.isPending}><Save className="mr-2 h-4 w-4" />Save & Close</Button>
               </DialogFooter>
             </>
