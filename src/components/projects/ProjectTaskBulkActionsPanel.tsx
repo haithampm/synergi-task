@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 const taskStatuses = ["backlog", "todo", "in-progress", "review", "done"];
 const taskPriorities = ["urgent", "high", "medium", "low"];
-const supportedPaths = ["/projects", "/tasks", "/schedule"];
+const supportedPaths = ["/tasks"];
 
 const taskProjectId = (task: any) => task.project_id ?? task.projectId ?? "";
 const taskDueDate = (task: any) => task.due_date ?? task.dueDate ?? task.end_date ?? "";
@@ -32,7 +32,7 @@ export default function ProjectTaskBulkActionsPanel() {
 
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
   const visible = supportedPaths.includes(pathname);
-  const pageLabel = pathname === "/schedule" ? "Schedule" : pathname === "/tasks" ? "Tasks" : "Project";
+  const pageLabel = "Tasks";
   const projectNameById = useMemo(() => new Map(projects.map((project: any) => [project.id, project.name])), [projects]);
   const projectTasks = useMemo(() => tasks.filter((task: any) => !isTaskArchived(task)).filter((task: any) => selectedProjectId === "all" || taskProjectId(task) === selectedProjectId).sort((a: any, b: any) => String(projectNameById.get(taskProjectId(a)) ?? "").localeCompare(String(projectNameById.get(taskProjectId(b)) ?? "")) || String(a.title).localeCompare(String(b.title))), [projectNameById, selectedProjectId, tasks]);
   const selectedTasks = useMemo(() => projectTasks.filter((task: any) => selectedTaskIds.includes(task.id)), [projectTasks, selectedTaskIds]);
@@ -81,21 +81,20 @@ export default function ProjectTaskBulkActionsPanel() {
     clearSelection();
   };
 
-  const triggerButton = (
-    <Button className="gap-2 shadow-sm" variant="default">
-      <CheckSquare className="h-4 w-4" /> {pageLabel} Task Actions
-    </Button>
-  );
-
   return (
-    <div className={pathname === "/tasks" || pathname === "/schedule" ? "sticky top-3 z-30 mx-4 mb-3 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur print:hidden sm:mx-6" : "fixed bottom-5 right-5 z-40 print:hidden"}>
+    <div className="mx-4 mb-3 rounded-2xl border bg-card/95 p-3 shadow-sm print:hidden sm:mx-6">
       <Dialog open={open} onOpenChange={setOpen}>
-        <div className={pathname === "/tasks" || pathname === "/schedule" ? "flex flex-wrap items-center justify-between gap-3" : ""}>
-          {(pathname === "/tasks" || pathname === "/schedule") ? <div><p className="text-xs font-black uppercase tracking-widest text-primary">Edit / Archive Tasks</p><p className="text-sm text-muted-foreground">Select tasks, bulk edit status/priority/owner, or safely archive selected tasks while preserving history.</p></div> : null}
-          <DialogTrigger asChild>{triggerButton}</DialogTrigger>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-primary">Task Actions</p>
+            <p className="text-sm text-muted-foreground">Bulk edit status, priority, owner, or archive tasks from inside the Tasks page.</p>
+          </div>
+          <DialogTrigger asChild>
+            <Button className="gap-2 shadow-sm" variant="default"><CheckSquare className="h-4 w-4" /> Open Task Actions</Button>
+          </DialogTrigger>
         </div>
         <DialogContent className="max-w-6xl">
-          <DialogHeader><DialogTitle>{pageLabel} Task Edit / Archive Actions</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{pageLabel} Bulk Edit / Archive</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
               <Select value={selectedProjectId} onValueChange={(value) => { setSelectedProjectId(value); setSelectedTaskIds([]); }}><SelectTrigger><SelectValue placeholder="Project" /></SelectTrigger><SelectContent><SelectItem value="all">All Projects</SelectItem>{projects.map((project: any) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent></Select>
