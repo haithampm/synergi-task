@@ -5,7 +5,7 @@ const escapeHtml = (value: string) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
 const englishOnly = (value: string) =>
@@ -17,6 +17,14 @@ const englishOnly = (value: string) =>
 
 const normalizeLine = (line: string) => englishOnly(line.trim());
 const slug = (value: string) => englishOnly(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+const WORD_TABLE_STYLE = "width:100%;border-collapse:collapse;border-spacing:0;border:1.25pt solid #7f9db9;mso-border-alt:solid #7f9db9 .75pt;mso-table-lspace:0pt;mso-table-rspace:0pt;";
+const WORD_TH_STYLE = "background:#17365d;color:#ffffff;border:1pt solid #17365d;mso-border-alt:solid #17365d .75pt;padding:6pt 7pt;font-weight:bold;text-align:left;vertical-align:middle;";
+const WORD_TD_STYLE = "border:1pt solid #9eb6ce;mso-border-alt:solid #9eb6ce .75pt;padding:5pt 7pt;vertical-align:top;min-height:18pt;height:18pt;";
+const META_TH_STYLE = "background:#17365d;color:#ffffff;border:1pt solid #17365d;mso-border-alt:solid #17365d .75pt;padding:6pt 7pt;font-weight:bold;text-align:left;width:18%;";
+const META_TD_STYLE = "border:1pt solid #a9c4dc;mso-border-alt:solid #a9c4dc .75pt;padding:6pt 7pt;background:#ffffff;width:32%;";
+const APPROVAL_TH_STYLE = "background:#70ad47;color:#ffffff;border:1pt solid #548235;mso-border-alt:solid #548235 .75pt;padding:7pt;font-weight:bold;text-align:left;";
+const APPROVAL_TD_STYLE = "border:1pt solid #9eb6ce;mso-border-alt:solid #9eb6ce .75pt;padding:11pt 8pt;height:26pt;";
 
 const standardLabel = (document: WorkspaceProjectDocument) => {
   const raw = `${document.metadata?.templateTheme ?? document.standardTemplate ?? ""}`.toUpperCase();
@@ -43,11 +51,12 @@ const renderContentLines = (content: string) => {
     const headers = tableRows[0].split(/\s*\|\s*/).map(englishOnly).filter((part) => part.length > 0);
     const bodyRows = tableRows.slice(1).map((row) => row.split(/\s*\|\s*/).map(englishOnly));
     const columnCount = Math.max(headers.length, ...bodyRows.map((row) => row.length), 1);
-    html.push(`<table class='data-table cols-${columnCount}'>`);
-    html.push("<thead><tr>" + Array.from({ length: columnCount }, (_, index) => `<th>${escapeHtml(headers[index] ?? "")}</th>`).join("") + "</tr></thead>");
+    html.push(`<table class='data-table cols-${columnCount}' border='1' cellspacing='0' cellpadding='0' style='${WORD_TABLE_STYLE}'>`);
+    html.push("<thead><tr>" + Array.from({ length: columnCount }, (_, index) => `<th style='${WORD_TH_STYLE}'>${escapeHtml(headers[index] ?? "")}</th>`).join("") + "</tr></thead>");
     html.push("<tbody>");
-    bodyRows.forEach((row) => {
-      html.push("<tr>" + Array.from({ length: columnCount }, (_, index) => `<td>${escapeHtml(row[index] ?? "")}</td>`).join("") + "</tr>");
+    bodyRows.forEach((row, rowIndex) => {
+      const shade = rowIndex % 2 === 1 ? "background:#f3f6fa;" : "background:#ffffff;";
+      html.push("<tr>" + Array.from({ length: columnCount }, (_, index) => `<td style='${WORD_TD_STYLE}${shade}'>${escapeHtml(row[index] ?? "")}</td>`).join("") + "</tr>");
     });
     html.push("</tbody></table>");
     tableRows = [];
@@ -114,13 +123,13 @@ const baseStyles = (isExcel: boolean) => `
   h2 { color: #17365d; font-size: ${isExcel ? "11px" : "12px"}; margin: 14px 0 6px; padding: 7px 9px; border-left: 5px solid #17365d; border-top: 1px solid #a9c4dc; border-right: 1px solid #a9c4dc; border-bottom: 1px solid #a9c4dc; background: #d9eaf7; font-weight: 800; page-break-after: avoid; text-transform: uppercase; letter-spacing: 0.02em; }
   h2 span { display: inline-block; }
   p { margin: 3px 0; }
-  .meta-grid { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: ${isExcel ? "8.4pt" : "8.7pt"}; table-layout: fixed; }
-  .meta-grid th { background: #17365d; color: #ffffff; text-align: left; padding: 6px 7px; border: 1px solid #17365d; width: 18%; font-weight: 800; }
-  .meta-grid td { padding: 6px 7px; border: 1px solid #a9c4dc; background: #ffffff; min-height: 18px; width: 32%; }
-  .data-table { width: 100%; border-collapse: collapse; margin: 6px 0 11px; font-size: ${isExcel ? "8.2pt" : "8.5pt"}; page-break-inside: auto; table-layout: ${isExcel ? "auto" : "fixed"}; border: 1px solid #7f9db9; }
+  .meta-grid { width: 100%; border-collapse: collapse; border-spacing:0; margin-top: 10px; font-size: ${isExcel ? "8.4pt" : "8.7pt"}; table-layout: fixed; border: 1.25pt solid #7f9db9; mso-border-alt: solid #7f9db9 .75pt; }
+  .meta-grid th { background: #17365d; color: #ffffff; text-align: left; padding: 6px 7px; border: 1pt solid #17365d; mso-border-alt: solid #17365d .75pt; width: 18%; font-weight: 800; }
+  .meta-grid td { padding: 6px 7px; border: 1pt solid #a9c4dc; mso-border-alt: solid #a9c4dc .75pt; background: #ffffff; min-height: 18px; width: 32%; }
+  .data-table { width: 100%; border-collapse: collapse; border-spacing:0; margin: 6px 0 11px; font-size: ${isExcel ? "8.2pt" : "8.5pt"}; page-break-inside: auto; table-layout: ${isExcel ? "auto" : "fixed"}; border: 1.25pt solid #7f9db9; mso-border-alt: solid #7f9db9 .75pt; }
   .data-table thead { display: table-header-group; }
-  .data-table th { background: #17365d; color: #ffffff; border: 1px solid #17365d; padding: 6px 7px; text-align: left; font-weight: 800; vertical-align: middle; }
-  .data-table td { border: 1px solid #9eb6ce; padding: 5px 7px; vertical-align: top; min-height: 20px; height: ${isExcel ? "22px" : "auto"}; }
+  .data-table th { background: #17365d; color: #ffffff; border: 1pt solid #17365d; mso-border-alt: solid #17365d .75pt; padding: 6px 7px; text-align: left; font-weight: 800; vertical-align: middle; }
+  .data-table td { border: 1pt solid #9eb6ce; mso-border-alt: solid #9eb6ce .75pt; padding: 5px 7px; vertical-align: top; min-height: 20px; height: ${isExcel ? "22px" : "auto"}; }
   .data-table tbody tr:nth-child(even) td { background: #f3f6fa; }
   .data-table tbody tr:nth-child(odd) td { background: #ffffff; }
   .data-table tbody tr:hover td { background: #eaf2f8; }
@@ -131,9 +140,9 @@ const baseStyles = (isExcel: boolean) => `
   .numbered { margin-left: 14px; }
   .spacer { height: 2px; }
   .approval { margin-top: 18px; page-break-inside: avoid; }
-  .approval table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .approval th { background: #70ad47; color: white; padding: 7px; border: 1px solid #548235; font-size: 8.6pt; text-align: left; }
-  .approval td { border: 1px solid #9eb6ce; padding: 11px 8px; height: 26px; }
+  .approval table { width: 100%; border-collapse: collapse; border-spacing:0; table-layout: fixed; border: 1.25pt solid #7f9db9; mso-border-alt: solid #7f9db9 .75pt; }
+  .approval th { background: #70ad47; color: white; padding: 7px; border: 1pt solid #548235; mso-border-alt: solid #548235 .75pt; font-size: 8.6pt; text-align: left; }
+  .approval td { border: 1pt solid #9eb6ce; mso-border-alt: solid #9eb6ce .75pt; padding: 11px 8px; height: 26px; }
   .footer { margin-top: 18px; padding-top: 8px; border-top: 2px solid #d9e2f3; color: #64748b; font-size: 7.8pt; text-align: center; }
 `;
 
@@ -172,11 +181,11 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
 
     <div class="title-block">
       <h1>${escapeHtml(title)}</h1>
-      <table class="meta-grid">
-        <tr><th>Project</th><td>${escapeHtml(project)}</td><th>Phase</th><td>${escapeHtml(phase)}</td></tr>
-        <tr><th>Deliverable</th><td>${escapeHtml(deliverable)}</td><th>Status</th><td>${escapeHtml(englishOnly(document.reviewStatus || ""))}</td></tr>
-        <tr><th>Output Type</th><td>${escapeHtml(englishOnly((document.outputFormat || "").toUpperCase()))}</td><th>Generated</th><td>${escapeHtml(generatedAt)}</td></tr>
-        <tr><th>Template</th><td>${escapeHtml(templateName)}</td><th>Folder</th><td>${escapeHtml(englishOnly(document.folder || ""))}</td></tr>
+      <table class="meta-grid" border="1" cellspacing="0" cellpadding="0" style="${WORD_TABLE_STYLE}">
+        <tr><th style="${META_TH_STYLE}">Project</th><td style="${META_TD_STYLE}">${escapeHtml(project)}</td><th style="${META_TH_STYLE}">Phase</th><td style="${META_TD_STYLE}">${escapeHtml(phase)}</td></tr>
+        <tr><th style="${META_TH_STYLE}">Deliverable</th><td style="${META_TD_STYLE}">${escapeHtml(deliverable)}</td><th style="${META_TH_STYLE}">Status</th><td style="${META_TD_STYLE}">${escapeHtml(englishOnly(document.reviewStatus || ""))}</td></tr>
+        <tr><th style="${META_TH_STYLE}">Output Type</th><td style="${META_TD_STYLE}">${escapeHtml(englishOnly((document.outputFormat || "").toUpperCase()))}</td><th style="${META_TH_STYLE}">Generated</th><td style="${META_TD_STYLE}">${escapeHtml(generatedAt)}</td></tr>
+        <tr><th style="${META_TH_STYLE}">Template</th><td style="${META_TD_STYLE}">${escapeHtml(templateName)}</td><th style="${META_TH_STYLE}">Folder</th><td style="${META_TD_STYLE}">${escapeHtml(englishOnly(document.folder || ""))}</td></tr>
       </table>
     </div>
 
@@ -184,11 +193,11 @@ export const buildBrandedDocumentHtml = (document: WorkspaceProjectDocument, pro
 
     ${isExcel ? "" : `<div class="approval">
       <h2>Approval</h2>
-      <table>
-        <tr><th>Name</th><th>Role</th><th>Signature</th><th>Date</th></tr>
-        <tr><td></td><td>Project Manager</td><td></td><td></td></tr>
-        <tr><td></td><td>Client Representative</td><td></td><td></td></tr>
-        <tr><td></td><td>Authorized Approver</td><td></td><td></td></tr>
+      <table border="1" cellspacing="0" cellpadding="0" style="${WORD_TABLE_STYLE}">
+        <tr><th style="${APPROVAL_TH_STYLE}">Name</th><th style="${APPROVAL_TH_STYLE}">Role</th><th style="${APPROVAL_TH_STYLE}">Signature</th><th style="${APPROVAL_TH_STYLE}">Date</th></tr>
+        <tr><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}">Project Manager</td><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}"></td></tr>
+        <tr><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}">Client Representative</td><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}"></td></tr>
+        <tr><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}">Authorized Approver</td><td style="${APPROVAL_TD_STYLE}"></td><td style="${APPROVAL_TD_STYLE}"></td></tr>
       </table>
     </div>`}
 
