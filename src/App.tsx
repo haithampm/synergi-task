@@ -18,6 +18,8 @@ import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEn
 import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
 import ImplementationActivitiesMatrix from "@/components/ImplementationActivitiesMatrix";
 import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
+import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
+import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
 import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
 import WorkspaceInteractionPolish from "@/components/WorkspaceInteractionPolish";
 import WorkspaceThemeRuntime from "@/components/theme/WorkspaceThemeRuntime";
@@ -52,6 +54,14 @@ const AppLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
     <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
   </div>
+);
+
+const TasksRoute = () => (
+  <>
+    <Tasks />
+    <ProjectTaskBulkActionsPanel />
+    <ProjectScheduleImporter embedded />
+  </>
 );
 
 function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => Promise<void> }) {
@@ -107,7 +117,7 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
-          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks" element={<TasksRoute />} />
           <Route path="/team" element={<Team />} />
           <Route path="/team-chat" element={<TeamChatPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
