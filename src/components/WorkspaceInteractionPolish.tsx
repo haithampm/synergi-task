@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { FolderKanban, Save, SquareCheckBig, Timer } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -140,10 +140,10 @@ const taskDueDate = (task?: Partial<WorkspaceTask> | null) => task?.due_date ?? 
 const taskEndDate = (task?: Partial<WorkspaceTask> | null) => task?.end_date ?? taskDueDate(task);
 
 type TaskFormMode = "quick" | "full";
+type ProjectFormMode = "quick" | "full";
 
 const WorkspaceInteractionPolish = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const { data: projects = [] } = useProjects();
   const { data: tasks = [] } = useTasks();
   const { data: teamMembers = [] } = useTeamMembers();
@@ -151,6 +151,7 @@ const WorkspaceInteractionPolish = () => {
   const updateTask = useUpdateTask();
   const [projectOpen, setProjectOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [projectFormMode, setProjectFormMode] = useState<ProjectFormMode>("quick");
   const [taskFormMode, setTaskFormMode] = useState<TaskFormMode>("quick");
   const [projectDraft, setProjectDraft] = useState<WorkspaceProject | null>(null);
   const [taskDraft, setTaskDraft] = useState<WorkspaceTask | null>(null);
@@ -160,10 +161,11 @@ const WorkspaceInteractionPolish = () => {
   const taskProjectOptions = useMemo(() => projects.filter((project) => project.status !== "archived"), [projects]);
   const parentTaskOptions = useMemo(() => tasks.filter((task) => task.id !== taskDraft?.id && (!taskDraft || !taskProjectId(taskDraft) || taskProjectId(task) === taskProjectId(taskDraft))), [taskDraft, tasks]);
 
-  const openProject = (id: string) => {
+  const openProject = (id: string, mode: ProjectFormMode = "quick") => {
     const project = projectById.get(id);
     if (!project) return;
     setProjectDraft({ ...project });
+    setProjectFormMode(mode);
     setProjectOpen(true);
   };
 
@@ -186,7 +188,7 @@ const WorkspaceInteractionPolish = () => {
   useEffect(() => {
     const projectId = new URLSearchParams(location.search).get("projectId");
     const taskId = new URLSearchParams(location.search).get("taskId");
-    if (location.pathname === "/projects" && projectId) openProject(projectId);
+    if (location.pathname === "/projects" && projectId) openProject(projectId, "full");
     if (location.pathname === "/tasks" && taskId) openTask(taskId, "full");
   }, [location.pathname, location.search, projectById, taskById]);
 
@@ -202,7 +204,7 @@ const WorkspaceInteractionPolish = () => {
       if (url.pathname === "/projects" && projectId) {
         event.preventDefault();
         event.stopPropagation();
-        openProject(projectId);
+        openProject(projectId, "full");
       }
       if (url.pathname === "/tasks" && taskId) {
         event.preventDefault();
@@ -229,11 +231,11 @@ const WorkspaceInteractionPolish = () => {
         if (!projectId && !taskId) return;
         node.dataset.workspacePolished = "true";
         node.classList.add("workspace-clickable-record");
-        node.title = projectId ? "Open project quick form" : "Open task form";
+        node.title = projectId ? "Open project form" : "Open task form";
         node.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          projectId ? openProject(projectId) : openTask(taskId as string, "quick");
+          projectId ? openProject(projectId, "quick") : openTask(taskId as string, "quick");
         });
       });
     };
@@ -245,9 +247,10 @@ const WorkspaceInteractionPolish = () => {
   const saveProject = async () => {
     if (!projectDraft) return;
     await updateProject.mutateAsync(projectDraft);
-    toast.success("Project saved and quick form closed");
+    toast.success("Project saved and form closed");
     setProjectOpen(false);
     setProjectDraft(null);
+    setProjectFormMode("quick");
   };
 
   const saveTask = async () => {
@@ -259,50 +262,107 @@ const WorkspaceInteractionPolish = () => {
     setTaskFormMode("quick");
   };
 
+  const updateProjectDraft = (updates: Partial<WorkspaceProject>) => setProjectDraft((current) => current ? { ...current, ...updates } : current);
   const updateTaskDraft = (updates: Partial<WorkspaceTask>) => setTaskDraft((current) => current ? { ...current, ...updates } : current);
 
   return (
     <>
-      <Dialog open={projectOpen} onOpenChange={setProjectOpen}>
-        <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0">
+      <Dialog open={projectOpen} onOpenChange={(open) => { setProjectOpen(open); if (!open) setProjectFormMode("quick"); }}>
+        <DialogContent className={`${projectFormMode === "full" ? "max-w-6xl" : "max-w-3xl"} gap-0 overflow-hidden p-0`}>
           {projectDraft ? (
             <>
               <DialogHeader className="border-b bg-muted/30 px-6 py-4">
-                <DialogTitle className="flex items-center gap-2 text-xl">
-                  <FolderKanban className="h-5 w-5 text-primary" /> Project Quick Form
+                <DialogTitle className="flex items-center justify-between gap-3 text-xl">
+                  <span className="flex items-center gap-2"><FolderKanban className="h-5 w-5 text-primary" /> {projectFormMode === "full" ? "Project Full Form" : "Project Quick Form"}</span>
+                  <Badge variant="outline">{projectDraft.id?.slice(0, 8)}</Badge>
                 </DialogTitle>
               </DialogHeader>
-              <div className="grid max-h-[70vh] gap-4 overflow-y-auto p-6 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Project Name</label>
-                  <Input value={projectDraft.name ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, name: event.target.value } : current)} />
+              <div className="max-h-[76vh] overflow-y-auto p-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Project Name</label>
+                    <Input value={projectDraft.name ?? ""} onChange={(event) => updateProjectDraft({ name: event.target.value })} />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Description</label>
+                    <Textarea rows={projectFormMode === "full" ? 6 : 4} value={projectDraft.description ?? ""} onChange={(event) => updateProjectDraft({ description: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Status</label>
+                    <Select value={projectDraft.status ?? "active"} onValueChange={(value) => updateProjectDraft({ status: value as WorkspaceProject["status"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="on-hold">On hold</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="at-risk">At risk</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Priority</label>
+                    <Select value={projectDraft.priority ?? "medium"} onValueChange={(value) => updateProjectDraft({ priority: value as WorkspaceProject["priority"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="urgent">Urgent</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Start Date</label>
+                    <Input type="date" value={projectDraft.start_date ?? projectDraft.startDate ?? ""} onChange={(event) => updateProjectDraft({ start_date: event.target.value, startDate: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">End Date</label>
+                    <Input type="date" value={projectDraft.end_date ?? projectDraft.endDate ?? ""} onChange={(event) => updateProjectDraft({ end_date: event.target.value, endDate: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Department</label>
+                    <Input value={projectDraft.department ?? ""} onChange={(event) => updateProjectDraft({ department: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Budget</label>
+                    <Input value={projectDraft.budget ?? ""} onChange={(event) => updateProjectDraft({ budget: event.target.value })} />
+                  </div>
                 </div>
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Description</label>
-                  <Textarea rows={4} value={projectDraft.description ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, description: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Status</label>
-                  <Select value={projectDraft.status ?? "active"} onValueChange={(value) => setProjectDraft((current) => current ? { ...current, status: value as WorkspaceProject["status"] } : current)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="on-hold">On hold</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="at-risk">At risk</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-muted-foreground">Priority</label>
-                  <Select value={projectDraft.priority ?? "medium"} onValueChange={(value) => setProjectDraft((current) => current ? { ...current, priority: value as WorkspaceProject["priority"] } : current)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="urgent">Urgent</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent>
-                  </Select>
-                </div>
-                <Input type="date" value={projectDraft.start_date ?? projectDraft.startDate ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, start_date: event.target.value, startDate: event.target.value } : current)} />
-                <Input type="date" value={projectDraft.end_date ?? projectDraft.endDate ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, end_date: event.target.value, endDate: event.target.value } : current)} />
-                <Input placeholder="Department" value={projectDraft.department ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, department: event.target.value } : current)} />
-                <Input placeholder="Budget" value={projectDraft.budget ?? ""} onChange={(event) => setProjectDraft((current) => current ? { ...current, budget: event.target.value } : current)} />
+
+                {projectFormMode === "full" ? (
+                  <div className="mt-6 space-y-5 border-t pt-5">
+                    <div>
+                      <p className="text-sm font-black uppercase tracking-[0.16em] text-muted-foreground">Full Project Planning</p>
+                      <p className="text-xs text-muted-foreground">Edit the selected project record directly in this form without navigating to the project page.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Project Nature</label>
+                        <Input value={projectDraft.projectNature ?? ""} onChange={(event) => updateProjectDraft({ projectNature: event.target.value })} placeholder="Implementation, PMO, operations, system delivery..." />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Namespace</label>
+                        <Input value={projectDraft.namespace ?? ""} onChange={(event) => updateProjectDraft({ namespace: event.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Progress %</label>
+                        <Input type="number" min="0" max="100" value={projectDraft.progress ?? 0} onChange={(event) => updateProjectDraft({ progress: Number(event.target.value || 0) })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Project Manager</label>
+                        <Input value={(projectDraft as any).projectManager ?? ""} onChange={(event) => updateProjectDraft({ ...( { projectManager: event.target.value } as any ) })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Sponsor</label>
+                        <Input value={(projectDraft as any).sponsor ?? ""} onChange={(event) => updateProjectDraft({ ...( { sponsor: event.target.value } as any ) })} />
+                      </div>
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Tags</label>
+                        <Textarea rows={3} value={(projectDraft.tags ?? []).join(", ")} onChange={(event) => updateProjectDraft({ tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="Enter tags separated by commas" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-muted-foreground">Key Notes</label>
+                        <Textarea rows={3} value={(projectDraft as any).notes ?? ""} onChange={(event) => updateProjectDraft({ ...( { notes: event.target.value } as any ) })} placeholder="Governance notes, delivery assumptions, client notes..." />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <DialogFooter className="border-t bg-muted/20 px-6 py-4">
-                <Button variant="outline" onClick={() => navigate(`/projects?projectId=${projectDraft.id}`)}>Open Full Project Form</Button>
-                <Button variant="outline" onClick={() => setProjectOpen(false)}>Cancel</Button>
+                {projectFormMode === "quick" ? <Button variant="outline" onClick={() => setProjectFormMode("full")}>Open Full Project Form</Button> : <Button variant="outline" onClick={() => setProjectFormMode("quick")}>Back to Quick Form</Button>}
+                <Button variant="outline" onClick={() => { setProjectOpen(false); setProjectFormMode("quick"); }}>Cancel</Button>
                 <Button onClick={saveProject} disabled={updateProject.isPending}><Save className="mr-2 h-4 w-4" />Save & Close</Button>
               </DialogFooter>
             </>
