@@ -304,6 +304,64 @@ main [role='combobox'] {
   max-width: 100%;
 }
 
+/* Fix dense schedule/filter toolbars so controls never overlap. */
+main .rounded-2xl.border.bg-card.p-3[class*='lg:grid-cols-'],
+main .rounded-2xl.border.bg-card.p-4[class*='lg:grid-cols-'],
+main [class*='lg:grid-cols-'][class*='bg-card'][class*='p-3'],
+main [class*='lg:grid-cols-'][class*='bg-card'][class*='p-4'] {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+  overflow: visible !important;
+}
+
+main .rounded-2xl.border.bg-card.p-3[class*='lg:grid-cols-'] > *,
+main .rounded-2xl.border.bg-card.p-4[class*='lg:grid-cols-'] > *,
+main [class*='lg:grid-cols-'][class*='bg-card'][class*='p-3'] > *,
+main [class*='lg:grid-cols-'][class*='bg-card'][class*='p-4'] > * {
+  flex: 0 1 auto !important;
+  min-width: fit-content !important;
+}
+
+main [class*='lg:grid-cols-'][class*='bg-card'] > label.relative,
+main [class*='lg:grid-cols-'][class*='bg-card'] > label.block {
+  flex: 1 1 20rem !important;
+  min-width: 18rem !important;
+}
+
+main [class*='lg:grid-cols-'][class*='bg-card'] select,
+main [class*='lg:grid-cols-'][class*='bg-card'] input,
+main [class*='lg:grid-cols-'][class*='bg-card'] [role='combobox'] {
+  min-width: 10.5rem !important;
+  height: 2.5rem !important;
+  white-space: nowrap !important;
+}
+
+main [class*='lg:grid-cols-'][class*='bg-card'] > .flex.rounded-xl.border {
+  flex: 0 0 auto !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  white-space: nowrap !important;
+}
+
+main [class*='lg:grid-cols-'][class*='bg-card'] > .flex.rounded-xl.border button {
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 900px) {
+  main [class*='lg:grid-cols-'][class*='bg-card'] > *,
+  main [class*='lg:grid-cols-'][class*='bg-card'] > label.relative,
+  main [class*='lg:grid-cols-'][class*='bg-card'] > label.block,
+  main [class*='lg:grid-cols-'][class*='bg-card'] select,
+  main [class*='lg:grid-cols-'][class*='bg-card'] input,
+  main [class*='lg:grid-cols-'][class*='bg-card'] [role='combobox'] {
+    flex: 1 1 100% !important;
+    min-width: 100% !important;
+  }
+}
+
 @media (max-width: 640px) {
   :root {
     --page-gap: 0.85rem;
