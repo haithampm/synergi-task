@@ -6,13 +6,13 @@ import PageSection from "@/components/layout/PageSection";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
   Sheet,
@@ -45,6 +45,7 @@ const fallbackRoles = [
 ];
 
 const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
 const UserAccounts = () => {
   const queryClient = useQueryClient();
@@ -116,18 +117,38 @@ const UserAccounts = () => {
         ].slice(0, 300),
       };
     });
+
+    queryClient.setQueryData<WorkspaceUserAccount[]>(workspaceKeys.users, (current = []) => {
+      const existingIndex = current.findIndex((item) =>
+        item.id === account.id || normalizeEmail(item.email) === normalizeEmail(account.email),
+      );
+      if (existingIndex >= 0) {
+        const next = [...current];
+        next[existingIndex] = { ...next[existingIndex], ...account, id: next[existingIndex].id };
+        return next;
+      }
+      return [account, ...current];
+    });
   };
 
   const handleSave = async () => {
-    if (!selectedAccount?.fullName || !selectedAccount?.email) {
+    const fullName = selectedAccount?.fullName?.trim() ?? "";
+    const email = selectedAccount?.email?.trim() ?? "";
+
+    if (!fullName || !email) {
       toast.error("Full name and email are required");
+      return;
+    }
+
+    if (!isValidEmail(email)) {
+      toast.error("Enter a valid email address");
       return;
     }
 
     setSaving(true);
     try {
       const existingByEmail = userAccounts.find(
-        (account) => normalizeEmail(account.email) === normalizeEmail(selectedAccount.email),
+        (account) => normalizeEmail(account.email) === normalizeEmail(email),
       );
       const existing = selectedAccount.id
         ? userAccounts.find((account) => account.id === selectedAccount.id) ?? existingByEmail
@@ -135,8 +156,8 @@ const UserAccounts = () => {
 
       const account: WorkspaceUserAccount = {
         id: existing?.id ?? selectedAccount.id ?? makeId("user"),
-        fullName: selectedAccount.fullName.trim(),
-        email: selectedAccount.email.trim(),
+        fullName,
+        email,
         roleId: selectedAccount.roleId ?? "viewer",
         status: selectedAccount.status ?? "active",
         authProvider: selectedAccount.authProvider ?? "email",
@@ -154,15 +175,27 @@ const UserAccounts = () => {
       };
 
       saveLocalUserAccount(account);
-      await syncWorkspaceUserAccount(account);
 
-      if (existing?.id) {
-        await updateAccount.mutateAsync(account);
+      let serverSyncFailed = false;
+      try {
+        await syncWorkspaceUserAccount(account);
+        if (existing?.id) {
+          await updateAccount.mutateAsync(account);
+        }
+      } catch (syncError) {
+        serverSyncFailed = true;
+        console.error("User account server sync failed", syncError);
       }
 
       await refreshUsers();
-      toast.success(existing?.id ? "User account updated locally and on server" : "User account created locally and queued to server");
       setIsSheetOpen(false);
+      setSelectedAccount(null);
+
+      if (serverSyncFailed) {
+        toast.warning("User account saved locally. Server membership sync failed; check Supabase Auth / workspace membership permissions.");
+      } else {
+        toast.success(existing?.id ? "User account updated" : "User account created");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save user account");
     } finally {
@@ -262,7 +295,7 @@ const UserAccounts = () => {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge 
+                      <Badge
                         variant={account.status === 'active' ? 'default' : 'secondary'}
                         className="capitalize"
                       >
@@ -275,9 +308,9 @@ const UserAccounts = () => {
                         <Button variant="ghost" size="icon" onClick={() => handleOpenForm(account)} title="Edit user">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           className="text-destructive hover:text-destructive"
                           onClick={() => handleDelete(account.id)}
                           title="Suspend user"
@@ -302,27 +335,27 @@ const UserAccounts = () => {
           <div className="grid gap-4 py-6">
             <div className="grid gap-2">
               <Label htmlFor="fullName">Full Name</Label>
-              <Input 
-                id="fullName" 
-                value={selectedAccount?.fullName || ""} 
+              <Input
+                id="fullName"
+                value={selectedAccount?.fullName || ""}
                 onChange={(e) => setSelectedAccount(prev => prev ? ({ ...prev, fullName: e.target.value }) : null)}
                 placeholder="John Doe"
               />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="email">Email Address</Label>
-              <Input 
-                id="email" 
+              <Input
+                id="email"
                 type="email"
-                value={selectedAccount?.email || ""} 
+                value={selectedAccount?.email || ""}
                 onChange={(e) => setSelectedAccount(prev => prev ? ({ ...prev, email: e.target.value }) : null)}
                 placeholder="john@example.com"
               />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="role">Permission Role</Label>
-              <Select 
-                value={selectedAccount?.roleId} 
+              <Select
+                value={selectedAccount?.roleId}
                 onValueChange={(value) => setSelectedAccount(prev => prev ? ({ ...prev, roleId: value }) : null)}
               >
                 <SelectTrigger id="role">
@@ -339,8 +372,8 @@ const UserAccounts = () => {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="status">Account Status</Label>
-              <Select 
-                value={selectedAccount?.status} 
+              <Select
+                value={selectedAccount?.status}
                 onValueChange={(value: any) => setSelectedAccount(prev => prev ? ({ ...prev, status: value }) : null)}
               >
                 <SelectTrigger id="status">
@@ -356,17 +389,17 @@ const UserAccounts = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="title">Job Title</Label>
-                <Input 
-                  id="title" 
-                  value={selectedAccount?.title || ""} 
+                <Input
+                  id="title"
+                  value={selectedAccount?.title || ""}
                   onChange={(e) => setSelectedAccount(prev => prev ? ({ ...prev, title: e.target.value }) : null)}
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="department">Department</Label>
-                <Input 
-                  id="department" 
-                  value={selectedAccount?.department || ""} 
+                <Input
+                  id="department"
+                  value={selectedAccount?.department || ""}
                   onChange={(e) => setSelectedAccount(prev => prev ? ({ ...prev, department: e.target.value }) : null)}
                 />
               </div>
