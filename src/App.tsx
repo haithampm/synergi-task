@@ -16,7 +16,6 @@ import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 import { getSafeRedirectPath } from "@/lib/auth-ui";
 import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEnhancer";
 import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
-import ImplementationActivitiesMatrix from "@/components/ImplementationActivitiesMatrix";
 import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
 import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
 import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
@@ -122,7 +121,6 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
       <ActiveProjectDataSanitizer />
       <WorkspaceInteractionPolish />
       <ProjectExperienceEnhancer />
-      <ImplementationActivitiesMatrix />
       <ProjectOwnerTaskPanel />
       <PMODeliveryCyclePanel />
       <Suspense fallback={null}><CommandPalette /></Suspense>
