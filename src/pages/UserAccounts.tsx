@@ -47,6 +47,25 @@ const fallbackRoles = [
 const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
+const mergeAccount = (accounts: WorkspaceUserAccount[] = [], account: WorkspaceUserAccount) => {
+  const existingIndex = accounts.findIndex((item) =>
+    item.id === account.id || normalizeEmail(item.email) === normalizeEmail(account.email),
+  );
+
+  if (existingIndex >= 0) {
+    const next = [...accounts];
+    next[existingIndex] = {
+      ...next[existingIndex],
+      ...account,
+      id: next[existingIndex].id,
+      createdAt: next[existingIndex].createdAt || account.createdAt,
+    };
+    return next;
+  }
+
+  return [account, ...accounts];
+};
+
 const UserAccounts = () => {
   const queryClient = useQueryClient();
   const { data: userAccounts = [], isLoading } = useUserAccounts();
@@ -57,8 +76,13 @@ const UserAccounts = () => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Partial<WorkspaceUserAccount> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [localUserAccounts, setLocalUserAccounts] = useState<WorkspaceUserAccount[]>([]);
 
   const roles = settings?.privilegeRoles?.length ? settings.privilegeRoles : fallbackRoles;
+  const visibleUserAccounts = localUserAccounts.reduce(
+    (accounts, account) => mergeAccount(accounts, account),
+    userAccounts,
+  );
 
   const refreshUsers = async () => {
     await Promise.all([
@@ -84,21 +108,10 @@ const UserAccounts = () => {
 
   const saveLocalUserAccount = (account: WorkspaceUserAccount) => {
     updateWorkspaceData((current) => {
-      const existingIndex = current.userAccounts.findIndex((item) =>
+      const nextUserAccounts = mergeAccount(current.userAccounts, account);
+      const existed = current.userAccounts.some((item) =>
         item.id === account.id || normalizeEmail(item.email) === normalizeEmail(account.email),
       );
-      const nextUserAccounts = [...current.userAccounts];
-
-      if (existingIndex >= 0) {
-        nextUserAccounts[existingIndex] = {
-          ...nextUserAccounts[existingIndex],
-          ...account,
-          id: nextUserAccounts[existingIndex].id,
-          createdAt: nextUserAccounts[existingIndex].createdAt || account.createdAt,
-        };
-      } else {
-        nextUserAccounts.unshift(account);
-      }
 
       return {
         ...current,
@@ -106,11 +119,11 @@ const UserAccounts = () => {
         auditLogs: [
           {
             id: makeId("audit"),
-            action: existingIndex >= 0 ? "User access updated" : "User access created",
+            action: existed ? "User access updated" : "User access created",
             entityType: "user",
             entityId: account.id,
             actorName: current.settings.currentUser.displayName || current.settings.profile.email || "Admin User",
-            detail: `${account.fullName} was ${existingIndex >= 0 ? "updated" : "added"} as ${account.roleId}.`,
+            detail: `${account.fullName} was ${existed ? "updated" : "added"} as ${account.roleId}.`,
             createdAt: new Date().toISOString(),
           },
           ...current.auditLogs,
@@ -118,17 +131,8 @@ const UserAccounts = () => {
       };
     });
 
-    queryClient.setQueryData<WorkspaceUserAccount[]>(workspaceKeys.users, (current = []) => {
-      const existingIndex = current.findIndex((item) =>
-        item.id === account.id || normalizeEmail(item.email) === normalizeEmail(account.email),
-      );
-      if (existingIndex >= 0) {
-        const next = [...current];
-        next[existingIndex] = { ...next[existingIndex], ...account, id: next[existingIndex].id };
-        return next;
-      }
-      return [account, ...current];
-    });
+    setLocalUserAccounts((current) => mergeAccount(current, account));
+    queryClient.setQueryData<WorkspaceUserAccount[]>(workspaceKeys.users, (current = []) => mergeAccount(current, account));
   };
 
   const handleSave = async () => {
@@ -147,11 +151,11 @@ const UserAccounts = () => {
 
     setSaving(true);
     try {
-      const existingByEmail = userAccounts.find(
+      const existingByEmail = visibleUserAccounts.find(
         (account) => normalizeEmail(account.email) === normalizeEmail(email),
       );
       const existing = selectedAccount.id
-        ? userAccounts.find((account) => account.id === selectedAccount.id) ?? existingByEmail
+        ? visibleUserAccounts.find((account) => account.id === selectedAccount.id) ?? existingByEmail
         : existingByEmail;
 
       const account: WorkspaceUserAccount = {
@@ -187,12 +191,16 @@ const UserAccounts = () => {
         console.error("User account server sync failed", syncError);
       }
 
-      await refreshUsers();
+      if (!serverSyncFailed) {
+        await refreshUsers();
+        queryClient.setQueryData<WorkspaceUserAccount[]>(workspaceKeys.users, (current = []) => mergeAccount(current, account));
+      }
+
       setIsSheetOpen(false);
       setSelectedAccount(null);
 
       if (serverSyncFailed) {
-        toast.warning("User account saved locally. Server membership sync failed; check Supabase Auth / workspace membership permissions.");
+        toast.warning("User account saved in this workspace. Server login membership was not created; configure Supabase Auth / workspace membership permissions for actual login.");
       } else {
         toast.success(existing?.id ? "User account updated" : "User account created");
       }
@@ -207,6 +215,7 @@ const UserAccounts = () => {
     if (window.confirm("Are you sure you want to suspend this user's access?")) {
       try {
         await deleteAccount.mutateAsync(id);
+        setLocalUserAccounts((current) => current.map((account) => account.id === id ? { ...account, status: "suspended" } : account));
         toast.success("User access suspended");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to suspend user access");
@@ -230,25 +239,25 @@ const UserAccounts = () => {
           <Card className="glass">
             <CardContent className="p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Users</p>
-              <p className="mt-2 text-2xl font-black">{userAccounts.length}</p>
+              <p className="mt-2 text-2xl font-black">{visibleUserAccounts.length}</p>
             </CardContent>
           </Card>
           <Card className="glass">
             <CardContent className="p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active</p>
-              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => account.status === "active").length}</p>
+              <p className="mt-2 text-2xl font-black">{visibleUserAccounts.filter((account) => account.status === "active").length}</p>
             </CardContent>
           </Card>
           <Card className="glass">
             <CardContent className="p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Admins</p>
-              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => ["admin", "super_admin"].includes(account.roleId)).length}</p>
+              <p className="mt-2 text-2xl font-black">{visibleUserAccounts.filter((account) => ["admin", "super_admin"].includes(account.roleId)).length}</p>
             </CardContent>
           </Card>
           <Card className="glass">
             <CardContent className="p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Invited</p>
-              <p className="mt-2 text-2xl font-black">{userAccounts.filter((account) => account.status === "invited").length}</p>
+              <p className="mt-2 text-2xl font-black">{visibleUserAccounts.filter((account) => account.status === "invited").length}</p>
             </CardContent>
           </Card>
         </div>
@@ -268,20 +277,20 @@ const UserAccounts = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && visibleUserAccounts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     Loading user accounts...
                   </TableCell>
                 </TableRow>
-              ) : userAccounts.length === 0 ? (
+              ) : visibleUserAccounts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     No user accounts found. Use Add User to create the first account record.
                   </TableCell>
                 </TableRow>
               ) : (
-                userAccounts.map((account) => (
+                visibleUserAccounts.map((account) => (
                   <TableRow key={account.id}>
                     <TableCell>
                       <div className="flex flex-col">
