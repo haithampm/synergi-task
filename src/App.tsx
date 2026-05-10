@@ -16,10 +16,8 @@ import { isPasswordRecoveryMode } from "@/lib/auth-recovery";
 import { getSafeRedirectPath } from "@/lib/auth-ui";
 import ProjectExperienceEnhancer from "@/components/projects/ProjectExperienceEnhancer";
 import ActiveProjectDataSanitizer from "@/components/projects/ActiveProjectDataSanitizer";
-import ProjectOwnerTaskPanel from "@/components/projects/ProjectOwnerTaskPanel";
 import ProjectTaskBulkActionsPanel from "@/components/projects/ProjectTaskBulkActionsPanel";
 import ProjectScheduleImporter from "@/components/schedule/ProjectScheduleImporter";
-import PMODeliveryCyclePanel from "@/components/PMODeliveryCyclePanel";
 import WorkspaceInteractionPolish from "@/components/WorkspaceInteractionPolish";
 import WorkspaceThemeRuntime from "@/components/theme/WorkspaceThemeRuntime";
 import type { User } from "@supabase/supabase-js";
@@ -121,8 +119,6 @@ function AuthenticatedWorkspace({ user, signOut }: { user: User; signOut: () => 
       <ActiveProjectDataSanitizer />
       <WorkspaceInteractionPolish />
       <ProjectExperienceEnhancer />
-      <ProjectOwnerTaskPanel />
-      <PMODeliveryCyclePanel />
       <Suspense fallback={null}><CommandPalette /></Suspense>
       <Suspense fallback={<AppLoader />}>
         <Routes>
