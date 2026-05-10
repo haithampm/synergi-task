@@ -33,6 +33,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { workspaceKeys, useUserAccounts, useUpdateUserAccount, useDeleteUserAccount, useWorkspaceSettings } from "@/hooks/useProjects";
 import { syncWorkspaceUserAccount } from "@/integrations/supabase/workspace-data";
+import { provisionWorkspaceUser } from "@/lib/admin-user-provisioning";
 import { toast } from "sonner";
 import { makeId, readWorkspaceData, updateWorkspaceData, WorkspaceUserAccount } from "@/lib/workspace-store";
 
@@ -97,7 +98,7 @@ const UserAccounts = () => {
       fullName: "",
       email: "",
       roleId: "viewer",
-      status: "active",
+      status: "invited",
       authProvider: "email",
       title: "",
       department: "",
@@ -158,37 +159,56 @@ const UserAccounts = () => {
         ? visibleUserAccounts.find((account) => account.id === selectedAccount.id) ?? existingByEmail
         : existingByEmail;
 
+      let provisionResult: Awaited<ReturnType<typeof provisionWorkspaceUser>> | null = null;
+      let serverSyncFailed = false;
+
+      try {
+        provisionResult = await provisionWorkspaceUser({
+          fullName,
+          email,
+          roleId: selectedAccount.roleId ?? "viewer",
+          status: selectedAccount.status ?? "invited",
+          title: selectedAccount.title ?? "",
+          department: selectedAccount.department ?? "",
+          notes: selectedAccount.notes ?? "",
+        });
+      } catch (provisionError) {
+        serverSyncFailed = true;
+        console.error("Admin user provisioning failed", provisionError);
+      }
+
       const account: WorkspaceUserAccount = {
-        id: existing?.id ?? selectedAccount.id ?? makeId("user"),
+        id: provisionResult?.userId ?? existing?.id ?? selectedAccount.id ?? makeId("user"),
         fullName,
         email,
-        roleId: selectedAccount.roleId ?? "viewer",
-        status: selectedAccount.status ?? "active",
+        roleId: selectedAccount.roleId ?? provisionResult?.role ?? "viewer",
+        status: (provisionResult?.status as WorkspaceUserAccount["status"] | undefined) ?? selectedAccount.status ?? "invited",
         authProvider: selectedAccount.authProvider ?? "email",
         teamMemberId: selectedAccount.teamMemberId || existing?.teamMemberId,
         title: selectedAccount.title ?? existing?.title ?? "",
         department: selectedAccount.department ?? existing?.department ?? "",
         createdAt: existing?.createdAt ?? new Date().toISOString(),
         lastAccessAt: existing?.lastAccessAt,
-        invitationSentAt: existing?.invitationSentAt,
+        invitationSentAt: provisionResult?.inviteSent ? new Date().toISOString() : existing?.invitationSentAt,
         passwordResetSentAt: existing?.passwordResetSentAt,
-        lastNotificationAt: existing?.lastNotificationAt,
-        notificationCount: existing?.notificationCount ?? 0,
+        lastNotificationAt: provisionResult?.inviteSent ? new Date().toISOString() : existing?.lastNotificationAt,
+        notificationCount: (existing?.notificationCount ?? 0) + (provisionResult?.inviteSent ? 1 : 0),
         invitedBy: existing?.invitedBy ?? readWorkspaceData().settings.currentUser.displayName,
         notes: selectedAccount.notes ?? existing?.notes ?? "",
       };
 
       saveLocalUserAccount(account);
 
-      let serverSyncFailed = false;
-      try {
-        await syncWorkspaceUserAccount(account);
-        if (existing?.id) {
-          await updateAccount.mutateAsync(account);
+      if (!provisionResult) {
+        try {
+          await syncWorkspaceUserAccount(account);
+          if (existing?.id) {
+            await updateAccount.mutateAsync(account);
+          }
+        } catch (syncError) {
+          serverSyncFailed = true;
+          console.error("Fallback user account server sync failed", syncError);
         }
-      } catch (syncError) {
-        serverSyncFailed = true;
-        console.error("User account server sync failed", syncError);
       }
 
       if (!serverSyncFailed) {
@@ -200,9 +220,9 @@ const UserAccounts = () => {
       setSelectedAccount(null);
 
       if (serverSyncFailed) {
-        toast.warning("User account saved in this workspace. Server login membership was not created; configure Supabase Auth / workspace membership permissions for actual login.");
+        toast.warning("User saved locally, but login provisioning failed. Deploy/check the admin-create-user Edge Function and Supabase service role settings.");
       } else {
-        toast.success(existing?.id ? "User account updated" : "User account created");
+        toast.success(provisionResult?.message ?? (existing?.id ? "User account updated" : "User account invited and added to workspace"));
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save user account");
@@ -228,7 +248,7 @@ const UserAccounts = () => {
       <AppHeader title="User Accounts" />
       <PageSection
         title="Workspace Access Control"
-        description="Manage mail users, admin access, linked team profiles, and workspace permissions from one directory."
+        description="Invite users, create Supabase Auth access, assign workspace roles, and manage app-level user records."
         action={
           <Button onClick={() => handleOpenForm()} className="gap-2">
             <Plus className="h-4 w-4" /> Add User
@@ -263,7 +283,7 @@ const UserAccounts = () => {
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Add or edit app-level user access here. Production login access still requires the user to exist in Supabase Auth and have an active workspace membership.
+          Add User now calls the secure admin provisioning flow. If the Edge Function is deployed, the user is invited in Supabase Auth, linked to the workspace, and added to the application directory.
         </p>
         <Card className="glass overflow-hidden">
           <Table>
@@ -417,7 +437,7 @@ const UserAccounts = () => {
           <SheetFooter>
             <Button variant="outline" onClick={() => setIsSheetOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || updateAccount.isPending}>
-              {saving || updateAccount.isPending ? "Saving..." : "Save Changes"}
+              {saving || updateAccount.isPending ? "Saving..." : selectedAccount?.id ? "Save Changes" : "Invite User"}
             </Button>
           </SheetFooter>
         </SheetContent>
